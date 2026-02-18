@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Web-specific global styles ─── */
+@media (min-width: 768px) {
+
+    html,
+    body,
+    #root {
+        overflow: hidden;
+        height: 100vh;
+    }
+
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.3);
+        border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgba(148, 163, 184, 0.5);
+    }
+
+    /* Smooth scroll for all containers */
+    * {
+        scroll-behavior: smooth;
+    }
+}
+
+/* Hover transitions for interactive elements */
+@media (hover: hover) {
+    [data-pressable] {
+        transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.15s ease;
+    }
+}
