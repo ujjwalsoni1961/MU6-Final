@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Pressable, PressableProps, Platform, ViewStyle, StyleProp, Animated } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { useTheme } from '../../context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -21,7 +22,7 @@ const PRESETS: Record<Preset, PresetConfig> = {
     card: {
         scale: 0.97,
         opacity: 0.88,
-        spring: { tension: 150, friction: 8 },
+        spring: { tension: 100, friction: 12 },
         haptic: 'light',
         hoverScale: 1.02,
         hoverOpacity: 1,
@@ -29,7 +30,7 @@ const PRESETS: Record<Preset, PresetConfig> = {
     button: {
         scale: 0.96,
         opacity: 0.88,
-        spring: { tension: 200, friction: 7 },
+        spring: { tension: 120, friction: 10 },
         haptic: 'medium',
         hoverScale: 1.03,
         hoverOpacity: 1,
@@ -37,15 +38,15 @@ const PRESETS: Record<Preset, PresetConfig> = {
     icon: {
         scale: 0.85,
         opacity: 0.7,
-        spring: { tension: 180, friction: 8 },
+        spring: { tension: 140, friction: 12 },
         haptic: 'light',
         hoverScale: 1.15,
         hoverOpacity: 0.85,
     },
     row: {
-        scale: 0.99,
+        scale: 0.98,
         opacity: 0.75,
-        spring: { tension: 200, friction: 10 },
+        spring: { tension: 100, friction: 10 },
         haptic: 'light',
         hoverScale: 1.005,
         hoverOpacity: 1,
@@ -53,7 +54,7 @@ const PRESETS: Record<Preset, PresetConfig> = {
     tab: {
         scale: 0.93,
         opacity: 0.85,
-        spring: { tension: 150, friction: 8 },
+        spring: { tension: 120, friction: 10 },
         haptic: 'light',
         hoverScale: 1.05,
         hoverOpacity: 1,
@@ -61,7 +62,7 @@ const PRESETS: Record<Preset, PresetConfig> = {
     miniPlayer: {
         scale: 0.98,
         opacity: 0.88,
-        spring: { tension: 150, friction: 8 },
+        spring: { tension: 100, friction: 12 },
         haptic: 'medium',
         hoverScale: 1.01,
         hoverOpacity: 1,
@@ -184,6 +185,7 @@ function NativeAnimatedPressable({
     children,
     ...rest
 }: AnimatedPressableProps) {
+    const { isDark } = useTheme();
     const config = PRESETS[preset];
     const targetScale = scaleValue ?? config.scale;
     const haptic = hapticType ?? config.haptic;
@@ -239,8 +241,13 @@ function NativeAnimatedPressable({
             onPressOut={handlePressOut}
             onPress={handlePress}
             disabled={disabled}
+            android_ripple={{
+                color: isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.12)',
+                borderless: preset === 'icon',
+                foreground: true
+            }}
             style={[
-                { transform: [{ scale: scaleAnim }], opacity: opacityAnim },
+                { transform: [{ scale: scaleAnim }], opacity: opacityAnim, overflow: 'hidden' },
                 style as any,
             ]}
             {...rest}

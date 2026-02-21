@@ -62,8 +62,6 @@ export default function FullPlayer() {
                         Animated.timing(panY, { toValue: height, useNativeDriver: true, duration: 300 }),
                         Animated.timing(panScale, { toValue: 0.9, useNativeDriver: true, duration: 300 }),
                     ]).start(() => {
-                        panY.setValue(0);
-                        panScale.setValue(1);
                         closeFullPlayer();
                     });
                 } else {

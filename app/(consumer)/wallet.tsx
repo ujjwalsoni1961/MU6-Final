@@ -1,143 +1,202 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated } from 'react-native';
+import React, { useRef } from 'react';
+import { View, Text, ScrollView, Animated, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { Gem } from 'lucide-react-native';
-import TabPill from '../../src/components/shared/TabPill';
-import NFTCard from '../../src/components/shared/NFTCard';
+import { ArrowUpRight, ArrowDownLeft, Clock, ShieldCheck, Wallet as WalletIcon, ExternalLink } from 'lucide-react-native';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
-import { nfts } from '../../src/mock/nfts';
-import { NFT } from '../../src/types';
 import { useTheme } from '../../src/context/ThemeContext';
+import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
+import { useRouter } from 'expo-router';
 
 const isWeb = Platform.OS === 'web';
-const filters = ['All', 'Legendary', 'Rare', 'Common'];
 
-export default function CollectionScreen() {
-    const [activeFilter, setActiveFilter] = useState('All');
-    const router = useRouter();
-    const { width } = useWindowDimensions();
+const MOCK_TRANSACTIONS = [
+    { id: '1', type: 'Received', amount: '+ 0.5 ETH', date: 'Today', status: 'Completed', from: '0x1A4...9B2z' },
+    { id: '2', type: 'Purchased NFT', amount: '- 0.05 ETH', date: 'Yesterday', status: 'Completed', from: 'Marketplace' },
+    { id: '3', type: 'Sent', amount: '- 0.1 ETH', date: 'Oct 12', status: 'Completed', from: '0x8B2...4C1x' },
+];
+
+export default function WalletScreen() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
-
-    const ownedNFTs = nfts;
-
-    const filteredNFTs = ownedNFTs.filter((nft) => {
-        if (activeFilter === 'All') return true;
-        return nft.rarity === activeFilter.toLowerCase();
-    });
-
-    const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
-
-    const renderHeader = () => (
-        <View>
-            {/* Header Text */}
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16 }}>
-                {!isWeb && (
-                    <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
-                        My Collection
-                    </Text>
-                )}
-                <Text style={{ fontSize: 14, color: colors.text.secondary, marginTop: 4, marginBottom: 16 }}>
-                    {ownedNFTs.length} NFTs collected
-                </Text>
-            </View>
-
-            {/* Stats Row */}
-            <View style={{ flexDirection: 'row', paddingHorizontal: isWeb ? 32 : 16, gap: 12, marginBottom: 20 }}>
-                <View style={{
-                    flex: 1,
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
-                    borderRadius: 16,
-                    padding: 16,
-                    borderWidth: 1,
-                    borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
-                }}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        Total Value
-                    </Text>
-                    <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, marginTop: 4 }}>
-                        {ownedNFTs.reduce((sum, n) => sum + n.price, 0).toFixed(2)} ETH
-                    </Text>
-                </View>
-                <View style={{
-                    flex: 1,
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
-                    borderRadius: 16,
-                    padding: 16,
-                    borderWidth: 1,
-                    borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
-                }}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        Rarest
-                    </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
-                        <Gem size={16} color="#f59e0b" />
-                        <Text style={{ fontSize: 18, fontWeight: '800', color: '#f59e0b' }}>
-                            {ownedNFTs.filter(n => n.rarity === 'legendary').length} Legendary
-                        </Text>
-                    </View>
-                </View>
-            </View>
-
-            {/* Filter Pills */}
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={{ marginBottom: 16, flexGrow: 0 }}
-                contentContainerStyle={{ paddingHorizontal: isWeb ? 32 : 16, paddingVertical: 4 }}
-            >
-                {filters.map((filter) => (
-                    <TabPill key={filter} label={filter} active={activeFilter === filter} onPress={() => setActiveFilter(filter)} />
-                ))}
-            </ScrollView>
-        </View>
-    );
+    const router = useRouter();
 
     return (
-        <ScreenScaffold dominantColor="#f59e0b" noScroll scrollY={scrollY}>
-            <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
-                <FlatList
-                    data={filteredNFTs}
-                    ListHeaderComponent={renderHeader}
-                    renderItem={({ item }: { item: NFT }) => (
-                        <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
-                            <NFTCard
-                                cover={item.coverImage}
-                                title={item.songTitle}
-                                artist={item.artistName}
-                                price={item.price}
-                                editionNumber={item.editionNumber}
-                                totalEditions={item.totalEditions}
-                                rarity={item.rarity}
-                                onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } })}
-                            />
-                        </View>
-                    )}
-                    keyExtractor={(item) => item.id}
-                    numColumns={numCols}
-                    key={`grid-${numCols}`}
+        <ScreenScaffold dominantColor={colors.accent.purple} noScroll scrollY={scrollY}>
+            <View style={{ flex: 1, maxWidth: isWeb ? 800 : undefined, width: '100%', alignSelf: 'center' }}>
+                <ScrollView
+                    showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
-                        paddingHorizontal: isWeb ? 26 : 10,
-                        paddingTop: isWeb ? 80 : insets.top + 44,
+                        paddingHorizontal: isWeb ? 32 : 16,
+                        paddingTop: isWeb ? 80 : insets.top + 60,
                         paddingBottom: 100,
                     }}
-                    showsVerticalScrollIndicator={false}
                     onScroll={Animated.event(
                         [{ nativeEvent: { contentOffset: { y: scrollY } } }],
                         { useNativeDriver: false }
                     )}
                     scrollEventThrottle={16}
-                    ListEmptyComponent={() => (
-                        <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
-                            <Gem size={48} color={colors.text.muted} style={{ marginBottom: 16 }} />
-                            <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
-                                No {activeFilter.toLowerCase()} NFTs found
-                            </Text>
+                >
+                    {/* Header */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 32 }}>
+                        <View style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: 24,
+                            backgroundColor: `${colors.accent.purple}15`,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: 16
+                        }}>
+                            <WalletIcon size={24} color={colors.accent.purple} />
                         </View>
-                    )}
-                />
+                        <View>
+                            <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
+                                My Wallet
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                                <ShieldCheck size={14} color={colors.status.success} style={{ marginRight: 4 }} />
+                                <Text style={{ fontSize: 13, color: colors.status.success, fontWeight: '600' }}>
+                                    Secure Connection
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Balance Card */}
+                    <View style={{
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',
+                        borderRadius: 24,
+                        padding: 24,
+                        marginBottom: 24,
+                        borderWidth: 1,
+                        borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 8 },
+                        shadowOpacity: isDark ? 0.3 : 0.05,
+                        shadowRadius: 24,
+                        elevation: 5,
+                    }}>
+                        <Text style={{ fontSize: 14, color: colors.text.secondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                            Total Balance
+                        </Text>
+                        <Text style={{ fontSize: 42, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
+                            2.45 <Text style={{ fontSize: 24, color: colors.text.muted }}>ETH</Text>
+                        </Text>
+                        <Text style={{ fontSize: 16, color: colors.text.tertiary, marginTop: 4 }}>
+                            ≈ $4,285.50 USD
+                        </Text>
+
+                        {/* Action Buttons */}
+                        <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
+                            <AnimatedPressable preset="button" style={{ flex: 1 }}>
+                                <View style={{
+                                    backgroundColor: colors.text.primary,
+                                    paddingVertical: 14,
+                                    borderRadius: 16,
+                                    alignItems: 'center',
+                                    flexDirection: 'row',
+                                    justifyContent: 'center',
+                                }}>
+                                    <ArrowDownLeft size={18} color={colors.text.inverse} style={{ marginRight: 8 }} />
+                                    <Text style={{ color: colors.text.inverse, fontSize: 15, fontWeight: '700' }}>Deposit</Text>
+                                </View>
+                            </AnimatedPressable>
+
+                            <AnimatedPressable preset="button" style={{ flex: 1 }}>
+                                <View style={{
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                                    paddingVertical: 14,
+                                    borderRadius: 16,
+                                    alignItems: 'center',
+                                    flexDirection: 'row',
+                                    justifyContent: 'center',
+                                }}>
+                                    <ArrowUpRight size={18} color={colors.text.primary} style={{ marginRight: 8 }} />
+                                    <Text style={{ color: colors.text.primary, fontSize: 15, fontWeight: '700' }}>Send</Text>
+                                </View>
+                            </AnimatedPressable>
+                        </View>
+                    </View>
+
+                    {/* Network Info */}
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 32 }}>
+                        {[
+                            { label: 'Network', val: 'Ethereum Mainnet' },
+                            { label: 'Address', val: '0x7F4...3A2x' },
+                        ].map((item, i) => (
+                            <View key={i} style={{
+                                flex: 1,
+                                minWidth: 150,
+                                backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+                                padding: 16,
+                                borderRadius: 16,
+                            }}>
+                                <Text style={{ fontSize: 12, color: colors.text.tertiary, marginBottom: 4 }}>{item.label}</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <Text style={{ fontSize: 14, color: colors.text.primary, fontWeight: '600', fontFamily: item.label === 'Address' ? (isWeb ? 'monospace' : undefined) : undefined }}>
+                                        {item.val}
+                                    </Text>
+                                    {item.label === 'Address' && <ExternalLink size={14} color={colors.text.muted} />}
+                                </View>
+                            </View>
+                        ))}
+                    </View>
+
+                    {/* Recent Transactions */}
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text.primary, marginBottom: 16 }}>
+                        Recent Activity
+                    </Text>
+
+                    <View style={{ gap: 12 }}>
+                        {MOCK_TRANSACTIONS.map((tx) => (
+                            <View key={tx.id} style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                paddingVertical: 12,
+                                paddingHorizontal: 16,
+                                backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+                                borderRadius: 16,
+                            }}>
+                                <View style={{
+                                    width: 40,
+                                    height: 40,
+                                    borderRadius: 20,
+                                    backgroundColor: tx.type === 'Received' ? `${colors.status.success}15` : `${colors.text.primary}10`,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    marginRight: 16
+                                }}>
+                                    {tx.type === 'Received' ? (
+                                        <ArrowDownLeft size={18} color={colors.status.success} />
+                                    ) : tx.type === 'Sent' ? (
+                                        <ArrowUpRight size={18} color={colors.text.primary} />
+                                    ) : (
+                                        <Clock size={18} color={colors.text.primary} />
+                                    )}
+                                </View>
+
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 15, fontWeight: '600', color: colors.text.primary }}>{tx.type}</Text>
+                                    <Text style={{ fontSize: 13, color: colors.text.secondary, marginTop: 2 }}>{tx.date} • {tx.from}</Text>
+                                </View>
+
+                                <View style={{ alignItems: 'flex-end' }}>
+                                    <Text style={{
+                                        fontSize: 15,
+                                        fontWeight: '700',
+                                        color: tx.type === 'Received' ? colors.status.success : colors.text.primary
+                                    }}>
+                                        {tx.amount}
+                                    </Text>
+                                    <Text style={{ fontSize: 12, color: colors.text.tertiary, marginTop: 2 }}>
+                                        {tx.status}
+                                    </Text>
+                                </View>
+                            </View>
+                        ))}
+                    </View>
+                </ScrollView>
             </View>
         </ScreenScaffold>
     );

@@ -8,6 +8,7 @@ import { useSafeAreaInsets, EdgeInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../src/context/ThemeContext';
 import { PlayerProvider } from '../../src/context/PlayerContext';
 import MusicPlayerOverlay from '../../src/components/player/MusicPlayerOverlay';
+import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 
 /* Constants */
 const isWeb = Platform.OS === 'web';
@@ -50,12 +51,21 @@ export default function ConsumerLayout() {
                                 <View style={{ flex: 1, backgroundColor: isDark ? 'rgba(3,7,17,0.9)' : 'rgba(255,255,255,0.9)' }} />
                         ),
                         animation: 'fade', // Add smooth fade transition between tabs
+                        tabBarButton: (props) => (
+                            <AnimatedPressable
+                                {...props}
+                                preset="icon"
+                                hapticType="none" // Expo Router handles its own taps often, but we can animate our press size
+                                style={[props.style, { flex: 1, borderRadius: 100 }]}
+                            />
+                        ),
                     }}
                 >
                     <Tabs.Screen name="home" options={{ title: 'Home', tabBarIcon: ({ color, size }) => <Home size={size} color={color} /> }} />
                     <Tabs.Screen name="marketplace" options={{ title: 'Market', tabBarIcon: ({ color, size }) => <Store size={size} color={color} /> }} />
                     <Tabs.Screen name="library" options={{ title: 'Library', tabBarIcon: ({ color, size }) => <Library size={size} color={color} /> }} />
-                    <Tabs.Screen name="wallet" options={{ title: 'Collection', tabBarIcon: ({ color, size }) => <Wallet size={size} color={color} /> }} />
+                    <Tabs.Screen name="collection" options={{ title: 'Collection', tabBarIcon: ({ color, size }) => <Wallet size={size} color={color} /> }} />
+                    <Tabs.Screen name="wallet" options={{ href: null }} />
                     <Tabs.Screen name="profile" options={{ href: null }} />
                     <Tabs.Screen name="search" options={{ href: null }} />
                     <Tabs.Screen name="song-detail" options={{ href: null }} />
