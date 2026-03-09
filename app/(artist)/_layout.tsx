@@ -44,8 +44,8 @@ function SidebarItem({ path, match, label, Icon, active, onPress }: {
     );
 }
 
-/* ─── Artist Web Sidebar ─── */
-function ArtistSidebar() {
+/* ─── Creator Web Sidebar ─── */
+function CreatorSidebar() {
     const router = useRouter();
     const pathname = usePathname();
 
@@ -110,7 +110,7 @@ function ArtistSidebar() {
 }
 
 /* ─── Layout Entry Point ─── */
-export default function ArtistLayout() {
+export default function CreatorLayout() {
     const tabScreens = (
         <Tabs
             screenOptions={{
@@ -140,7 +140,7 @@ export default function ArtistLayout() {
     if (isWeb) {
         return (
             <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: '#f8fafc' }}>
-                <ArtistSidebar />
+                <CreatorSidebar />
                 <View style={{ flex: 1 }}>
                     {tabScreens}
                 </View>

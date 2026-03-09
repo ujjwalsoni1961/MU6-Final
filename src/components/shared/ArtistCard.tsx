@@ -4,7 +4,7 @@ import { Image } from 'expo-image';
 import { BadgeCheck } from 'lucide-react-native';
 import AnimatedPressable from './AnimatedPressable';
 
-interface ArtistCardProps {
+interface CreatorCardProps {
     avatar: string;
     name: string;
     followers: number;
@@ -19,7 +19,7 @@ function formatFollowers(count: number): string {
 
 import { useTheme } from '../../context/ThemeContext';
 
-export default function ArtistCard({ avatar, name, followers, verified, onPress }: ArtistCardProps) {
+export default function CreatorCard({ avatar, name, followers, verified, onPress }: CreatorCardProps) {
     const { isDark, colors } = useTheme();
 
     return (

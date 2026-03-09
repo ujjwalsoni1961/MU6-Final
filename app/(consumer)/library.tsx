@@ -15,12 +15,12 @@ import { artists } from '../../src/mock/artists';
 import { Song, NFT, Artist } from '../../src/types';
 
 const isWeb = Platform.OS === 'web';
-const tabs = ['Songs', 'NFTs', 'Artists'];
+const tabs = ['Songs', 'NFTs', 'Creators'];
 
 import { useTheme } from '../../src/context/ThemeContext';
 
-/* ─── Artist Row ─── */
-function ArtistRow({ item, onPress }: { item: Artist; onPress: () => void }) {
+/* ─── Creator Row ─── */
+function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
     const { isDark, colors } = useTheme();
 
     return (
@@ -88,8 +88,8 @@ export default function LibraryScreen() {
         />
     );
 
-    const renderArtist = ({ item }: { item: Artist }) => (
-        <ArtistRow
+    const renderCreator = ({ item }: { item: Artist }) => (
+        <CreatorRow
             item={item}
             onPress={() => router.push({ pathname: '/(consumer)/artist-profile', params: { id: item.id } })}
         />
@@ -114,13 +114,13 @@ export default function LibraryScreen() {
 
     const getData = () => {
         if (activeTab === 'Songs') return songs.slice(0, 8);
-        if (activeTab === 'Artists') return artists;
+        if (activeTab === 'Creators') return artists;
         return []; // NFTs handled separately
     };
 
     const renderItem = ({ item }: { item: any }) => {
         if (activeTab === 'Songs') return renderSong({ item });
-        if (activeTab === 'Artists') return renderArtist({ item });
+        if (activeTab === 'Creators') return renderCreator({ item });
         return null;
     };
 

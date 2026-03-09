@@ -162,7 +162,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                 >
                     <Search size={16} color={isSearchFocused ? colors.accent.cyan : colors.text.muted} style={{ marginRight: 12 }} />
                     <TextInput
-                        placeholder="Search songs, artists, NFTs..."
+                        placeholder="Search songs, creators, NFTs..."
                         placeholderTextColor={isDark ? colors.text.secondary : colors.text.muted}
                         value={searchQuery}
                         onChangeText={setSearchQuery}
@@ -274,7 +274,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                             /* Filtered Results */
                             <>
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-                                    Songs & Artists
+                                    Songs & Creators
                                 </Text>
                                 {filteredSongs.length > 0 ? filteredSongs.map((song) => (
                                     <AnimatedPressable

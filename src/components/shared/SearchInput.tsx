@@ -12,7 +12,7 @@ interface SearchInputProps {
 
 import { useTheme } from '../../context/ThemeContext';
 
-export default function SearchInput({ value, onChangeText, placeholder = 'Search songs, artists, NFTs...', autoFocus }: SearchInputProps) {
+export default function SearchInput({ value, onChangeText, placeholder = 'Search songs, creators, NFTs...', autoFocus }: SearchInputProps) {
     const { isDark, colors } = useTheme();
 
     return (

@@ -20,7 +20,7 @@ function formatFollowers(count: number): string {
     return count.toString();
 }
 
-export default function ArtistProfileScreen() {
+export default function CreatorProfileScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
     const artist = artists.find((a) => a.id === id) || artists[0];

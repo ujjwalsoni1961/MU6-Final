@@ -101,10 +101,17 @@ function WebLogin() {
                     </View>
 
                     <LoginButton
-                        label="Artist Dashboard"
+                        label="Creator Dashboard"
                         icon={<Brush size={16} color="#8b5cf6" />}
                         color="#8b5cf6"
-                        onPress={() => router.replace('/(artist)/dashboard')}
+                        onPress={() => router.push('/(auth)/creator-register')}
+                    />
+
+                    <LoginButton
+                        label="Super Admin"
+                        icon={<Shield size={16} color="#f59e0b" />}
+                        color="#f59e0b"
+                        onPress={() => router.replace('/(admin)/dashboard')}
                     />
                 </View>
             </View>

@@ -9,7 +9,7 @@ import { nfts } from '../../src/mock/nfts';
 import { artists } from '../../src/mock/artists';
 import SongCard from '../../src/components/shared/SongCard';
 import NFTCard from '../../src/components/shared/NFTCard';
-import ArtistCard from '../../src/components/shared/ArtistCard';
+import CreatorCard from '../../src/components/shared/ArtistCard';
 import { useTheme } from '../../src/context/ThemeContext';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { usePlayer } from '../../src/context/PlayerContext';
@@ -188,9 +188,9 @@ export default function HomeScreen() {
                         ))}
                     </Animated.ScrollView>
 
-                    {/* ─── Top Artists ─── */}
+                    {/* ─── Top Creators ─── */}
                     <View style={{ paddingHorizontal: hPad }}>
-                        <SectionHeader title="Your Top Artists" onViewAll={() => { }} />
+                        <SectionHeader title="Top Creators" onViewAll={() => { }} />
                     </View>
                     <Animated.ScrollView
                         horizontal
@@ -199,7 +199,7 @@ export default function HomeScreen() {
                         style={{ marginBottom: 40 }}
                     >
                         {artists.map((artist) => (
-                            <ArtistCard
+                            <CreatorCard
                                 key={artist.id}
                                 avatar={artist.avatar}
                                 name={artist.name}

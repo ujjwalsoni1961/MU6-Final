@@ -44,7 +44,7 @@ export default function SearchScreen() {
                     <SearchInput
                         value={query}
                         onChangeText={setQuery}
-                        placeholder="Search songs, artists..."
+                        placeholder="Search songs, creators..."
                         autoFocus
                     />
                 </View>

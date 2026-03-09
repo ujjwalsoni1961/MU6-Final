@@ -71,7 +71,7 @@ function SongTableRow({ index, song }: { index: number; song: typeof songs[0] })
     );
 }
 
-export default function ArtistSongsScreen() {
+export default function CreatorSongsScreen() {
     const router = useRouter();
     const Container = isWeb ? View : SafeAreaView;
 

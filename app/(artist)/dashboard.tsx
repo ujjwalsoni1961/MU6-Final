@@ -126,7 +126,7 @@ function TopSongRow({ rank, song }: { rank: number; song: typeof songs[0] }) {
 }
 
 /* ─── Main Screen ─── */
-export default function ArtistDashboardScreen() {
+export default function CreatorDashboardScreen() {
     const artist = artists[0];
     const topSongs = [...songs].sort((a, b) => b.plays - a.plays).slice(0, 6);
 
@@ -145,11 +145,16 @@ export default function ArtistDashboardScreen() {
                 showsVerticalScrollIndicator={false}
             >
                 {/* Header */}
-                <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: '#0f172a', letterSpacing: -1 }}>
-                    Welcome back, {artist.name}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: '#0f172a', letterSpacing: -1 }}>
+                        Welcome back, {artist.name}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(139,92,246,0.1)', borderRadius: 9999, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(139,92,246,0.2)' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6', textTransform: 'uppercase', letterSpacing: 1 }}>Creator Type: Artist</Text>
+                    </View>
+                </View>
                 <Text style={{ fontSize: 14, color: '#64748b', marginTop: 4, marginBottom: 24 }}>
-                    Here's your overview for this month.
+                    Here's your creator overview for this month.
                 </Text>
 
                 {/* Stat Cards Row */}
