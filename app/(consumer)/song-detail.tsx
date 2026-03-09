@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, ScrollView, Platform } from 'react-native';
+import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -10,25 +10,40 @@ import GlassCard from '../../src/components/shared/GlassCard';
 import GenreTag from '../../src/components/shared/GenreTag';
 import SongCard from '../../src/components/shared/SongCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
-import { songs } from '../../src/mock/songs';
-
 import { useTheme } from '../../src/context/ThemeContext';
+import { usePlayer } from '../../src/context/PlayerContext';
+import { useSongById, useArtistSongs, useNFTReleases, useIsLiked } from '../../src/hooks/useData';
 
 function formatPlays(count: number): string {
     if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
     return count.toString();
 }
 
-import { usePlayer } from '../../src/context/PlayerContext';
-
 export default function SongDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const song = songs.find((s) => s.id === id) || songs[0];
-    const moreSongs = songs.filter((s) => s.artistName === song.artistName && s.id !== song.id);
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
     const { playSong } = usePlayer();
+
+    // Real data hooks
+    const { data: song, loading: loadingSong } = useSongById(id);
+    const { data: moreSongs, loading: loadingMore } = useArtistSongs(song?._creatorId);
+    const { data: nftReleases } = useNFTReleases(id);
+    const { liked, toggle: toggleLike } = useIsLiked(id);
+
+    const filteredMoreSongs = moreSongs.filter((s) => s.id !== id);
+    const nftRelease = nftReleases[0]; // first release for this song
+
+    if (loadingSong || !song) {
+        return (
+            <ScreenScaffold dominantColor="#38b4ba" contentContainerStyle={{ paddingBottom: 120 }}>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
+                    <ActivityIndicator size="large" color="#38b4ba" />
+                </View>
+            </ScreenScaffold>
+        );
+    }
 
     return (
         <ScreenScaffold dominantColor="#38b4ba" contentContainerStyle={{ paddingBottom: 120 }}>
@@ -50,7 +65,7 @@ export default function SongDetailScreen() {
                     </AnimatedPressable>
                 </View>
 
-                {/* Cover Art & Content Wrapper */}
+                {/* Cover Art & Content */}
                 <View style={[
                     isWeb ? { flexDirection: 'row', gap: 40, paddingVertical: 40, maxWidth: 1200, alignSelf: 'center', width: '100%', paddingHorizontal: 16 } : { paddingHorizontal: 24, alignItems: 'center' },
                 ]}>
@@ -72,7 +87,7 @@ export default function SongDetailScreen() {
                         )}
                     </View>
 
-                    {/* Details Container */}
+                    {/* Details */}
                     <View style={isWeb ? { flex: 1 } : { width: '100%', alignItems: 'center' }}>
                         <Text style={{ fontSize: isWeb ? 48 : 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, textAlign: isWeb ? 'left' : 'center' }}>{song.title}</Text>
                         <Text style={{ fontSize: isWeb ? 24 : 18, color: colors.text.secondary, marginTop: 4, fontWeight: '500', textAlign: isWeb ? 'left' : 'center' }}>{song.artistName}</Text>
@@ -96,7 +111,20 @@ export default function SongDetailScreen() {
                                 <Text style={{ fontSize: 17, fontWeight: '700', color: isDark ? '#000' : '#0f172a' }}>Play</Text>
                             </AnimatedPressable>
 
-                            {[Heart, Share, MoreHorizontal].map((Icon, idx) => (
+                            <AnimatedPressable
+                                preset="icon"
+                                onPress={toggleLike}
+                                style={{
+                                    width: 56, height: 56, borderRadius: 28,
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : '#fff',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9',
+                                }}
+                            >
+                                <Heart size={22} color={liked ? '#ef4444' : colors.text.primary} fill={liked ? '#ef4444' : 'transparent'} />
+                            </AnimatedPressable>
+
+                            {[Share, MoreHorizontal].map((Icon, idx) => (
                                 <AnimatedPressable
                                     key={idx}
                                     preset="icon"
@@ -112,7 +140,7 @@ export default function SongDetailScreen() {
                             ))}
                         </View>
 
-                        {/* Lyrics Section */}
+                        {/* Lyrics */}
                         {song.lyrics && (
                             <View style={{ marginBottom: 32, backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.5)', padding: 24, borderRadius: 16, width: '100%' }}>
                                 <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text.primary, marginBottom: 12 }}>Lyrics</Text>
@@ -122,7 +150,7 @@ export default function SongDetailScreen() {
                             </View>
                         )}
 
-                        {/* Credits Section */}
+                        {/* Credits */}
                         {song.credits && (
                             <View style={{ marginBottom: 32, backgroundColor: isDark ? colors.bg.card : '#fff', padding: 24, borderRadius: 16, width: '100%' }}>
                                 <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text.primary, marginBottom: 20 }}>Credits</Text>
@@ -142,7 +170,7 @@ export default function SongDetailScreen() {
                             </View>
                         )}
 
-                        {/* Stats Row */}
+                        {/* Stats */}
                         <GlassCard style={{ flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20, width: '100%' }}>
                             <View style={{ alignItems: 'center' }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -168,11 +196,11 @@ export default function SongDetailScreen() {
                         </GlassCard>
 
                         {/* NFT Section */}
-                        {song.isNFT && (
+                        {nftRelease && (
                             <GlassCard intensity="heavy" style={{ marginBottom: 20, width: '100%' }}>
-                                <Text style={{ fontSize: 36, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, textAlign: 'center' }}>{song.price} ETH</Text>
+                                <Text style={{ fontSize: 36, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, textAlign: 'center' }}>{nftRelease.price} ETH</Text>
                                 <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4, textAlign: 'center' }}>
-                                    {song.editionsSold} of {song.totalEditions} editions sold
+                                    {nftRelease.editionNumber - 1} of {nftRelease.totalEditions} editions minted
                                 </Text>
                                 <AnimatedPressable
                                     preset="button"
@@ -190,13 +218,13 @@ export default function SongDetailScreen() {
                 </View>
 
                 {/* More by Artist */}
-                {moreSongs.length > 0 && (
+                {filteredMoreSongs.length > 0 && (
                     <View style={isWeb ? { maxWidth: 1200, alignSelf: 'center', width: '100%', marginTop: 40, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
                         <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>
                             More by {song.artistName}
                         </Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 32 }}>
-                            {moreSongs.map((s) => (
+                            {filteredMoreSongs.map((s) => (
                                 <SongCard
                                     key={s.id}
                                     cover={s.coverImage}

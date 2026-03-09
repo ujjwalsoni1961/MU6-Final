@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, ScrollView, Platform, StyleSheet } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -10,18 +10,33 @@ import GlassCard from '../../src/components/shared/GlassCard';
 import RarityBadge from '../../src/components/shared/RarityBadge';
 import NFTCard from '../../src/components/shared/NFTCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
-import { nfts } from '../../src/mock/nfts';
-
 import { useTheme } from '../../src/context/ThemeContext';
+import { useNFTReleases } from '../../src/hooks/useData';
+import { NFT } from '../../src/types';
 
 export default function NFTDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const nft = nfts.find((n) => n.id === id) || nfts[0];
-    const moreNFTs = nfts.filter((n) => n.id !== nft.id);
-    const truncatedOwner = `${nft.owner.slice(0, 6)}...${nft.owner.slice(-4)}`;
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
+
+    // Get all NFT releases
+    const { data: allNFTs, loading } = useNFTReleases();
+
+    const nft = allNFTs.find((n) => n.id === id) || allNFTs[0];
+    const moreNFTs = allNFTs.filter((n) => n.id !== id);
+
+    if (loading || !nft) {
+        return (
+            <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
+                    <ActivityIndicator size="large" color="#8b5cf6" />
+                </View>
+            </ScreenScaffold>
+        );
+    }
+
+    const truncatedOwner = nft.owner ? `${nft.owner.slice(0, 6)}...${nft.owner.slice(-4)}` : 'Not yet minted';
 
     return (
         <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
@@ -48,7 +63,7 @@ export default function NFTDetailScreen() {
                 <View style={[
                     isWeb ? { flexDirection: 'row', gap: 40, paddingVertical: 40, paddingHorizontal: 16 } : { paddingHorizontal: 16 },
                 ]}>
-                    {/* NFT Cover - Left Column (Web) */}
+                    {/* NFT Cover */}
                     <View style={[
                         { borderRadius: 32, overflow: 'hidden', marginBottom: 20, position: 'relative' },
                         isWeb && { width: 400, height: 400, flexShrink: 0 },
@@ -69,7 +84,6 @@ export default function NFTDetailScreen() {
                                 <RarityBadge rarity={nft.rarity} />
                             </View>
                         )}
-                        {/* Title overlaid - Mobile Only */}
                         {!isWeb && (
                             <View style={{ position: 'absolute', bottom: 20, left: 20, right: 20 }}>
                                 <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', letterSpacing: -1 }}>{nft.songTitle}</Text>
@@ -78,9 +92,8 @@ export default function NFTDetailScreen() {
                         )}
                     </View>
 
-                    {/* Right Column (Web) / Bottom (Mobile) */}
+                    {/* Details */}
                     <View style={{ flex: 1 }}>
-                        {/* Title/Info - Web Only */}
                         {isWeb && (
                             <View style={{ marginBottom: 24 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -96,7 +109,7 @@ export default function NFTDetailScreen() {
                             <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>Current Price</Text>
                             <Text style={{ fontSize: 40, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, marginTop: 4 }}>{nft.price} ETH</Text>
                             <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4 }}>
-                                Edition #{nft.editionNumber} of {nft.totalEditions}
+                                {nft.editionNumber - 1} of {nft.totalEditions} minted
                             </Text>
                             <AnimatedPressable
                                 preset="button"
@@ -112,19 +125,6 @@ export default function NFTDetailScreen() {
                                 <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 16 }}>Buy Now</Text>
                             </AnimatedPressable>
                         </GlassCard>
-
-                        {/* Price History */}
-                        {nft.priceHistory && nft.priceHistory.length > 0 && (
-                            <GlassCard style={{ marginBottom: 16 }}>
-                                <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text.primary, marginBottom: 12 }}>Price History</Text>
-                                {nft.priceHistory.map((entry, index) => (
-                                    <View key={index} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: index < nft.priceHistory!.length - 1 ? 1 : 0, borderBottomColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
-                                        <Text style={{ color: colors.text.secondary, fontSize: 13 }}>{entry.date}</Text>
-                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13 }}>{entry.price} ETH</Text>
-                                    </View>
-                                ))}
-                            </GlassCard>
-                        )}
 
                         {/* Owner */}
                         <GlassCard intensity="light" style={{ marginBottom: 20, flexDirection: 'row', alignItems: 'center' }}>
@@ -147,25 +147,29 @@ export default function NFTDetailScreen() {
                 </View>
 
                 {/* More NFTs */}
-                <View style={{ paddingHorizontal: 16 }}>
-                    <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 12 }}>More NFTs</Text>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 32, paddingHorizontal: 16 }}>
-                    {moreNFTs.map((n) => (
-                        <View key={n.id} style={{ width: 176, marginRight: 12 }}>
-                            <NFTCard
-                                cover={n.coverImage}
-                                title={n.songTitle}
-                                artist={n.artistName}
-                                price={n.price}
-                                editionNumber={n.editionNumber}
-                                totalEditions={n.totalEditions}
-                                rarity={n.rarity}
-                                onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: n.id } })}
-                            />
+                {moreNFTs.length > 0 && (
+                    <>
+                        <View style={{ paddingHorizontal: 16 }}>
+                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 12 }}>More NFTs</Text>
                         </View>
-                    ))}
-                </ScrollView>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 32, paddingHorizontal: 16 }}>
+                            {moreNFTs.map((n) => (
+                                <View key={n.id} style={{ width: 176, marginRight: 12 }}>
+                                    <NFTCard
+                                        cover={n.coverImage}
+                                        title={n.songTitle}
+                                        artist={n.artistName}
+                                        price={n.price}
+                                        editionNumber={n.editionNumber}
+                                        totalEditions={n.totalEditions}
+                                        rarity={n.rarity}
+                                        onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: n.id } })}
+                                    />
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </>
+                )}
             </View>
         </ScreenScaffold>
     );

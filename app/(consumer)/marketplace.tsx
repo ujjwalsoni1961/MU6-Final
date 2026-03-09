@@ -1,12 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated } from 'react-native';
+import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import TabPill from '../../src/components/shared/TabPill';
 import NFTCard from '../../src/components/shared/NFTCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
-import { nfts } from '../../src/mock/nfts';
 import { NFT } from '../../src/types';
+import { useNFTReleases } from '../../src/hooks/useData';
 
 const isWeb = Platform.OS === 'web';
 const filters = ['All', 'Trending', 'New', 'Rare', 'Legendary'];
@@ -21,7 +21,10 @@ export default function MarketplaceScreen() {
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
 
-    const filteredNFTs = nfts.filter((nft) => {
+    // Real data
+    const { data: nftReleases, loading } = useNFTReleases();
+
+    const filteredNFTs = nftReleases.filter((nft) => {
         if (activeFilter === 'All' || activeFilter === 'Trending' || activeFilter === 'New') return true;
         if (activeFilter === 'Rare') return nft.rarity === 'rare';
         if (activeFilter === 'Legendary') return nft.rarity === 'legendary';
@@ -32,7 +35,6 @@ export default function MarketplaceScreen() {
 
     const renderHeader = () => (
         <View>
-            {/* Header */}
             <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 12 }}>
                 {!isWeb && (
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>Marketplace</Text>
@@ -40,7 +42,6 @@ export default function MarketplaceScreen() {
                 <Text style={{ fontSize: 14, color: colors.text.secondary, marginTop: isWeb ? 0 : 4 }}>Discover unique music NFTs</Text>
             </View>
 
-            {/* Filter Pills */}
             <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -51,6 +52,12 @@ export default function MarketplaceScreen() {
                     <TabPill key={filter} label={filter} active={activeFilter === filter} onPress={() => setActiveFilter(filter)} />
                 ))}
             </ScrollView>
+
+            {loading && (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#38b4ba" />
+                </View>
+            )}
         </View>
     );
 
@@ -58,7 +65,7 @@ export default function MarketplaceScreen() {
         <ScreenScaffold dominantColor="#8b5cf6" noScroll scrollY={scrollY}>
             <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 <FlatList
-                    data={filteredNFTs}
+                    data={loading ? [] : filteredNFTs}
                     ListHeaderComponent={renderHeader}
                     renderItem={({ item }: { item: NFT }) => (
                         <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
@@ -88,6 +95,11 @@ export default function MarketplaceScreen() {
                         { useNativeDriver: false }
                     )}
                     scrollEventThrottle={16}
+                    ListEmptyComponent={() => !loading ? (
+                        <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                            <Text style={{ color: colors.text.secondary, fontSize: 16 }}>No NFTs available</Text>
+                        </View>
+                    ) : null}
                 />
             </View>
         </ScreenScaffold>

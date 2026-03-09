@@ -18,6 +18,11 @@ export interface Song {
         producedBy: string;
         releaseDate: string;
     };
+    // Extended fields from DB adapter
+    _creatorId?: string;
+    _audioPath?: string | null;
+    _coverPath?: string | null;
+    _durationSeconds?: number | null;
 }
 
 export interface Artist {

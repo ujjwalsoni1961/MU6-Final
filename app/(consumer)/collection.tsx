@@ -1,14 +1,14 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated } from 'react-native';
+import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Gem } from 'lucide-react-native';
 import TabPill from '../../src/components/shared/TabPill';
 import NFTCard from '../../src/components/shared/NFTCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
-import { nfts } from '../../src/mock/nfts';
 import { NFT } from '../../src/types';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useOwnedNFTs } from '../../src/hooks/useData';
 
 const isWeb = Platform.OS === 'web';
 const filters = ['All', 'Legendary', 'Rare', 'Common'];
@@ -21,7 +21,8 @@ export default function CollectionScreen() {
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
 
-    const ownedNFTs = nfts;
+    // Real data
+    const { data: ownedNFTs, loading } = useOwnedNFTs();
 
     const filteredNFTs = ownedNFTs.filter((nft) => {
         if (activeFilter === 'All') return true;
@@ -32,7 +33,6 @@ export default function CollectionScreen() {
 
     const renderHeader = () => (
         <View>
-            {/* Header Text */}
             <View style={{ paddingHorizontal: isWeb ? 32 : 16 }}>
                 {!isWeb && (
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
@@ -49,8 +49,7 @@ export default function CollectionScreen() {
                 <View style={{
                     flex: 1,
                     backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
-                    borderRadius: 16,
-                    padding: 16,
+                    borderRadius: 16, padding: 16,
                     borderWidth: 1,
                     borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
                 }}>
@@ -64,8 +63,7 @@ export default function CollectionScreen() {
                 <View style={{
                     flex: 1,
                     backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
-                    borderRadius: 16,
-                    padding: 16,
+                    borderRadius: 16, padding: 16,
                     borderWidth: 1,
                     borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
                 }}>
@@ -83,8 +81,7 @@ export default function CollectionScreen() {
 
             {/* Filter Pills */}
             <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
+                horizontal showsHorizontalScrollIndicator={false}
                 style={{ marginBottom: 16, flexGrow: 0 }}
                 contentContainerStyle={{ paddingHorizontal: isWeb ? 32 : 16, paddingVertical: 4 }}
             >
@@ -92,6 +89,12 @@ export default function CollectionScreen() {
                     <TabPill key={filter} label={filter} active={activeFilter === filter} onPress={() => setActiveFilter(filter)} />
                 ))}
             </ScrollView>
+
+            {loading && (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#38b4ba" />
+                </View>
+            )}
         </View>
     );
 
@@ -99,7 +102,7 @@ export default function CollectionScreen() {
         <ScreenScaffold dominantColor="#f59e0b" noScroll scrollY={scrollY}>
             <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 <FlatList
-                    data={filteredNFTs}
+                    data={loading ? [] : filteredNFTs}
                     ListHeaderComponent={renderHeader}
                     renderItem={({ item }: { item: NFT }) => (
                         <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
@@ -129,14 +132,14 @@ export default function CollectionScreen() {
                         { useNativeDriver: false }
                     )}
                     scrollEventThrottle={16}
-                    ListEmptyComponent={() => (
+                    ListEmptyComponent={() => !loading ? (
                         <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
                             <Gem size={48} color={colors.text.muted} style={{ marginBottom: 16 }} />
                             <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
-                                No {activeFilter.toLowerCase()} NFTs found
+                                {activeFilter === 'All' ? 'No NFTs in your collection yet' : `No ${activeFilter.toLowerCase()} NFTs found`}
                             </Text>
                         </View>
-                    )}
+                    ) : null}
                 />
             </View>
         </ScreenScaffold>

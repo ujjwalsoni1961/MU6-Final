@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,10 +9,8 @@ import TabPill from '../../src/components/shared/TabPill';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import SongRow from '../../src/components/shared/SongRow';
 import NFTCard from '../../src/components/shared/NFTCard';
-import { songs } from '../../src/mock/songs';
-import { nfts } from '../../src/mock/nfts';
-import { artists } from '../../src/mock/artists';
 import { Song, NFT, Artist } from '../../src/types';
+import { useLikedSongs, useArtists, useOwnedNFTs } from '../../src/hooks/useData';
 
 const isWeb = Platform.OS === 'web';
 const tabs = ['Songs', 'NFTs', 'Creators'];
@@ -74,7 +72,16 @@ export default function LibraryScreen() {
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
 
+    // Real data hooks
+    const { data: likedSongs, loading: loadingSongs } = useLikedSongs();
+    const { data: artists, loading: loadingArtists } = useArtists(20);
+    const { data: ownedNFTs, loading: loadingNFTs } = useOwnedNFTs();
+
     const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
+
+    const isLoading = (activeTab === 'Songs' && loadingSongs) ||
+                      (activeTab === 'Creators' && loadingArtists) ||
+                      (activeTab === 'NFTs' && loadingNFTs);
 
     const renderSong = ({ item }: { item: Song }) => (
         <SongRow
@@ -109,13 +116,18 @@ export default function LibraryScreen() {
                     ))}
                 </ScrollView>
             </View>
+            {isLoading && (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                    <ActivityIndicator size="small" color="#38b4ba" />
+                </View>
+            )}
         </View>
     );
 
     const getData = () => {
-        if (activeTab === 'Songs') return songs.slice(0, 8);
+        if (activeTab === 'Songs') return likedSongs;
         if (activeTab === 'Creators') return artists;
-        return []; // NFTs handled separately
+        return [];
     };
 
     const renderItem = ({ item }: { item: any }) => {
@@ -129,7 +141,7 @@ export default function LibraryScreen() {
             <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 {activeTab === 'NFTs' ? (
                     <FlatList
-                        data={nfts}
+                        data={ownedNFTs}
                         ListHeaderComponent={renderHeader}
                         renderItem={({ item }: { item: NFT }) => (
                             <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
@@ -159,10 +171,15 @@ export default function LibraryScreen() {
                             { useNativeDriver: false }
                         )}
                         scrollEventThrottle={16}
+                        ListEmptyComponent={() => !isLoading ? (
+                            <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                                <Text style={{ color: colors.text.secondary, fontSize: 16 }}>No NFTs in your collection yet</Text>
+                            </View>
+                        ) : null}
                     />
                 ) : (
                     <FlatList
-                        data={getData()}
+                        data={isLoading ? [] : getData()}
                         ListHeaderComponent={renderHeader}
                         renderItem={renderItem}
                         keyExtractor={(item) => item.id}
@@ -177,6 +194,13 @@ export default function LibraryScreen() {
                             { useNativeDriver: false }
                         )}
                         scrollEventThrottle={16}
+                        ListEmptyComponent={() => !isLoading ? (
+                            <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                                <Text style={{ color: colors.text.secondary, fontSize: 16 }}>
+                                    {activeTab === 'Songs' ? 'No liked songs yet' : 'No creators to show'}
+                                </Text>
+                            </View>
+                        ) : null}
                     />
                 )}
             </View>
