@@ -1,16 +1,21 @@
 /**
  * MU6 Blockchain Service
  *
- * Handles all on-chain operations via Thirdweb SDK v5.
- * For MVP: contracts are NOT deployed yet, so most functions
- * create Supabase records only and log "contract pending".
+ * Handles on-chain operations via Thirdweb SDK v5, wired to:
+ *   - DropERC721 "MU6 Songs" (lazy mint + claim)
+ *   - MarketplaceV3 (direct listings, offers)
+ *   - Split (revenue distribution)
  *
- * Once contracts are deployed (Phase 3/4), these functions will
- * be updated to send real on-chain transactions.
+ * Chain: Polygon Amoy testnet (80002) → Polygon mainnet (137) for production.
  */
 
-import { sendTransaction, prepareContractCall } from 'thirdweb';
-import { thirdwebClient, baseSepolia, CONTRACTS, getContractInstance } from '../lib/thirdweb';
+import { prepareContractCall, readContract, sendTransaction, type Account } from 'thirdweb';
+import {
+    CONTRACTS,
+    getSongNFTContract,
+    getMarketplaceContract,
+    getSplitContract,
+} from '../lib/thirdweb';
 import { supabaseAdmin } from '../lib/supabase';
 
 // ────────────────────────────────────────────
@@ -24,48 +29,323 @@ export interface MintConfig {
     totalSupply: number;
     allocatedRoyaltyPercent: number;
     priceEth: number;
+    /** IPFS URI for the token metadata (uploaded before calling this) */
+    metadataUri: string;
 }
 
 export interface ListingConfig {
-    nftTokenId: string; // DB UUID
-    priceEth: number;
+    nftTokenId: string; // DB UUID of the nft_token row
+    onChainTokenId: string; // on-chain token ID
+    pricePerToken: string; // price in wei
     sellerWallet: string;
 }
 
 export interface BuyConfig {
     listingId: string; // DB UUID
+    onChainListingId: bigint; // on-chain listing ID
     buyerWallet: string;
+    totalPrice: string; // price in wei
+    currency: string; // ERC20 address or 0xEee...EEeE for native
 }
 
 // ────────────────────────────────────────────
-// Contract status check
+// Contract status helpers
 // ────────────────────────────────────────────
 
-export function isContractDeployed(): boolean {
-    return !!CONTRACTS.SONG_NFT && CONTRACTS.SONG_NFT.length > 10;
+export function isContractReady(): boolean {
+    return !!CONTRACTS.SONG_NFT && CONTRACTS.SONG_NFT.startsWith('0x') && CONTRACTS.SONG_NFT.length === 42;
 }
 
-export function isMarketplaceDeployed(): boolean {
-    return !!CONTRACTS.MARKETPLACE && CONTRACTS.MARKETPLACE.length > 10;
+export function isMarketplaceReady(): boolean {
+    return !!CONTRACTS.MARKETPLACE && CONTRACTS.MARKETPLACE.startsWith('0x') && CONTRACTS.MARKETPLACE.length === 42;
 }
 
 // ────────────────────────────────────────────
-// NFT Minting
+// READ: On-chain state queries
+// ────────────────────────────────────────────
+
+/** Total NFTs lazy-minted so far */
+export async function getNextTokenIdToMint(): Promise<bigint> {
+    return readContract({
+        contract: getSongNFTContract(),
+        method: 'function nextTokenIdToMint() view returns (uint256)',
+        params: [],
+    });
+}
+
+/** Total NFTs claimed so far */
+export async function getNextTokenIdToClaim(): Promise<bigint> {
+    return readContract({
+        contract: getSongNFTContract(),
+        method: 'function nextTokenIdToClaim() view returns (uint256)',
+        params: [],
+    });
+}
+
+/** Total supply */
+export async function getTotalSupply(): Promise<bigint> {
+    return readContract({
+        contract: getSongNFTContract(),
+        method: 'function totalSupply() view returns (uint256)',
+        params: [],
+    });
+}
+
+/** Get token URI */
+export async function getTokenURI(tokenId: bigint): Promise<string> {
+    return readContract({
+        contract: getSongNFTContract(),
+        method: 'function tokenURI(uint256 _tokenId) view returns (string)',
+        params: [tokenId],
+    });
+}
+
+/** Get marketplace listing count */
+export async function getTotalListings(): Promise<bigint> {
+    return readContract({
+        contract: getMarketplaceContract(),
+        method: 'function totalListings() view returns (uint256)',
+        params: [],
+    });
+}
+
+// ────────────────────────────────────────────
+// WRITE: NFT Minting (DropERC721)
+// ────────────────────────────────────────────
+
+/**
+ * Step 1: Lazy mint NFTs (creator uploads metadata, we register tokens on-chain).
+ * Only the admin/minter role can call this.
+ * Returns the batch ID.
+ */
+export async function lazyMintSongNFT(
+    account: Account,
+    amount: number,
+    baseURI: string,
+): Promise<{ success: boolean; batchId?: string; error?: string }> {
+    try {
+        const tx = prepareContractCall({
+            contract: getSongNFTContract(),
+            method: 'function lazyMint(uint256 _amount, string _baseURIForTokens, bytes _data) returns (uint256 batchId)',
+            params: [BigInt(amount), baseURI, '0x'],
+        });
+        const result = await sendTransaction({ account, transaction: tx });
+        console.log('[blockchain] lazyMint tx:', result.transactionHash);
+        return { success: true, batchId: result.transactionHash };
+    } catch (err: any) {
+        console.error('[blockchain] lazyMint error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Step 2: Claim (mint) an NFT. Buyer calls this to mint from a lazy-minted batch.
+ * Respects claim conditions (price, allowlist, supply limits).
+ */
+export async function claimSongNFT(
+    account: Account,
+    receiver: string,
+    quantity: number,
+    currency: string,
+    pricePerToken: bigint,
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    try {
+        // Default allowlist proof (no allowlist for public mint)
+        const allowlistProof = {
+            proof: [] as `0x${string}`[],
+            quantityLimitPerWallet: BigInt(0),
+            pricePerToken: BigInt(0),
+            currency: '0x0000000000000000000000000000000000000000' as `0x${string}`,
+        };
+
+        const tx = prepareContractCall({
+            contract: getSongNFTContract(),
+            method: 'function claim(address _receiver, uint256 _quantity, address _currency, uint256 _pricePerToken, (bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable',
+            params: [
+                receiver as `0x${string}`,
+                BigInt(quantity),
+                currency as `0x${string}`,
+                pricePerToken,
+                allowlistProof,
+                '0x' as `0x${string}`,
+            ],
+            value: pricePerToken * BigInt(quantity), // send native token if paying in ETH/MATIC
+        });
+
+        const result = await sendTransaction({ account, transaction: tx });
+        console.log('[blockchain] claim tx:', result.transactionHash);
+        return { success: true, txHash: result.transactionHash };
+    } catch (err: any) {
+        console.error('[blockchain] claim error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+// ────────────────────────────────────────────
+// WRITE: Marketplace (MarketplaceV3)
+// ────────────────────────────────────────────
+
+/** Native token address placeholder used by MarketplaceV3 */
+const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+/**
+ * Create a direct listing on the marketplace.
+ */
+export async function createListing(
+    account: Account,
+    params: {
+        assetContract: string;
+        tokenId: bigint;
+        quantity: bigint;
+        currency: string;
+        pricePerToken: bigint;
+        startTimestamp: bigint;
+        endTimestamp: bigint;
+        reserved: boolean;
+    },
+): Promise<{ success: boolean; listingId?: string; txHash?: string; error?: string }> {
+    try {
+        const listingParams = {
+            assetContract: params.assetContract as `0x${string}`,
+            tokenId: params.tokenId,
+            quantity: params.quantity,
+            currency: (params.currency || NATIVE_TOKEN) as `0x${string}`,
+            pricePerToken: params.pricePerToken,
+            startTimestamp: params.startTimestamp,
+            endTimestamp: params.endTimestamp,
+            reserved: params.reserved,
+        };
+
+        const tx = prepareContractCall({
+            contract: getMarketplaceContract(),
+            method: 'function createListing((address assetContract, uint256 tokenId, uint256 quantity, address currency, uint256 pricePerToken, uint128 startTimestamp, uint128 endTimestamp, bool reserved) _params) returns (uint256 listingId)',
+            params: [listingParams],
+        });
+
+        const result = await sendTransaction({ account, transaction: tx });
+        console.log('[blockchain] createListing tx:', result.transactionHash);
+        return { success: true, txHash: result.transactionHash };
+    } catch (err: any) {
+        console.error('[blockchain] createListing error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Buy from a direct listing.
+ */
+export async function buyFromListing(
+    account: Account,
+    listingId: bigint,
+    buyFor: string,
+    quantity: bigint,
+    currency: string,
+    totalPrice: bigint,
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    try {
+        const tx = prepareContractCall({
+            contract: getMarketplaceContract(),
+            method: 'function buyFromListing(uint256 _listingId, address _buyFor, uint256 _quantity, address _currency, uint256 _expectedTotalPrice) payable',
+            params: [
+                listingId,
+                buyFor as `0x${string}`,
+                quantity,
+                currency as `0x${string}`,
+                totalPrice,
+            ],
+            value: currency.toLowerCase() === NATIVE_TOKEN.toLowerCase() ? totalPrice : BigInt(0),
+        });
+
+        const result = await sendTransaction({ account, transaction: tx });
+        console.log('[blockchain] buyFromListing tx:', result.transactionHash);
+        return { success: true, txHash: result.transactionHash };
+    } catch (err: any) {
+        console.error('[blockchain] buyFromListing error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Cancel a direct listing.
+ */
+export async function cancelListingOnChain(
+    account: Account,
+    listingId: bigint,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const tx = prepareContractCall({
+            contract: getMarketplaceContract(),
+            method: 'function cancelListing(uint256 _listingId)',
+            params: [listingId],
+        });
+        await sendTransaction({ account, transaction: tx });
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+}
+
+// ────────────────────────────────────────────
+// WRITE: Split (revenue distribution)
+// ────────────────────────────────────────────
+
+/**
+ * Distribute accumulated native token (MATIC) to all payees.
+ */
+export async function distributeSplitNative(
+    account: Account,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const tx = prepareContractCall({
+            contract: getSplitContract(),
+            method: 'function distribute()',
+            params: [],
+        });
+        await sendTransaction({ account, transaction: tx });
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Distribute accumulated ERC20 token to all payees.
+ */
+export async function distributeSplitERC20(
+    account: Account,
+    tokenAddress: string,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const tx = prepareContractCall({
+            contract: getSplitContract(),
+            method: 'function distribute(address token)',
+            params: [tokenAddress as `0x${string}`],
+        });
+        await sendTransaction({ account, transaction: tx });
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+}
+
+// ────────────────────────────────────────────
+// HIGH-LEVEL: Combined on-chain + off-chain flows
 // ────────────────────────────────────────────
 
 /**
  * Create an NFT release tier for a song.
- *
- * - If contract is deployed: mints on-chain + creates DB record
- * - If not deployed (MVP): creates DB record only with contract_address = null
+ * 1. Stores the release in Supabase
+ * 2. If account provided, lazy-mints on-chain
  *
  * The DB trigger enforces SUM(allocated_royalty_percent) <= 50 per song.
  */
-export async function createNFTRelease(config: MintConfig): Promise<{
+export async function createNFTRelease(
+    config: MintConfig,
+    account?: Account,
+): Promise<{
     success: boolean;
     releaseId?: string;
     error?: string;
-    contractPending?: boolean;
 }> {
     try {
         // 1. Create the release record in Supabase
@@ -73,8 +353,8 @@ export async function createNFTRelease(config: MintConfig): Promise<{
             .from('nft_releases')
             .insert({
                 song_id: config.songId,
-                chain_id: '84532', // Base Sepolia
-                contract_address: isContractDeployed() ? CONTRACTS.SONG_NFT : null,
+                chain_id: '80002',
+                contract_address: CONTRACTS.SONG_NFT,
                 tier_name: config.tierName,
                 rarity: config.rarity,
                 total_supply: config.totalSupply,
@@ -87,38 +367,25 @@ export async function createNFTRelease(config: MintConfig): Promise<{
             .single();
 
         if (dbError) {
-            // Check if it's the royalty cap trigger
             if (dbError.message?.includes('50')) {
                 return { success: false, error: 'Total NFT royalty allocation would exceed 50% for this song.' };
             }
             return { success: false, error: dbError.message };
         }
 
-        // 2. If contract is deployed, mint on-chain
-        if (isContractDeployed()) {
-            try {
-                // TODO Phase 3: Call ERC-1155 mint function
-                // const contract = getContractInstance(CONTRACTS.SONG_NFT);
-                // const tx = prepareContractCall({
-                //     contract,
-                //     method: "function lazyMint(uint256 amount, string baseURI, bytes data)",
-                //     params: [BigInt(config.totalSupply), metadataUri, "0x"],
-                // });
-                // const result = await sendTransaction({ account, transaction: tx });
-                console.log('[blockchain] On-chain mint will be implemented in Phase 3');
-            } catch (chainErr) {
-                console.error('[blockchain] On-chain mint failed:', chainErr);
-                // DB record still exists; can retry on-chain later
+        // 2. Lazy-mint on-chain if account is available
+        if (account && isContractReady()) {
+            const mintResult = await lazyMintSongNFT(
+                account,
+                config.totalSupply,
+                config.metadataUri,
+            );
+            if (!mintResult.success) {
+                console.warn('[blockchain] On-chain lazy mint failed, DB record still created:', mintResult.error);
             }
-        } else {
-            console.log('[blockchain] Contract not deployed. Release created off-chain only.');
         }
 
-        return {
-            success: true,
-            releaseId: release.id,
-            contractPending: !isContractDeployed(),
-        };
+        return { success: true, releaseId: release.id };
     } catch (err: any) {
         console.error('[blockchain] createNFTRelease error:', err);
         return { success: false, error: err.message };
@@ -126,15 +393,16 @@ export async function createNFTRelease(config: MintConfig): Promise<{
 }
 
 /**
- * Mint a specific NFT token (buyer minting from a release).
- * For MVP: creates nft_tokens record + increments minted_count.
+ * Mint (claim) a specific NFT token from a release.
+ * 1. Calls claim on-chain
+ * 2. Creates nft_tokens record in Supabase
  */
 export async function mintToken(
     releaseId: string,
     buyerWallet: string,
+    account?: Account,
 ): Promise<{ success: boolean; tokenId?: string; error?: string }> {
     try {
-        // Check release exists and has supply
         const { data: release } = await supabaseAdmin
             .from('nft_releases')
             .select('*')
@@ -146,10 +414,25 @@ export async function mintToken(
             return { success: false, error: 'Sold out' };
         }
 
-        // Generate token ID
-        const tokenId = `${release.minted_count + 1}`;
+        const tokenIdNum = release.minted_count + 1;
+        const tokenId = `${tokenIdNum}`;
 
-        // Create token record
+        // On-chain claim if account available
+        if (account && isContractReady()) {
+            const priceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
+            const claimResult = await claimSongNFT(
+                account,
+                buyerWallet,
+                1,
+                NATIVE_TOKEN,
+                priceWei,
+            );
+            if (!claimResult.success) {
+                return { success: false, error: `On-chain claim failed: ${claimResult.error}` };
+            }
+        }
+
+        // Create token record in Supabase
         const { data: token, error: tokenErr } = await supabaseAdmin
             .from('nft_tokens')
             .insert({
@@ -160,16 +443,7 @@ export async function mintToken(
             .select()
             .single();
 
-        if (tokenErr) {
-            return { success: false, error: tokenErr.message };
-        }
-
-        // minted_count is auto-incremented by DB trigger
-
-        // TODO Phase 3: On-chain mint via contract call
-        if (isContractDeployed()) {
-            console.log('[blockchain] On-chain claim will be implemented in Phase 3');
-        }
+        if (tokenErr) return { success: false, error: tokenErr.message };
 
         return { success: true, tokenId: token.id };
     } catch (err: any) {
@@ -177,24 +451,24 @@ export async function mintToken(
     }
 }
 
-// ────────────────────────────────────────────
-// Marketplace
-// ────────────────────────────────────────────
-
 /**
  * List an NFT for sale on the marketplace.
- * Creates a listing record. On-chain listing will be added in Phase 4.
+ * 1. Creates on-chain listing via MarketplaceV3
+ * 2. Creates listing record in Supabase
  */
-export async function listForSale(config: ListingConfig): Promise<{
-    success: boolean;
-    listingId?: string;
-    error?: string;
-}> {
+export async function listForSale(
+    config: {
+        nftTokenId: string;
+        priceEth: number;
+        sellerWallet: string;
+    },
+    account?: Account,
+): Promise<{ success: boolean; listingId?: string; error?: string }> {
     try {
         // Verify ownership
         const { data: token } = await supabaseAdmin
             .from('nft_tokens')
-            .select('id, owner_wallet_address')
+            .select('id, owner_wallet_address, token_id')
             .eq('id', config.nftTokenId)
             .single();
 
@@ -203,6 +477,31 @@ export async function listForSale(config: ListingConfig): Promise<{
             return { success: false, error: 'Not the token owner' };
         }
 
+        // On-chain listing
+        let chainListingId: string | undefined;
+        if (account && isMarketplaceReady()) {
+            const now = BigInt(Math.floor(Date.now() / 1000));
+            const oneYear = now + BigInt(365 * 24 * 60 * 60);
+            const priceWei = BigInt(Math.floor(config.priceEth * 1e18));
+
+            const result = await createListing(account, {
+                assetContract: CONTRACTS.SONG_NFT,
+                tokenId: BigInt(token.token_id),
+                quantity: BigInt(1),
+                currency: NATIVE_TOKEN,
+                pricePerToken: priceWei,
+                startTimestamp: now,
+                endTimestamp: oneYear,
+                reserved: false,
+            });
+
+            if (!result.success) {
+                return { success: false, error: `On-chain listing failed: ${result.error}` };
+            }
+            chainListingId = result.txHash;
+        }
+
+        // Supabase record
         const { data: listing, error } = await supabaseAdmin
             .from('marketplace_listings')
             .insert({
@@ -210,17 +509,12 @@ export async function listForSale(config: ListingConfig): Promise<{
                 seller_wallet: config.sellerWallet.toLowerCase(),
                 price_eth: config.priceEth,
                 is_active: true,
+                chain_listing_id: chainListingId || null,
             })
             .select()
             .single();
 
         if (error) return { success: false, error: error.message };
-
-        // TODO Phase 4: Create on-chain marketplace listing
-        if (isMarketplaceDeployed()) {
-            console.log('[blockchain] On-chain listing will be implemented in Phase 4');
-        }
-
         return { success: true, listingId: listing.id };
     } catch (err: any) {
         return { success: false, error: err.message };
@@ -229,15 +523,13 @@ export async function listForSale(config: ListingConfig): Promise<{
 
 /**
  * Buy an NFT from a marketplace listing.
- * Transfers ownership in DB. On-chain transfer in Phase 4.
  * Secondary royalty (5%) goes to creator only per spec.
  */
-export async function buyListing(config: BuyConfig): Promise<{
-    success: boolean;
-    error?: string;
-}> {
+export async function buyListingFlow(
+    config: { listingId: string; buyerWallet: string },
+    account?: Account,
+): Promise<{ success: boolean; error?: string }> {
     try {
-        // Get listing with full chain
         const { data: listing } = await supabaseAdmin
             .from('marketplace_listings')
             .select(`
@@ -256,9 +548,25 @@ export async function buyListing(config: BuyConfig): Promise<{
 
         if (!listing) return { success: false, error: 'Listing not found or inactive' };
 
+        // On-chain buy
+        if (account && isMarketplaceReady() && listing.chain_listing_id) {
+            const priceWei = BigInt(Math.floor(parseFloat(listing.price_eth) * 1e18));
+            const result = await buyFromListing(
+                account,
+                BigInt(listing.chain_listing_id),
+                config.buyerWallet,
+                BigInt(1),
+                NATIVE_TOKEN,
+                priceWei,
+            );
+            if (!result.success) {
+                return { success: false, error: `On-chain buy failed: ${result.error}` };
+            }
+        }
+
         const now = new Date().toISOString();
 
-        // 1. Mark listing as sold
+        // Mark listing as sold
         await supabaseAdmin
             .from('marketplace_listings')
             .update({
@@ -268,7 +576,7 @@ export async function buyListing(config: BuyConfig): Promise<{
             })
             .eq('id', config.listingId);
 
-        // 2. Transfer token ownership
+        // Transfer token ownership
         await supabaseAdmin
             .from('nft_tokens')
             .update({
@@ -278,8 +586,8 @@ export async function buyListing(config: BuyConfig): Promise<{
             })
             .eq('id', listing.nft_token_id);
 
-        // 3. Record secondary sale royalty event (5% to creator)
-        const salePriceEur = parseFloat(listing.price_eth) * 2500; // Rough ETH→EUR; will use oracle later
+        // Record secondary sale royalty (5% to creator)
+        const salePriceEur = parseFloat(listing.price_eth) * 2500; // rough ETH→EUR; replace with oracle
         const royaltyAmountEur = salePriceEur * 0.05;
         const creatorId = listing.nft_token?.release?.song?.creator_id;
 
@@ -302,15 +610,10 @@ export async function buyListing(config: BuyConfig): Promise<{
                         royalty_event_id: royaltyEvent.id,
                         linked_profile_id: creatorId,
                         share_type: 'direct',
-                        share_percent: 100, // 100% of the 5% goes to creator
+                        share_percent: 100,
                         amount_eur: royaltyAmountEur,
                     });
             }
-        }
-
-        // TODO Phase 4: Execute on-chain transfer + royalty split
-        if (isMarketplaceDeployed()) {
-            console.log('[blockchain] On-chain sale execution will be implemented in Phase 4');
         }
 
         return { success: true };
@@ -320,18 +623,36 @@ export async function buyListing(config: BuyConfig): Promise<{
 }
 
 /**
- * Cancel a marketplace listing (seller only).
+ * Cancel a marketplace listing.
  */
-export async function cancelListing(
+export async function cancelListingFlow(
     listingId: string,
     sellerWallet: string,
+    account?: Account,
 ): Promise<{ success: boolean; error?: string }> {
+    const { data: listing } = await supabaseAdmin
+        .from('marketplace_listings')
+        .select('chain_listing_id')
+        .eq('id', listingId)
+        .eq('seller_wallet', sellerWallet.toLowerCase())
+        .eq('is_active', true)
+        .single();
+
+    if (!listing) return { success: false, error: 'Listing not found' };
+
+    // Cancel on-chain if exists
+    if (account && isMarketplaceReady() && listing.chain_listing_id) {
+        const result = await cancelListingOnChain(account, BigInt(listing.chain_listing_id));
+        if (!result.success) {
+            return { success: false, error: `On-chain cancel failed: ${result.error}` };
+        }
+    }
+
+    // Cancel in Supabase
     const { error } = await supabaseAdmin
         .from('marketplace_listings')
         .update({ is_active: false })
-        .eq('id', listingId)
-        .eq('seller_wallet', sellerWallet.toLowerCase())
-        .eq('is_active', true);
+        .eq('id', listingId);
 
     if (error) return { success: false, error: error.message };
     return { success: true };

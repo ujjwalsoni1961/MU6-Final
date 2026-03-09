@@ -9,7 +9,7 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
-import { thirdwebClient, baseSepolia, supportedWallets } from '../../src/lib/thirdweb';
+import { thirdwebClient, activeChain, supportedWallets } from '../../src/lib/thirdweb';
 
 const isWeb = Platform.OS === 'web';
 
@@ -18,7 +18,7 @@ function WalletConnect() {
     return (
         <ConnectEmbed
             client={thirdwebClient}
-            chain={baseSepolia}
+            chain={activeChain}
             wallets={supportedWallets}
             theme="dark"
             modalSize="compact"
