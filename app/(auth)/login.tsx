@@ -1,21 +1,40 @@
-import React from 'react';
-import { View, Text, Platform } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Wallet, Shield, Brush } from 'lucide-react-native';
+import { Brush, Shield } from 'lucide-react-native';
+import { ConnectEmbed } from 'thirdweb/react';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
+
+import { useTheme } from '../../src/context/ThemeContext';
+import { useAuth } from '../../src/context/AuthContext';
+import { thirdwebClient, baseSepolia, supportedWallets } from '../../src/lib/thirdweb';
 
 const isWeb = Platform.OS === 'web';
 
-import { useTheme } from '../../src/context/ThemeContext';
+/* ─── Shared Thirdweb Connect Embed wrapper ─── */
+function WalletConnect() {
+    return (
+        <ConnectEmbed
+            client={thirdwebClient}
+            chain={baseSepolia}
+            wallets={supportedWallets}
+            theme="dark"
+            modalSize="compact"
+            showThirdwebBranding={false}
+            header={{
+                title: 'Connect to MU6',
+                titleIcon: '',
+            }}
+        />
+    );
+}
 
-/* ─── Reusable Login Button ─── */
-function LoginButton({ label, icon, color, onPress }: {
+/* ─── Reusable Role Button ─── */
+function RoleButton({ label, icon, color, onPress }: {
     label: string; icon?: React.ReactNode; color: string; onPress: () => void;
 }) {
-    const { isDark } = useTheme();
-
     return (
         <AnimatedPressable
             preset="button"
@@ -51,10 +70,36 @@ function LoginButton({ label, icon, color, onPress }: {
 function WebLogin() {
     const router = useRouter();
     const { colors } = useTheme();
+    const { isConnected, isLoading, role } = useAuth();
+
+    // Auto-redirect after wallet connects and profile syncs
+    useEffect(() => {
+        if (isConnected && !isLoading && role) {
+            if (role === 'admin') {
+                router.replace('/(admin)/dashboard');
+            } else if (role === 'creator') {
+                router.replace('/(artist)/dashboard');
+            } else {
+                router.replace('/(consumer)/home');
+            }
+        }
+    }, [isConnected, isLoading, role]);
+
+    // Show loading while profile is syncing after wallet connection
+    if (isConnected && isLoading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#030711' }}>
+                <ActivityIndicator size="large" color="#38b4ba" />
+                <Text style={{ color: '#94a3b8', marginTop: 16, fontSize: 14 }}>
+                    Setting up your profile...
+                </Text>
+            </View>
+        );
+    }
 
     return (
         <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#030711' }}>
-            {/* Left side */}
+            {/* Left side – branding */}
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}>
                 <Image
                     source={require('../../assets/mu6-logo.png')}
@@ -74,25 +119,25 @@ function WebLogin() {
                 </Text>
             </View>
 
-            {/* Right side */}
+            {/* Right side – connect */}
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }}>
                 <View
                     style={{
-                        width: '100%', maxWidth: 380,
+                        width: '100%', maxWidth: 420,
                         backgroundColor: 'rgba(255,255,255,0.03)',
                         borderRadius: 24, padding: 36,
                         borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
                     }}
                 >
-                    <Text style={{ fontSize: 24, fontWeight: '800', color: '#f1f5f9', marginBottom: 4 }}>Welcome</Text>
-                    <Text style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>Connect your wallet to continue.</Text>
+                    <Text style={{ fontSize: 24, fontWeight: '800', color: '#f1f5f9', marginBottom: 4 }}>
+                        Welcome
+                    </Text>
+                    <Text style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>
+                        Connect your wallet to continue.
+                    </Text>
 
-                    <LoginButton
-                        label="Connect Wallet"
-                        icon={<Wallet size={18} color="#38b4ba" />}
-                        color="#38b4ba"
-                        onPress={() => router.replace('/(consumer)/home')}
-                    />
+                    {/* Thirdweb Connect Embed – replaces mock wallet button */}
+                    <WalletConnect />
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 20 }}>
                         <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
@@ -100,14 +145,14 @@ function WebLogin() {
                         <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
                     </View>
 
-                    <LoginButton
+                    <RoleButton
                         label="Creator Dashboard"
                         icon={<Brush size={16} color="#8b5cf6" />}
                         color="#8b5cf6"
                         onPress={() => router.push('/(auth)/creator-register')}
                     />
 
-                    <LoginButton
+                    <RoleButton
                         label="Super Admin"
                         icon={<Shield size={16} color="#f59e0b" />}
                         color="#f59e0b"
@@ -122,6 +167,31 @@ function WebLogin() {
 /* ─── Mobile Login ─── */
 function MobileLogin() {
     const router = useRouter();
+    const { isConnected, isLoading, role } = useAuth();
+
+    // Auto-redirect after wallet connects
+    useEffect(() => {
+        if (isConnected && !isLoading && role) {
+            if (role === 'admin') {
+                router.replace('/(admin)/dashboard');
+            } else if (role === 'creator') {
+                router.replace('/(artist)/dashboard');
+            } else {
+                router.replace('/(consumer)/home');
+            }
+        }
+    }, [isConnected, isLoading, role]);
+
+    if (isConnected && isLoading) {
+        return (
+            <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#38b4ba" />
+                <Text style={{ color: '#94a3b8', marginTop: 16, fontSize: 14 }}>
+                    Setting up your profile...
+                </Text>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
@@ -137,13 +207,9 @@ function MobileLogin() {
                 MUSIC. OWNED.
             </Text>
 
-            <View style={{ marginTop: 60, width: 280 }}>
-                <LoginButton
-                    label="Connect Wallet"
-                    icon={<Wallet size={18} color="#38b4ba" />}
-                    color="#38b4ba"
-                    onPress={() => router.replace('/(consumer)/home')}
-                />
+            <View style={{ marginTop: 40, width: 320, alignItems: 'center' }}>
+                {/* Thirdweb Connect Embed – replaces mock wallet button */}
+                <WalletConnect />
             </View>
         </SafeAreaView>
     );

@@ -4,9 +4,11 @@ import { View, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { ThirdwebProvider } from 'thirdweb/react';
 import AnimatedBackground from '../src/components/shared/AnimatedBackground';
 
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
+import { AuthProvider } from '../src/context/AuthContext';
 
 function MainLayout() {
     const isWeb = Platform.OS === 'web';
@@ -32,9 +34,13 @@ function MainLayout() {
 export default function RootLayout() {
     return (
         <SafeAreaProvider>
-            <ThemeProvider>
-                <MainLayout />
-            </ThemeProvider>
+            <ThirdwebProvider>
+                <ThemeProvider>
+                    <AuthProvider>
+                        <MainLayout />
+                    </AuthProvider>
+                </ThemeProvider>
+            </ThirdwebProvider>
         </SafeAreaProvider>
     );
 }
