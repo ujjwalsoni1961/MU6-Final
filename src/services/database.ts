@@ -715,12 +715,18 @@ export function getPublicUrl(bucket: 'covers' | 'avatars', path: string): string
     return data.publicUrl;
 }
 
-/** Get a signed URL for private audio files */
+/** Get a signed URL for private audio files.
+ *  Uses the admin client because the audio bucket is private
+ *  and the anon key doesn't have RLS read access to storage.objects.
+ */
 export async function getAudioUrl(path: string, expiresIn = 3600): Promise<string | null> {
-    const { data, error } = await supabase.storage
+    const { data, error } = await supabaseAdmin.storage
         .from('audio')
         .createSignedUrl(path, expiresIn);
-    if (error || !data) return null;
+    if (error || !data) {
+        console.error('[db] getAudioUrl error:', error);
+        return null;
+    }
     return data.signedUrl;
 }
 

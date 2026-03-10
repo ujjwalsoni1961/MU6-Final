@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { View, Text, Platform, Dimensions, ScrollView, Animated, PanResponder } from 'react-native';
+import { View, Text, Platform, Dimensions, ScrollView, Animated, PanResponder, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { Play, Pause, SkipBack, SkipForward, ChevronDown, Shuffle, Repeat, MoreHorizontal, Volume2, Mic2, ListMusic, Airplay } from 'lucide-react-native';
@@ -12,7 +12,7 @@ const isWeb = Platform.OS === 'web';
 
 export default function FullPlayer() {
     const { isDark, colors } = useTheme();
-    const { currentSong, isPlaying, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious } = usePlayer();
+    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious } = usePlayer();
 
     // Animation for slide-in
     const slideAnim = useRef(new Animated.Value(height)).current;
@@ -109,7 +109,7 @@ export default function FullPlayer() {
         >
             {/* Dynamic Background Gradient */}
             <LinearGradient
-                colors={[currentSong.dominantColor || colors.accent.cyan, isDark ? '#030711' : '#fff']}
+                colors={[(currentSong as any).dominantColor || colors.accent.cyan, isDark ? '#030711' : '#fff']}
                 style={{ position: 'absolute', top: 0, left: 0, right: 0, height: height * 0.6, opacity: 0.3 }}
             />
 
@@ -133,7 +133,7 @@ export default function FullPlayer() {
                 <Animated.View style={{
                     width: width - 80, height: width - 80, maxWidth: 400, maxHeight: 400,
                     borderRadius: 24,
-                    shadowColor: currentSong.dominantColor || colors.accent.cyan,
+                    shadowColor: (currentSong as any).dominantColor || colors.accent.cyan,
                     shadowOffset: { width: 0, height: 20 },
                     shadowOpacity: isDark ? 0.3 : 0.2,
                     shadowRadius: 30,
@@ -167,11 +167,11 @@ export default function FullPlayer() {
                     }}>
                         <View style={{
                             position: 'absolute', left: 0, top: 0, bottom: 0, width: `${progressPercent}%`,
-                            backgroundColor: currentSong.dominantColor || colors.accent.cyan, borderRadius: 2
+                            backgroundColor: (currentSong as any).dominantColor || colors.accent.cyan, borderRadius: 2
                         }} />
                         <View style={{
                             position: 'absolute', left: `${progressPercent}%`, top: -5, width: 14, height: 14, borderRadius: 7,
-                            backgroundColor: isDark ? (currentSong.dominantColor || colors.accent.cyan) : '#fff',
+                            backgroundColor: isDark ? ((currentSong as any).dominantColor || colors.accent.cyan) : '#fff',
                             shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4,
                             transform: [{ translateX: -7 }]
                         }} />
@@ -203,7 +203,9 @@ export default function FullPlayer() {
                             shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 16, elevation: 8,
                         }}
                     >
-                        {isPlaying ? (
+                        {isBuffering ? (
+                            <ActivityIndicator size="small" color={isDark ? '#000' : '#fff'} />
+                        ) : isPlaying ? (
                             <Pause size={32} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} />
                         ) : (
                             <Play size={32} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} style={{ marginLeft: 4 }} />

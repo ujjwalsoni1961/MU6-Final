@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, Pressable, Animated, Platform } from 'react-native';
+import { View, Text, Pressable, Animated, Platform, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import {
@@ -13,13 +13,13 @@ import WebPlayerExpanded from './WebPlayerExpanded';
 export default function WebPlayerBar() {
     const { isDark, colors } = useTheme();
     const {
-        currentSong, isPlaying, togglePlay, currentTime, duration,
-        seekTo, skipNext, skipPrevious,
+        currentSong, isPlaying, isBuffering, togglePlay, currentTime, duration,
+        seekTo, skipNext, skipPrevious, volume, setVolume,
     } = usePlayer();
 
     const [isExpanded, setIsExpanded] = useState(false);
-    const [volume, setVolume] = useState(0.7);
     const [isMuted, setIsMuted] = useState(false);
+    const [prevVolume, setPrevVolume] = useState(0.7);
     const [isDraggingProgress, setIsDraggingProgress] = useState(false);
     const [isDraggingVolume, setIsDraggingVolume] = useState(false);
     const progressBarRef = useRef<View>(null);
@@ -61,6 +61,17 @@ export default function WebPlayerBar() {
             const percent = Math.max(0, Math.min(1, clickX / rect.width));
             setVolume(percent);
             if (percent > 0) setIsMuted(false);
+        }
+    };
+
+    const toggleMute = () => {
+        if (isMuted) {
+            setVolume(prevVolume || 0.7);
+            setIsMuted(false);
+        } else {
+            setPrevVolume(volume);
+            setVolume(0);
+            setIsMuted(true);
         }
     };
 
@@ -166,7 +177,9 @@ export default function WebPlayerBar() {
                                 alignItems: 'center', justifyContent: 'center',
                             }}
                         >
-                            {isPlaying ? (
+                            {isBuffering ? (
+                                <ActivityIndicator size="small" color={isDark ? '#000' : '#fff'} />
+                            ) : isPlaying ? (
                                 <Pause size={16} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} />
                             ) : (
                                 <Play size={16} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} style={{ marginLeft: 2 }} />
@@ -253,7 +266,7 @@ export default function WebPlayerBar() {
                     <AnimatedPressable
                         preset="icon"
                         hapticType="none"
-                        onPress={() => setIsMuted(!isMuted)}
+                        onPress={toggleMute}
                         style={{
                             padding: 6,
                             borderRadius: 12,

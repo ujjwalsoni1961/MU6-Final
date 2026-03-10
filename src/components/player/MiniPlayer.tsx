@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Platform, Animated } from 'react-native';
+import { View, Text, Platform, Animated, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { Play, Pause, X, Heart } from 'lucide-react-native';
@@ -8,7 +8,7 @@ import { usePlayer } from '../../context/PlayerContext';
 
 export default function MiniPlayer() {
     const { isDark, colors } = useTheme();
-    const { currentSong, isPlaying, togglePlay, openFullPlayer, dismissPlayer } = usePlayer();
+    const { currentSong, isPlaying, isBuffering, togglePlay, openFullPlayer, dismissPlayer } = usePlayer();
     const slideAnim = useRef(new Animated.Value(100)).current; // Start off-screen (below)
     const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -90,7 +90,9 @@ export default function MiniPlayer() {
                         alignItems: 'center' as const, justifyContent: 'center' as const,
                     }}
                 >
-                    {isPlaying ? (
+                    {isBuffering ? (
+                        <ActivityIndicator size="small" color={isDark ? '#000' : '#fff'} />
+                    ) : isPlaying ? (
                         <Pause size={18} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} />
                     ) : (
                         <Play size={18} color={isDark ? '#000' : '#fff'} fill={isDark ? '#000' : '#fff'} style={{ marginLeft: 2 }} />
