@@ -12,11 +12,14 @@ config.resolver.unstable_conditionNames = [
 ];
 
 // Stub out native-only modules that thirdweb dynamically imports
-// but aren't needed for our auth flow (in-app wallet + MetaMask + Rabby)
+// but aren't needed for our auth flow (in-app wallet + MetaMask + Rabby).
+// Thirdweb bundles Coinbase wallet code that tries to import these at runtime.
 const emptyModule = path.resolve(__dirname, 'src/lib/empty-module.js');
 config.resolver.extraNodeModules = {
     ...config.resolver.extraNodeModules,
     '@coinbase/wallet-mobile-sdk': emptyModule,
+    '@coinbase/wallet-sdk': emptyModule,
+    '@mobile-wallet-protocol/client': emptyModule,
 };
 
 module.exports = withNativeWind(config, { input: './src/styles/global.css' });
