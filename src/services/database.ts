@@ -162,7 +162,15 @@ export async function getSongs(filters?: {
     offset?: number;
     includeDrafts?: boolean;
 }): Promise<Song[]> {
-    let query = supabase
+    // Use admin client for creator-owned queries (their own songs list).
+    // The anon client goes through RLS which checks auth.uid(), but since we
+    // use Thirdweb (not Supabase Auth), auth.uid() is always NULL on the client.
+    // For published songs this doesn't matter (RLS passes on is_published=TRUE),
+    // but for drafts and to guarantee creator queries always work, use admin.
+    const isCreatorQuery = !!filters?.creatorId;
+    const client = isCreatorQuery ? supabaseAdmin : supabase;
+
+    let query = client
         .from('songs')
         .select(`
             *,
@@ -198,7 +206,7 @@ export async function getSongs(filters?: {
 
     const { data, error } = await query;
     if (error) {
-        console.error('[db] getSongs error:', error);
+        console.error('[db] getSongs error:', error, 'filters:', filters);
         return [];
     }
     return (data || []).map(mapSongRow);
@@ -695,8 +703,12 @@ export interface CreatorDashboardStats {
 }
 
 export async function getCreatorDashboard(profileId: string): Promise<CreatorDashboardStats> {
+    // Use admin client — Thirdweb auth means auth.uid() is NULL on anon client,
+    // so RLS may silently filter out creator's own songs/data.
+    const client = supabaseAdmin;
+
     // Songs aggregate
-    const { data: songs } = await supabase
+    const { data: songs } = await client
         .from('songs')
         .select('id, plays_count, likes_count')
         .eq('creator_id', profileId);
@@ -709,7 +721,7 @@ export async function getCreatorDashboard(profileId: string): Promise<CreatorDas
     const songIds = songs?.map((s) => s.id) || [];
     let totalNFTsMinted = 0;
     if (songIds.length > 0) {
-        const { data: releases } = await supabase
+        const { data: releases } = await client
             .from('nft_releases')
             .select('minted_count')
             .in('song_id', songIds);
@@ -719,7 +731,7 @@ export async function getCreatorDashboard(profileId: string): Promise<CreatorDas
     // Revenue from royalty_events
     let totalRevenueEur = 0;
     if (songIds.length > 0) {
-        const { data: events } = await supabase
+        const { data: events } = await client
             .from('royalty_events')
             .select('gross_amount_eur')
             .in('song_id', songIds);
@@ -729,7 +741,7 @@ export async function getCreatorDashboard(profileId: string): Promise<CreatorDas
     // Recent streams
     let recentStreams: StreamEntry[] = [];
     if (songIds.length > 0) {
-        const { data: streams } = await supabase
+        const { data: streams } = await client
             .from('streams')
             .select('*')
             .in('song_id', songIds)
@@ -752,8 +764,8 @@ export async function getStreamsByCreator(
     profileId: string,
     options?: { limit?: number; offset?: number },
 ): Promise<StreamEntry[]> {
-    // Get creator's song IDs first
-    const { data: songs } = await supabase
+    // Get creator's song IDs first (admin client bypasses RLS — Thirdweb auth means auth.uid() is NULL)
+    const { data: songs } = await supabaseAdmin
         .from('songs')
         .select('id')
         .eq('creator_id', profileId);
@@ -761,7 +773,7 @@ export async function getStreamsByCreator(
     const songIds = songs?.map((s) => s.id) || [];
     if (songIds.length === 0) return [];
 
-    let query = supabase
+    let query = supabaseAdmin
         .from('streams')
         .select('*')
         .in('song_id', songIds)
@@ -781,8 +793,8 @@ export async function getStreamsByCreator(
 
 /** Get full royalty summary for a creator across all their songs */
 export async function getCreatorRoyaltySummary(profileId: string): Promise<CreatorRoyaltySummary> {
-    // Get creator's songs
-    const { data: songs } = await supabase
+    // Get creator's songs (admin client bypasses RLS — Thirdweb auth means auth.uid() is NULL)
+    const { data: songs } = await supabaseAdmin
         .from('songs')
         .select('id, title, cover_path, plays_count')
         .eq('creator_id', profileId);
@@ -847,7 +859,7 @@ export async function getCreatorRoyaltySummary(profileId: string): Promise<Creat
     // Get NFTs minted count
     let totalNFTsSold = 0;
     if (songIds.length > 0) {
-        const { data: releases } = await supabase
+        const { data: releases } = await supabaseAdmin
             .from('nft_releases')
             .select('minted_count')
             .in('song_id', songIds);
