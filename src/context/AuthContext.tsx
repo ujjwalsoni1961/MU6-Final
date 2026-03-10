@@ -59,7 +59,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // Create new profile via upsert
             // First, we need a Supabase auth user. For MVP with Thirdweb auth,
             // we use the service role to create the profile directly.
-            const newId = crypto.randomUUID ? crypto.randomUUID() : generateUUID();
+            const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : generateUUID();
 
             const { data: created, error } = await supabaseAdmin
                 .from('profiles')
