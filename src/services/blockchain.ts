@@ -481,11 +481,22 @@ export async function mintToken(
             return { success: false, error: 'Sold out' };
         }
 
-        const tokenIdNum = release.minted_count + 1;
-        const tokenId = `${tokenIdNum}`;
+        // The on-chain token ID is determined by totalSupply() BEFORE claiming.
+        // DropERC721 uses 0-based sequential IDs: first claimed = 0, second = 1, etc.
+        // We read it before claim so we know exactly which token ID was assigned.
+        let onChainTokenId: string | null = null;
 
         // On-chain claim if account available
         if (account && isContractReady()) {
+            // Read the on-chain totalSupply to know the next token ID
+            try {
+                const supply = await getTotalSupply();
+                onChainTokenId = supply.toString(); // next token = current supply (0-based)
+                console.log('[blockchain] next on-chain token ID will be:', onChainTokenId);
+            } catch (supplyErr) {
+                console.warn('[blockchain] Could not read totalSupply:', supplyErr);
+            }
+
             // Read the actual on-chain claim condition to get the correct price.
             // The contract enforces its own price — we must match it exactly,
             // regardless of what the DB release price says.
@@ -514,6 +525,9 @@ export async function mintToken(
                 return { success: false, error: `On-chain claim failed: ${claimResult.error}` };
             }
         }
+
+        // Use on-chain token ID if available, otherwise fall back to minted_count (0-based)
+        const tokenId = onChainTokenId || `${release.minted_count}`;
 
         // Create token record in Supabase (idempotent: ON CONFLICT DO NOTHING)
         // If a previous attempt already created the row (e.g. on-chain succeeded,
