@@ -19,10 +19,11 @@ export const appWallet = inAppWallet({
 });
 
 // External wallets for power users
+// Note: Coinbase wallet removed — requires @coinbase/wallet-mobile-sdk
+// which causes crashes on iOS/Android. Can re-add after installing the native module.
 export const supportedWallets = [
     appWallet,
     createWallet('io.metamask'),
-    createWallet('com.coinbase.wallet'),
     createWallet('io.rabby'),
 ];
 
