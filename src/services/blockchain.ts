@@ -50,6 +50,19 @@ export interface BuyConfig {
 }
 
 // ────────────────────────────────────────────
+// Shared constants
+// ────────────────────────────────────────────
+
+/** Native token address placeholder used by Thirdweb contracts */
+const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+/** Check if an address is the native token (ETH/MATIC) */
+function isNativeToken(addr: string): boolean {
+    const lower = addr.toLowerCase();
+    return lower === NATIVE_TOKEN.toLowerCase() || lower === '0x0000000000000000000000000000000000000000';
+}
+
+// ────────────────────────────────────────────
 // Contract status helpers
 // ────────────────────────────────────────────
 
@@ -141,6 +154,56 @@ export async function getTotalListings(): Promise<bigint> {
 // WRITE: NFT Minting (DropERC721)
 // ────────────────────────────────────────────
 
+/** Maximum uint256 — used as "unlimited" for quantityLimitPerWallet */
+const MAX_UINT256 = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935');
+
+/**
+ * Set claim conditions on the DropERC721 so that `claim()` does not revert
+ * with "!Tokens".  DropERC721 requires at least one active claim-condition
+ * phase before any tokens can be claimed.
+ *
+ * NOTE: DropERC721 has ONE global set of claim conditions (not per-token).
+ * Every call here replaces the previous conditions (resetClaimEligibility = true).
+ *
+ * @param account        The admin/minter account that can set claim conditions
+ * @param pricePerToken  Price in wei (pass 0n for free claims)
+ * @param maxClaimable   Maximum number of tokens that can be claimed under this phase
+ * @param currency       Token address for payment (NATIVE_TOKEN for MATIC/ETH)
+ */
+export async function setClaimConditionsForRelease(
+    account: Account,
+    pricePerToken: bigint,
+    maxClaimable: bigint,
+    currency: string = NATIVE_TOKEN,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        // Build a single public claim-condition phase
+        const claimCondition = {
+            startTimestamp: BigInt(0),                          // active immediately
+            maxClaimableSupply: maxClaimable,                   // total tokens claimable
+            supplyClaimed: BigInt(0),                           // none claimed yet in this phase
+            quantityLimitPerWallet: MAX_UINT256,                // no per-wallet limit
+            merkleRoot: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`, // public (no allowlist)
+            pricePerToken,
+            currency: currency as `0x${string}`,
+            metadata: '',                                       // no metadata
+        };
+
+        const tx = prepareContractCall({
+            contract: getSongNFTContract(),
+            method: 'function setClaimConditions((uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata)[] _conditions, bool _resetClaimEligibility)',
+            params: [[claimCondition], true],
+        });
+
+        const result = await sendTransaction({ account, transaction: tx });
+        console.log('[blockchain] setClaimConditions tx:', result.transactionHash);
+        return { success: true };
+    } catch (err: any) {
+        console.error('[blockchain] setClaimConditions error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
 /**
  * Step 1: Lazy mint NFTs (creator uploads metadata, we register tokens on-chain).
  * Only the admin/minter role can call this.
@@ -212,15 +275,6 @@ export async function claimSongNFT(
 // ────────────────────────────────────────────
 // WRITE: Marketplace (MarketplaceV3)
 // ────────────────────────────────────────────
-
-/** Native token address placeholder used by MarketplaceV3 */
-const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-
-/** Check if an address is the native token (ETH/MATIC) */
-function isNativeToken(addr: string): boolean {
-    const lower = addr.toLowerCase();
-    return lower === NATIVE_TOKEN.toLowerCase() || lower === '0x0000000000000000000000000000000000000000';
-}
 
 /**
  * Check if a chain_listing_id is a valid numeric listing ID (not a tx hash).
@@ -472,6 +526,24 @@ export async function createNFTRelease(
             );
             if (!mintResult.success) {
                 console.warn('[blockchain] On-chain lazy mint failed, DB record still created:', mintResult.error);
+            } else {
+                // 3. Set claim conditions so claim() doesn't revert with "!Tokens".
+                //    We read nextTokenIdToMint to know the total supply cap, then
+                //    set a public claim phase with the release price.
+                try {
+                    const totalMinted = await getNextTokenIdToMint();
+                    const priceWei = BigInt(Math.floor((config.priceEth || 0) * 1e18));
+                    const ccResult = await setClaimConditionsForRelease(
+                        account,
+                        priceWei,
+                        totalMinted, // allow claiming up to all lazy-minted tokens
+                    );
+                    if (!ccResult.success) {
+                        console.warn('[blockchain] setClaimConditions failed (NFTs minted but may not be claimable):', ccResult.error);
+                    }
+                } catch (ccErr: any) {
+                    console.warn('[blockchain] setClaimConditions threw (NFTs minted but may not be claimable):', ccErr.message);
+                }
             }
         }
 
