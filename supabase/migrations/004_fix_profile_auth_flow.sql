@@ -1,0 +1,25 @@
+-- ============================================================
+-- MU6 – Fix Profile Auth Flow for Thirdweb Users
+-- ============================================================
+-- Problem:
+-- profiles.id has FK constraint → auth.users(id).
+-- Thirdweb-authenticated users don't have auth.users rows,
+-- so profile creation via upsert fails silently.
+-- The fallback created phantom in-memory profiles that broke
+-- likes, follows, and other FK-dependent operations.
+--
+-- Solution:
+-- AuthContext.tsx now creates an auth.users entry via the
+-- GoTrue Admin API (/auth/v1/admin/users) BEFORE inserting
+-- the profile. This satisfies the FK constraint while
+-- keeping the existing schema intact.
+--
+-- This migration is a no-op (documentation only).
+-- The actual fix is in:
+-- - src/lib/supabase.ts (createAuthUserForWallet function)
+-- - src/context/AuthContext.tsx (syncProfile rewrite)
+-- ============================================================
+
+-- No DDL changes needed – the auth.users entry is created
+-- programmatically via the GoTrue Admin API at runtime.
+SELECT 1;
