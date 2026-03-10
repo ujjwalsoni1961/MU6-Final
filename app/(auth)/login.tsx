@@ -3,9 +3,7 @@ import { View, Text, Platform, ActivityIndicator, ScrollView } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Brush } from 'lucide-react-native';
 import { ConnectEmbed } from 'thirdweb/react';
-import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
@@ -28,41 +26,6 @@ function WalletConnect({ isDark }: { isDark?: boolean }) {
                 titleIcon: '',
             }}
         />
-    );
-}
-
-/* ─── Reusable Role Button ─── */
-function RoleButton({ label, icon, color, onPress }: {
-    label: string; icon?: React.ReactNode; color: string; onPress: () => void;
-}) {
-    return (
-        <AnimatedPressable
-            preset="button"
-            onPress={onPress}
-            style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: 'transparent',
-                borderRadius: 14,
-                paddingVertical: 16,
-                paddingHorizontal: 24,
-                borderWidth: 1,
-                borderColor: color,
-                marginBottom: 12,
-                width: '100%',
-            }}
-        >
-            {icon}
-            <Text style={{
-                color: color,
-                fontWeight: '700',
-                fontSize: 15,
-                marginLeft: icon ? 10 : 0
-            }}>
-                {label}
-            </Text>
-        </AnimatedPressable>
     );
 }
 
@@ -134,21 +97,8 @@ function WebLogin() {
                         Connect your wallet to continue.
                     </Text>
 
-                    {/* Thirdweb Connect Embed – replaces mock wallet button */}
+                    {/* Thirdweb Connect Embed – auto-creates in-app wallet via email/Google/Apple */}
                     <WalletConnect isDark={isDark} />
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 20 }}>
-                        <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                        <Text style={{ color: '#475569', fontSize: 12, marginHorizontal: 12 }}>want to publish music?</Text>
-                        <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                    </View>
-
-                    <RoleButton
-                        label="Become a Creator"
-                        icon={<Brush size={16} color="#8b5cf6" />}
-                        color="#8b5cf6"
-                        onPress={() => router.push('/(auth)/creator-register')}
-                    />
                 </View>
             </View>
         </View>

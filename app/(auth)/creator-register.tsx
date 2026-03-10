@@ -24,7 +24,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export default function CreatorRegisterScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
-    const { profile, isConnected, refreshProfile } = useAuth();
+    const { profile, isConnected, isLoading, refreshProfile, walletAddress } = useAuth();
 
     const [form, setForm] = useState<CreatorProfile>({
         legalFullName: '',
@@ -53,18 +53,25 @@ export default function CreatorRegisterScreen() {
         return Object.keys(e).length === 0;
     };
 
+    // Redirect to login if not connected (they'll get auto-wallet there)
+    React.useEffect(() => {
+        if (!isLoading && !isConnected) {
+            router.replace('/(auth)/login');
+        }
+    }, [isLoading, isConnected]);
+
     const handleContinue = async () => {
         setSubmitted(true);
         if (!validate()) return;
 
-        // Require wallet connection
-        if (!isConnected || !profile?.id) {
-            const msg = 'Please connect your wallet first. Go back to login and connect your wallet, then return here.';
+        if (!profile?.id) {
+            const msg = 'Please sign in first. You will be redirected to the login screen.';
             if (Platform.OS === 'web') {
                 alert(msg);
             } else {
-                Alert.alert('Wallet Required', msg);
+                Alert.alert('Sign In Required', msg);
             }
+            router.replace('/(auth)/login');
             return;
         }
 
@@ -107,16 +114,19 @@ export default function CreatorRegisterScreen() {
         }
     };
 
-    // Show wallet connection prompt if not connected
-    const walletNotice = !isConnected ? (
+    // Show auto-created wallet info
+    const walletInfo = walletAddress ? (
         <View style={{
-            backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+            backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : '#f0fdfa',
             borderRadius: 12, padding: 14, marginBottom: 20,
             borderWidth: 1,
-            borderColor: isDark ? 'rgba(245,158,11,0.2)' : '#fde68a',
+            borderColor: isDark ? 'rgba(56,180,186,0.2)' : '#ccfbf1',
         }}>
-            <Text style={{ fontSize: 13, color: '#f59e0b', fontWeight: '600' }}>
-                ⚠ Connect your wallet on the login screen before registering as a creator.
+            <Text style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#475569', fontWeight: '600' }}>
+                Your MU6 wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+            </Text>
+            <Text style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8', marginTop: 4 }}>
+                This wallet was auto-created for you. It will be used for minting NFTs and receiving royalties.
             </Text>
         </View>
     ) : null;
@@ -155,20 +165,7 @@ export default function CreatorRegisterScreen() {
                                 Set up your creator profile to get started.
                             </Text>
 
-                            {walletNotice}
-
-                            {isConnected && profile && (
-                                <View style={{
-                                    backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : '#f0fdfa',
-                                    borderRadius: 12, padding: 14, marginBottom: 20,
-                                    borderWidth: 1,
-                                    borderColor: isDark ? 'rgba(56,180,186,0.2)' : '#ccfbf1',
-                                }}>
-                                    <Text style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#475569', fontWeight: '600' }}>
-                                        Connected wallet: {profile.walletAddress?.slice(0, 6)}...{profile.walletAddress?.slice(-4)}
-                                    </Text>
-                                </View>
-                            )}
+                            {walletInfo}
 
                             <RegistrationForm form={form} errors={errors} update={update} />
 
@@ -210,20 +207,7 @@ export default function CreatorRegisterScreen() {
                             </Text>
                         </View>
 
-                        {walletNotice}
-
-                        {isConnected && profile && (
-                            <View style={{
-                                backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : '#f0fdfa',
-                                borderRadius: 12, padding: 14, marginBottom: 20,
-                                borderWidth: 1,
-                                borderColor: isDark ? 'rgba(56,180,186,0.2)' : '#ccfbf1',
-                            }}>
-                                <Text style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#475569', fontWeight: '600' }}>
-                                    Connected wallet: {profile.walletAddress?.slice(0, 6)}...{profile.walletAddress?.slice(-4)}
-                                </Text>
-                            </View>
-                        )}
+                        {walletInfo}
 
                         <RegistrationForm form={form} errors={errors} update={update} />
 

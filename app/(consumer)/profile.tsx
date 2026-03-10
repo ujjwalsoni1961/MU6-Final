@@ -4,7 +4,7 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet } from 'lucide-react-native';
+import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet, Brush, ChevronRight } from 'lucide-react-native';
 import GlassCard from '../../src/components/shared/GlassCard';
 import NFTCard from '../../src/components/shared/NFTCard';
 import TransactionRow from '../../src/components/shared/TransactionRow';
@@ -49,7 +49,7 @@ function StatCard({ icon, value, label }: { icon: React.ReactNode; value: number
 
 export default function ProfileScreen() {
     const router = useRouter();
-    const { profile, walletAddress } = useAuth();
+    const { profile, walletAddress, role } = useAuth();
     const { isDark, colors } = useTheme();
 
     // Real data hooks
@@ -185,6 +185,36 @@ export default function ProfileScreen() {
                             </View>
                         </View>
                         <ExternalLink size={16} color={colors.text.tertiary} />
+                    </AnimatedPressable>
+                )}
+
+                {/* Become a Creator CTA – only for listeners */}
+                {role === 'listener' && (
+                    <AnimatedPressable
+                        preset="row"
+                        onPress={() => router.push('/(auth)/creator-register')}
+                        style={{
+                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                            marginBottom: 24, padding: 20, borderRadius: isWeb ? 16 : 24,
+                            backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.06)',
+                            borderWidth: 1,
+                            borderColor: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.15)',
+                        }}
+                    >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <View style={{
+                                width: 44, height: 44, borderRadius: 22,
+                                backgroundColor: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.1)',
+                                alignItems: 'center', justifyContent: 'center', marginRight: 16,
+                            }}>
+                                <Brush size={22} color="#8b5cf6" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text.primary }}>Become a Creator</Text>
+                                <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }}>Upload music, mint NFTs, earn royalties</Text>
+                            </View>
+                        </View>
+                        <ChevronRight size={18} color="#8b5cf6" />
                     </AnimatedPressable>
                 )}
 

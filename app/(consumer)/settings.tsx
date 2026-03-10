@@ -7,7 +7,7 @@ import {
     ChevronLeft, ChevronRight,
     User, Wallet, Bell, Headphones, Palette,
     Shield, Lock, HelpCircle, Bug, FileText, Eye,
-    LogOut, Moon, Sun
+    LogOut, Moon, Sun, Brush
 } from 'lucide-react-native';
 
 const isWeb = Platform.OS === 'web';
@@ -72,7 +72,7 @@ function Divider() {
 export default function SettingsScreen() {
     const router = useRouter();
     const { isDark, colors, toggleTheme } = useTheme();
-    const { signOut } = useAuth();
+    const { signOut, role } = useAuth();
     const Container = isWeb ? View : SafeAreaView;
 
     const doLogout = async () => {
@@ -124,6 +124,17 @@ export default function SettingsScreen() {
                     <SettingRow icon={<User size={18} color="#38b4ba" />} label="Edit Profile" subtitle="Name, avatar, bio" />
                     <Divider />
                     <SettingRow icon={<Wallet size={18} color="#38b4ba" />} label="Wallet" subtitle="Connected wallets & transactions" />
+                    {role === 'listener' && (
+                        <>
+                            <Divider />
+                            <SettingRow
+                                icon={<Brush size={18} color="#8b5cf6" />}
+                                label="Become a Creator"
+                                subtitle="Upload music, mint NFTs, earn royalties"
+                                onPress={() => router.push('/(auth)/creator-register')}
+                            />
+                        </>
+                    )}
                 </SectionCard>
 
                 {/* Preferences */}
