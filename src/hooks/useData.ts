@@ -127,6 +127,7 @@ export function adaptNFTRelease(r: DbNFTRelease): NFT {
     return {
         id: r.id,
         songId: r.songId,
+        creatorId: r.song?.creatorId || '',
         songTitle: r.song?.title || 'Unknown Song',
         artistName: r.song?.creator?.displayName || 'Unknown Artist',
         coverImage: coverUrl(r.song?.coverPath),
@@ -145,6 +146,7 @@ export function adaptNFTToken(t: DbNFTToken): NFT {
     return {
         id: t.id,
         songId: release?.songId || '',
+        creatorId: (song as any)?.creatorId || '',
         songTitle: song?.title || 'Unknown Song',
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
         coverImage: coverUrl(song?.coverPath),
@@ -166,6 +168,7 @@ export function adaptListing(l: DbListing): NFT & { listingId: string; sellerWal
         listingId: l.id,
         sellerWallet: l.sellerWallet,
         songId: release?.songId || '',
+        creatorId: (song as any)?.creatorId || '',
         songTitle: song?.title || 'Unknown Song',
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
         coverImage: coverUrl(song?.coverPath),

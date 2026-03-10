@@ -3,7 +3,7 @@ import { NFT } from '../types';
 export const nfts: NFT[] = [
     {
         id: 'nft_1',
-        songId: '1',
+        creatorId: '', songId: '1',
         songTitle: 'Neon Nights',
         artistName: 'Cyber Soul',
         coverImage: 'https://picsum.photos/seed/neon/400/400',
@@ -22,7 +22,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_2',
-        songId: '2',
+        creatorId: '', songId: '2',
         songTitle: 'Midnight Drive',
         artistName: 'The Wanderers',
         coverImage: 'https://picsum.photos/seed/midnight/400/400',
@@ -34,7 +34,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_3',
-        songId: '4',
+        creatorId: '', songId: '4',
         songTitle: 'Ethereal Dreams',
         artistName: 'Luna',
         coverImage: 'https://picsum.photos/seed/ethereal/400/400',
@@ -46,7 +46,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_4',
-        songId: '5',
+        creatorId: '', songId: '5',
         songTitle: 'Bass Drop',
         artistName: 'DJ X',
         coverImage: 'https://picsum.photos/seed/bass/400/400',
@@ -58,7 +58,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_5',
-        songId: '7',
+        creatorId: '', songId: '7',
         songTitle: 'Retro Future',
         artistName: 'Synth Squad',
         coverImage: 'https://picsum.photos/seed/retro/400/400',
@@ -70,7 +70,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_6',
-        songId: '8',
+        creatorId: '', songId: '8',
         songTitle: 'Deep Blue',
         artistName: 'Oceanic',
         coverImage: 'https://picsum.photos/seed/deep/400/400',
@@ -82,7 +82,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_7',
-        songId: '10',
+        creatorId: '', songId: '10',
         songTitle: 'Electric Love',
         artistName: 'The Volts',
         coverImage: 'https://picsum.photos/seed/electric/400/400',
@@ -94,7 +94,7 @@ export const nfts: NFT[] = [
     },
     {
         id: 'nft_8',
-        songId: '12',
+        creatorId: '', songId: '12',
         songTitle: 'Golden Hour',
         artistName: 'Sunset Collective',
         coverImage: 'https://picsum.photos/seed/golden/400/400',

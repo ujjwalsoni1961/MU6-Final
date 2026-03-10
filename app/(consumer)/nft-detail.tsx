@@ -31,7 +31,7 @@ export default function NFTDetailScreen() {
     const router = useRouter();
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
-    const { walletAddress } = useAuth();
+    const { walletAddress, profile } = useAuth();
     const account = useActiveAccount();
 
     // Determine view mode: primary (release) or secondary (listing)
@@ -113,6 +113,7 @@ export default function NFTDetailScreen() {
 
     const isPrimary = viewMode === 'release';
     const isSoldOut = isPrimary && nft.editionNumber > nft.totalEditions;
+    const isOwnRelease = isPrimary && profile?.id === nft.creatorId;
     const isOwnListing = listing && walletAddress
         ? listing.sellerWallet.toLowerCase() === walletAddress.toLowerCase()
         : false;
@@ -122,8 +123,8 @@ export default function NFTDetailScreen() {
     const actionSuccess = mintHook.success || buyHook.success;
 
     // Determine button state
-    // Both creators and consumers can mint from primary sales
-    const canMint = isPrimary;
+    // Consumers can collect primary NFTs; creators see stats for their own releases
+    const canMint = isPrimary && !isOwnRelease;
     const canBuy = !isPrimary && !isOwnListing;
 
     let buttonLabel = canMint ? 'Collect Now' : 'Buy Now';
@@ -139,6 +140,11 @@ export default function NFTDetailScreen() {
         buttonColor = '#10b981';
     } else if (isSoldOut) {
         buttonLabel = 'Sold Out';
+        buttonDisabled = true;
+        buttonColor = '#64748b';
+    } else if (isOwnRelease) {
+        // Artist viewing their own release — no collect button
+        buttonLabel = `${nft.editionNumber - 1} of ${nft.totalEditions} Collected`;
         buttonDisabled = true;
         buttonColor = '#64748b';
     } else if (isOwnListing) {

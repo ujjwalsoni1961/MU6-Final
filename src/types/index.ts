@@ -41,6 +41,8 @@ export interface Artist {
 export interface NFT {
     id: string;
     songId: string;
+    /** Profile ID of the song's creator (used to detect own NFTs) */
+    creatorId: string;
     songTitle: string;
     artistName: string;
     coverImage: string;
