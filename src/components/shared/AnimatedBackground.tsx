@@ -83,7 +83,7 @@ export default function AnimatedBackground() {
         : ['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.03)'];
 
     return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
             <Blob
                 size={isDark ? 320 : 260}
                 colors={cyanColors}

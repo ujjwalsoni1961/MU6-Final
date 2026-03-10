@@ -9,7 +9,8 @@
  * Chain: Polygon Amoy testnet (80002) → Polygon mainnet (137) for production.
  */
 
-import { prepareContractCall, readContract, sendTransaction, type Account } from 'thirdweb';
+import { prepareContractCall, readContract, sendTransaction } from 'thirdweb';
+import type { Account } from 'thirdweb/wallets';
 import {
     CONTRACTS,
     getSongNFTContract,

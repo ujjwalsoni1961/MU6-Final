@@ -111,10 +111,8 @@ function WebLogin() {
                     color: '#f1f5f9',
                     marginTop: 12,
                     letterSpacing: 4,
-                    textShadowColor: 'rgba(56,180,186,0.5)',
-                    textShadowOffset: { width: 0, height: 0 },
-                    textShadowRadius: 10
-                }}>
+                    ...(Platform.OS === 'web' ? { textShadow: '0px 0px 10px rgba(56,180,186,0.5)' } : {}),
+                } as any}>
                     MUSIC. OWNED.
                 </Text>
             </View>
@@ -227,7 +225,7 @@ function MobileLogin() {
                   The embed’s internal root has flex:1 which collapses inside
                   ScrollView. Wrapping with minHeight ensures it renders.
                 */}
-                <View style={{ width: '100%', maxWidth: 380, minHeight: 320 }}>
+                <View style={{ width: '100%', maxWidth: 380, minHeight: 400 }}>
                     <WalletConnect isDark={isDark} />
                 </View>
             </ScrollView>

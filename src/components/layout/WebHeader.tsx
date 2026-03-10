@@ -4,7 +4,7 @@ import AnimatedPressable from '../shared/AnimatedPressable';
 import { useRouter } from 'expo-router';
 import { User, Search, ChevronDown, LogOut, Settings, Wallet, X, Clock, TrendingUp } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import { songs } from '../../mock/songs';
+import { useSongs } from '../../hooks/useData';
 import { useTheme } from '../../context/ThemeContext';
 
 interface WebHeaderProps {
@@ -15,7 +15,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
     const router = useRouter();
     const scale = useRef(new Animated.Value(1)).current;
     const [showDropdown, setShowDropdown] = useState(false);
-    const closeTimeout = useRef<NodeJS.Timeout | null>(null);
+    const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { isDark, colors, toggleTheme } = useTheme();
 
     // Search State
@@ -23,10 +23,9 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
     const [isSearchFocused, setIsSearchFocused] = useState(false);
     const [isSearchHovered, setIsSearchHovered] = useState(false); // Replaced Animated.Value with state for Web CSS
 
-    // Filter Logic
-    const filteredSongs = searchQuery.length > 0
-        ? songs.filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()) || s.artistName.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 5)
-        : [];
+    // Live search from Supabase
+    const { data: allSongs } = useSongs({ search: searchQuery, limit: 5 });
+    const filteredSongs = searchQuery.length > 0 ? allSongs : [];
 
     const genres = ['Pop', 'Hiphop', 'R&B', 'Electronic', 'Lo-Fi'];
     const recentSearches = ['Lost in Tokyo', 'Midnight City', 'The Weeknd'];
@@ -153,7 +152,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                                 transitionProperty: 'transform, box-shadow, border-color, background-color',
                                 transitionDuration: '200ms',
                                 transitionTimingFunction: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
-                                cursor: 'text', // Looks like a text input area
+                                cursor: 'text' as any, // Web-only: looks like a text input area
                             } as any
                         })
                     })}
@@ -327,7 +326,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                             overflow: 'hidden',
                             borderWidth: 2.5,
                             borderColor: hovered ? colors.accent.cyan : (isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0'), // Subtle border usually
-                            cursor: 'pointer',
+                            cursor: 'pointer' as any,
                         })}
                     >
                         <Image
@@ -364,7 +363,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                             borderWidth: 1,
                             borderColor: isDark ? colors.border.base : '#f1f5f9',
                             zIndex: 1000,
-                            cursor: 'default',
+                            cursor: 'default' as any,
                         }}
                     >
                         <DropdownItem icon={<User size={16} color={colors.text.secondary} />} label="My Profile" onPress={() => { setShowDropdown(false); router.push('/(consumer)/profile'); }} />

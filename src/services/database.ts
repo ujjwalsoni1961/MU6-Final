@@ -176,7 +176,7 @@ export async function getSongs(filters?: {
         query = query.eq('genre', filters.genre);
     }
     if (filters?.search) {
-        query = query.or(`title.ilike.%${filters.search}%,album.ilike.%${filters.search}%`);
+        query = query.or(`title.ilike.%${filters.search}%,album.ilike.%${filters.search}%,genre.ilike.%${filters.search}%`);
     }
     if (filters?.creatorId) {
         query = query.eq('creator_id', filters.creatorId);

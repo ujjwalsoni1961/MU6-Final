@@ -73,7 +73,7 @@ export default function CreatorRegisterScreen() {
                             style={{ width: 100, height: 100, marginBottom: 20 }}
                             contentFit="contain"
                         />
-                        <Text style={{ fontSize: 18, color: '#f1f5f9', letterSpacing: 4, textShadowColor: 'rgba(56,180,186,0.5)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10 }}>
+                        <Text style={{ fontSize: 18, color: '#f1f5f9', letterSpacing: 4 } as any}>
                             MUSIC. OWNED.
                         </Text>
                         <Text style={{ fontSize: 14, color: '#64748b', marginTop: 12, textAlign: 'center', maxWidth: 260 }}>

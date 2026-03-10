@@ -12,7 +12,10 @@ export const activeChain = defineChain(80002);
 // ── Wallets ──
 // In-app wallet: email, Google, Apple (embedded wallet – no extension needed)
 export const appWallet = inAppWallet({
-    auth: { mode: 'popup' },
+    auth: {
+        mode: 'popup',
+        options: ['email', 'google', 'apple', 'facebook', 'passkey'],
+    },
     metadata: {
         name: 'MU6 Wallet',
     },
