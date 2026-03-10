@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Platform, Alert } from 'react-native';
+import { View, Text, ScrollView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -7,6 +7,8 @@ import { ChevronLeft } from 'lucide-react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { FormField, TextFormInput, RadioGroup, SelectField } from '../../src/components/form';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useAuth } from '../../src/context/AuthContext';
+import { upgradeToCreator } from '../../src/services/database';
 import {
     CREATOR_TYPES,
     ENABLED_CREATOR_TYPES,
@@ -19,15 +21,10 @@ const isWeb = Platform.OS === 'web';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const creatorTypeOptions = CREATOR_TYPES.map((t) => ({
-    value: t,
-    label: CREATOR_TYPE_LABELS[t],
-    disabled: !ENABLED_CREATOR_TYPES.includes(t),
-}));
-
 export default function CreatorRegisterScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
+    const { profile, isConnected, refreshProfile } = useAuth();
 
     const [form, setForm] = useState<CreatorProfile>({
         legalFullName: '',
@@ -38,6 +35,7 @@ export default function CreatorRegisterScreen() {
     });
     const [errors, setErrors] = useState<Partial<Record<keyof CreatorProfile, string>>>({});
     const [submitted, setSubmitted] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     const update = <K extends keyof CreatorProfile>(key: K, value: CreatorProfile[K]) => {
         setForm((prev) => ({ ...prev, [key]: value }));
@@ -55,12 +53,73 @@ export default function CreatorRegisterScreen() {
         return Object.keys(e).length === 0;
     };
 
-    const handleContinue = () => {
+    const handleContinue = async () => {
         setSubmitted(true);
-        if (validate()) {
+        if (!validate()) return;
+
+        // Require wallet connection
+        if (!isConnected || !profile?.id) {
+            const msg = 'Please connect your wallet first. Go back to login and connect your wallet, then return here.';
+            if (Platform.OS === 'web') {
+                alert(msg);
+            } else {
+                Alert.alert('Wallet Required', msg);
+            }
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const country = form.country === 'other' ? (form.countryOther || 'Other') : 'Finland';
+            const result = await upgradeToCreator(profile.id, {
+                displayName: form.stageName.trim(),
+                email: form.email.trim(),
+                creatorType: form.creatorType,
+                country,
+            });
+
+            if (!result) {
+                const msg = 'Failed to create your creator profile. Please try again.';
+                if (Platform.OS === 'web') {
+                    alert(msg);
+                } else {
+                    Alert.alert('Error', msg);
+                }
+                setSaving(false);
+                return;
+            }
+
+            // Refresh the auth context so role updates everywhere
+            await refreshProfile();
+
+            // Navigate to artist dashboard
             router.replace('/(artist)/dashboard');
+        } catch (err: any) {
+            console.error('[creator-register] Error:', err);
+            const msg = err?.message || 'An unexpected error occurred.';
+            if (Platform.OS === 'web') {
+                alert(msg);
+            } else {
+                Alert.alert('Error', msg);
+            }
+        } finally {
+            setSaving(false);
         }
     };
+
+    // Show wallet connection prompt if not connected
+    const walletNotice = !isConnected ? (
+        <View style={{
+            backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : '#fffbeb',
+            borderRadius: 12, padding: 14, marginBottom: 20,
+            borderWidth: 1,
+            borderColor: isDark ? 'rgba(245,158,11,0.2)' : '#fde68a',
+        }}>
+            <Text style={{ fontSize: 13, color: '#f59e0b', fontWeight: '600' }}>
+                ⚠ Connect your wallet on the login screen before registering as a creator.
+            </Text>
+        </View>
+    ) : null;
 
     return (
         <View style={{ flex: 1, backgroundColor: isDark ? '#030711' : '#f8fafc' }}>
@@ -96,13 +155,29 @@ export default function CreatorRegisterScreen() {
                                 Set up your creator profile to get started.
                             </Text>
 
+                            {walletNotice}
+
+                            {isConnected && profile && (
+                                <View style={{
+                                    backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : '#f0fdfa',
+                                    borderRadius: 12, padding: 14, marginBottom: 20,
+                                    borderWidth: 1,
+                                    borderColor: isDark ? 'rgba(56,180,186,0.2)' : '#ccfbf1',
+                                }}>
+                                    <Text style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#475569', fontWeight: '600' }}>
+                                        Connected wallet: {profile.walletAddress?.slice(0, 6)}...{profile.walletAddress?.slice(-4)}
+                                    </Text>
+                                </View>
+                            )}
+
                             <RegistrationForm form={form} errors={errors} update={update} />
 
                             <AnimatedPressable
                                 preset="button"
                                 onPress={handleContinue}
+                                disabled={saving}
                                 style={{
-                                    backgroundColor: '#38b4ba',
+                                    backgroundColor: saving ? '#2d9a9f' : '#38b4ba',
                                     borderRadius: 14,
                                     paddingVertical: 16,
                                     alignItems: 'center',
@@ -111,9 +186,14 @@ export default function CreatorRegisterScreen() {
                                     shadowOffset: { width: 0, height: 4 },
                                     shadowOpacity: 0.3,
                                     shadowRadius: 12,
+                                    opacity: saving ? 0.7 : 1,
                                 }}
                             >
-                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Continue to Dashboard</Text>
+                                {saving ? (
+                                    <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Continue to Dashboard</Text>
+                                )}
                             </AnimatedPressable>
                         </ScrollView>
                     </View>
@@ -130,20 +210,41 @@ export default function CreatorRegisterScreen() {
                             </Text>
                         </View>
 
+                        {walletNotice}
+
+                        {isConnected && profile && (
+                            <View style={{
+                                backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : '#f0fdfa',
+                                borderRadius: 12, padding: 14, marginBottom: 20,
+                                borderWidth: 1,
+                                borderColor: isDark ? 'rgba(56,180,186,0.2)' : '#ccfbf1',
+                            }}>
+                                <Text style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#475569', fontWeight: '600' }}>
+                                    Connected wallet: {profile.walletAddress?.slice(0, 6)}...{profile.walletAddress?.slice(-4)}
+                                </Text>
+                            </View>
+                        )}
+
                         <RegistrationForm form={form} errors={errors} update={update} />
 
                         <AnimatedPressable
                             preset="button"
                             onPress={handleContinue}
+                            disabled={saving}
                             style={{
-                                backgroundColor: '#38b4ba',
+                                backgroundColor: saving ? '#2d9a9f' : '#38b4ba',
                                 borderRadius: 14,
                                 paddingVertical: 16,
                                 alignItems: 'center',
                                 marginTop: 8,
+                                opacity: saving ? 0.7 : 1,
                             }}
                         >
-                            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Continue to Dashboard</Text>
+                            {saving ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Continue to Dashboard</Text>
+                            )}
                         </AnimatedPressable>
                     </ScrollView>
                 </SafeAreaView>

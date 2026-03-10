@@ -160,6 +160,7 @@ export async function getSongs(filters?: {
     creatorId?: string;
     limit?: number;
     offset?: number;
+    includeDrafts?: boolean;
 }): Promise<Song[]> {
     let query = supabase
         .from('songs')
@@ -169,8 +170,15 @@ export async function getSongs(filters?: {
                 id, wallet_address, display_name, bio, creator_type, role, avatar_path, is_verified, country
             )
         `)
-        .eq('is_published', true)
         .order('created_at', { ascending: false });
+
+    // When a creator is viewing their own songs, include drafts.
+    // Otherwise only show published songs.
+    if (filters?.creatorId && filters?.includeDrafts) {
+        // No is_published filter — show all songs for this creator
+    } else {
+        query = query.eq('is_published', true);
+    }
 
     if (filters?.genre) {
         query = query.eq('genre', filters.genre);
@@ -330,6 +338,35 @@ export async function updateSong(
 // ────────────────────────────────────────────
 // ARTISTS / PROFILES
 // ────────────────────────────────────────────
+
+/** Upgrade a listener to creator role. Persists creator profile data. */
+export async function upgradeToCreator(profileId: string, data: {
+    displayName: string;
+    email?: string;
+    creatorType?: string;
+    country?: string;
+    bio?: string;
+}): Promise<ArtistProfile | null> {
+    const { data: updated, error } = await supabaseAdmin
+        .from('profiles')
+        .update({
+            role: 'creator',
+            display_name: data.displayName,
+            email: data.email || null,
+            creator_type: data.creatorType || 'artist',
+            country: data.country || null,
+            bio: data.bio || null,
+        })
+        .eq('id', profileId)
+        .select()
+        .single();
+
+    if (error || !updated) {
+        console.error('[db] upgradeToCreator error:', error);
+        return null;
+    }
+    return mapArtistRow(updated);
+}
 
 export async function getArtists(limit = 20): Promise<ArtistProfile[]> {
     const { data, error } = await supabase

@@ -9,6 +9,7 @@ export interface Song {
     likes: number;
     price: number;
     isNFT: boolean;
+    isPublished?: boolean;
     totalEditions?: number;
     editionsSold?: number;
     lyrics?: string;

@@ -56,8 +56,28 @@ function formatDuration(seconds: number | null | undefined): string {
 // Type Adapters: DB → UI shapes
 // ────────────────────────────────────────────
 
+// Cache for NFT release song IDs (populated on first use)
+let _nftSongIdsCache: Set<string> | null = null;
+let _nftSongIdsCacheTime = 0;
+const NFT_CACHE_TTL = 60_000; // 60 seconds
+
+async function getNFTSongIds(): Promise<Set<string>> {
+    const now = Date.now();
+    if (_nftSongIdsCache && now - _nftSongIdsCacheTime < NFT_CACHE_TTL) {
+        return _nftSongIdsCache;
+    }
+    try {
+        const releases = await db.getNFTReleases();
+        _nftSongIdsCache = new Set(releases.map((r) => r.songId));
+        _nftSongIdsCacheTime = now;
+    } catch {
+        _nftSongIdsCache = new Set();
+    }
+    return _nftSongIdsCache;
+}
+
 /** Convert a DB Song (with joined creator) to the flat UI Song type */
-export function adaptSong(s: DbSong): Song {
+export function adaptSong(s: DbSong, nftSongIds?: Set<string>): Song {
     return {
         id: s.id,
         title: s.title,
@@ -68,7 +88,8 @@ export function adaptSong(s: DbSong): Song {
         plays: s.playsCount,
         likes: s.likesCount,
         price: 0, // filled by NFT context if applicable
-        isNFT: false, // will be enriched per-screen
+        isNFT: nftSongIds ? nftSongIds.has(s.id) : false,
+        isPublished: s.isPublished,
         lyrics: s.description || undefined,
         credits: s.creator
             ? {
@@ -221,8 +242,11 @@ function useAsync<T>(fetcher: () => Promise<T>, initial: T, deps: any[] = []): A
 export function useTrendingSongs(limit = 10) {
     return useAsync(
         async () => {
-            const songs = await db.getTrendingSongs(limit);
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getTrendingSongs(limit),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [limit],
@@ -233,8 +257,11 @@ export function useTrendingSongs(limit = 10) {
 export function useNewReleases(limit = 10) {
     return useAsync(
         async () => {
-            const songs = await db.getNewReleases(limit);
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getNewReleases(limit),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [limit],
@@ -245,8 +272,11 @@ export function useNewReleases(limit = 10) {
 export function useSongs(filters?: { genre?: string; search?: string; limit?: number }) {
     return useAsync(
         async () => {
-            const songs = await db.getSongs(filters);
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getSongs(filters),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [filters?.genre, filters?.search, filters?.limit],
@@ -258,8 +288,11 @@ export function useSongById(id: string | undefined) {
     return useAsync(
         async () => {
             if (!id) return null;
-            const s = await db.getSongById(id);
-            return s ? adaptSong(s) : null;
+            const [s, nftSongIds] = await Promise.all([
+                db.getSongById(id),
+                getNFTSongIds(),
+            ]);
+            return s ? adaptSong(s, nftSongIds) : null;
         },
         null as Song | null,
         [id],
@@ -298,8 +331,11 @@ export function useArtistSongs(creatorId: string | undefined) {
     return useAsync(
         async () => {
             if (!creatorId) return [];
-            const songs = await db.getArtistSongs(creatorId);
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getArtistSongs(creatorId),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [creatorId],
@@ -336,8 +372,11 @@ export function useLikedSongs() {
     return useAsync(
         async () => {
             if (!profile?.id) return [];
-            const songs = await db.getLikedSongs(profile.id);
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getLikedSongs(profile.id),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [profile?.id],
@@ -435,8 +474,11 @@ export function useCreatorSongs() {
     return useAsync(
         async () => {
             if (!profile?.id) return [];
-            const songs = await db.getSongs({ creatorId: profile.id });
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getSongs({ creatorId: profile.id, includeDrafts: true }),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [profile?.id],
@@ -449,8 +491,8 @@ export function useCreatorNFTs() {
     return useAsync(
         async () => {
             if (!profile?.id) return [];
-            // Get all songs first, then get NFT releases for them
-            const songs = await db.getSongs({ creatorId: profile.id });
+            // Get all songs first (including drafts), then get NFT releases for them
+            const songs = await db.getSongs({ creatorId: profile.id, includeDrafts: true });
             const allReleases: NFT[] = [];
             for (const song of songs) {
                 const releases = await db.getNFTReleases(song.id);
@@ -585,8 +627,11 @@ export function useAdminUsers(limit = 50) {
 export function useAdminSongs(limit = 100) {
     return useAsync(
         async () => {
-            const songs = await db.getSongs({ limit });
-            return songs.map(adaptSong);
+            const [songs, nftSongIds] = await Promise.all([
+                db.getSongs({ limit }),
+                getNFTSongIds(),
+            ]);
+            return songs.map((s) => adaptSong(s, nftSongIds));
         },
         [] as Song[],
         [limit],

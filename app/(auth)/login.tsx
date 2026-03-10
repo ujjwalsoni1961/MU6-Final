@@ -3,7 +3,7 @@ import { View, Text, Platform, ActivityIndicator, ScrollView } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Brush, Shield } from 'lucide-react-native';
+import { Brush } from 'lucide-react-native';
 import { ConnectEmbed } from 'thirdweb/react';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 
@@ -139,22 +139,15 @@ function WebLogin() {
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 20 }}>
                         <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                        <Text style={{ color: '#475569', fontSize: 12, marginHorizontal: 12 }}>or continue as</Text>
+                        <Text style={{ color: '#475569', fontSize: 12, marginHorizontal: 12 }}>want to publish music?</Text>
                         <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
                     </View>
 
                     <RoleButton
-                        label="Creator Dashboard"
+                        label="Become a Creator"
                         icon={<Brush size={16} color="#8b5cf6" />}
                         color="#8b5cf6"
                         onPress={() => router.push('/(auth)/creator-register')}
-                    />
-
-                    <RoleButton
-                        label="Super Admin"
-                        icon={<Shield size={16} color="#f59e0b" />}
-                        color="#f59e0b"
-                        onPress={() => router.replace('/(admin)/dashboard')}
                     />
                 </View>
             </View>

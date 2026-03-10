@@ -1,7 +1,9 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, Platform, Alert } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, ScrollView, Platform, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Plus, Trash2, Info, Music, Send, Save } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import * as DocumentPicker from 'expo-document-picker';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import {
     FormField,
@@ -26,6 +28,9 @@ import {
     createInitialUploadFormState,
 } from '../../src/types/creator';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useAuth } from '../../src/context/AuthContext';
+import { createSong, upsertSplitSheet } from '../../src/services/database';
+import { supabaseAdmin } from '../../src/lib/supabase';
 
 const isWeb = Platform.OS === 'web';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -36,12 +41,12 @@ function SectionCard({ children, style }: { children: React.ReactNode; style?: a
         <View style={[{
             backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#ffffff',
             borderRadius: 16,
-            padding: isWeb ? 32 : 20, // Increased padding
-            marginBottom: isWeb ? 32 : 24, // Increased spacing
+            padding: isWeb ? 32 : 20,
+            marginBottom: isWeb ? 32 : 24,
             borderWidth: 1,
-            borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0', // Darker border
+            borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
             ...(isWeb && !isDark ? {
-                shadowColor: '#64748b', // Stronger shadow
+                shadowColor: '#64748b',
                 shadowOffset: { width: 0, height: 6 },
                 shadowOpacity: 0.08,
                 shadowRadius: 16,
@@ -52,11 +57,118 @@ function SectionCard({ children, style }: { children: React.ReactNode; style?: a
     );
 }
 
+// ── File handling helpers ──
+
+interface PickedFile {
+    uri: string;
+    name: string;
+    mimeType?: string;
+    size?: number;
+}
+
+async function pickAudioFile(): Promise<PickedFile | null> {
+    try {
+        const result = await DocumentPicker.getDocumentAsync({
+            type: ['audio/*'],
+            copyToCacheDirectory: true,
+        });
+        if (result.canceled || !result.assets?.length) return null;
+        const asset = result.assets[0];
+        return { uri: asset.uri, name: asset.name, mimeType: asset.mimeType || 'audio/mpeg', size: asset.size };
+    } catch (err) {
+        console.error('[upload] pickAudioFile error:', err);
+        return null;
+    }
+}
+
+async function pickCoverImage(): Promise<PickedFile | null> {
+    try {
+        const result = await DocumentPicker.getDocumentAsync({
+            type: ['image/*'],
+            copyToCacheDirectory: true,
+        });
+        if (result.canceled || !result.assets?.length) return null;
+        const asset = result.assets[0];
+        return { uri: asset.uri, name: asset.name, mimeType: asset.mimeType || 'image/jpeg', size: asset.size };
+    } catch (err) {
+        console.error('[upload] pickCoverImage error:', err);
+        return null;
+    }
+}
+
+async function uploadToStorage(
+    bucket: string,
+    filePath: string,
+    fileUri: string,
+    contentType: string,
+): Promise<string | null> {
+    try {
+        // Fetch file data from URI
+        const response = await fetch(fileUri);
+        const blob = await response.blob();
+
+        const { error } = await supabaseAdmin.storage
+            .from(bucket)
+            .upload(filePath, blob, {
+                contentType,
+                upsert: true,
+            });
+
+        if (error) {
+            console.error(`[upload] Storage upload error (${bucket}/${filePath}):`, error);
+            return null;
+        }
+        return filePath;
+    } catch (err) {
+        console.error(`[upload] Storage upload exception (${bucket}/${filePath}):`, err);
+        return null;
+    }
+}
+
+// ── Parse duration string (MM:SS) to seconds ──
+function parseDuration(duration: string): number | null {
+    const match = duration.match(/^(\d{1,3}):(\d{2})$/);
+    if (!match) return null;
+    return parseInt(match[1]) * 60 + parseInt(match[2]);
+}
+
+// ── Parse date string (DD/MM/YYYY) to ISO ──
+function parseDate(dateStr: string): string | null {
+    const match = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) return null;
+    return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
 export default function CreatorUploadScreen() {
+    const router = useRouter();
     const { isDark, colors } = useTheme();
+    const { profile } = useAuth();
     const [form, setForm] = useState<UploadFormState>(createInitialUploadFormState);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [submitted, setSubmitted] = useState(false);
+    const [publishing, setPublishing] = useState(false);
+    const [savingDraft, setSavingDraft] = useState(false);
+
+    // Track picked files
+    const [audioFile, setAudioFile] = useState<PickedFile | null>(null);
+    const [coverFile, setCoverFile] = useState<PickedFile | null>(null);
+
+    // Pre-fill artist basics from profile
+    useEffect(() => {
+        if (profile) {
+            setForm((prev) => ({
+                ...prev,
+                stageName: prev.stageName || profile.displayName || '',
+                email: prev.email || profile.email || '',
+                country: prev.country || (profile.country?.toLowerCase() === 'finland' ? 'finland' : profile.country ? 'other' : ''),
+                countryOther: prev.countryOther || (profile.country?.toLowerCase() !== 'finland' ? (profile.country || '') : ''),
+                // Pre-fill first split entry with creator name
+                splits: prev.splits.length === 1 && !prev.splits[0].name
+                    ? [{ name: profile.displayName || '', role: 'Artist' as const, percentage: '100', email: profile.email || '' }]
+                    : prev.splits,
+            }));
+        }
+    }, [profile]);
 
     const set = useCallback(<K extends keyof UploadFormState>(key: K, value: UploadFormState[K]) => {
         setForm((prev) => ({ ...prev, [key]: value }));
@@ -103,60 +215,185 @@ export default function CreatorUploadScreen() {
 
     const splitTotal = form.splits.reduce((sum, s) => sum + (parseFloat(s.percentage) || 0), 0);
 
-    const validate = (): boolean => {
+    // ── Audio file picker ──
+    const handlePickAudio = async () => {
+        const file = await pickAudioFile();
+        if (file) {
+            setAudioFile(file);
+            set('audioFileName', file.name);
+        } else if (audioFile) {
+            // Toggle off
+            setAudioFile(null);
+            set('audioFileName', '');
+        }
+    };
+
+    // ── Cover image picker ──
+    const handlePickCover = async () => {
+        const file = await pickCoverImage();
+        if (file) {
+            setCoverFile(file);
+        }
+    };
+
+    const validate = (isDraft: boolean): boolean => {
         const e: Record<string, string> = {};
 
-        if (!form.legalFullName.trim()) e.legalFullName = 'Required';
-        if (!form.stageName.trim()) e.stageName = 'Required';
-        if (!form.email.trim()) e.email = 'Required';
-        else if (!EMAIL_REGEX.test(form.email)) e.email = 'Invalid email';
-        if (!form.country) e.country = 'Required';
-        if (form.country === 'other' && !form.countryOther.trim()) e.countryOther = 'Required';
-
+        // Always required
         if (!form.trackTitle.trim()) e.trackTitle = 'Required';
-        if (!form.genre) e.genre = 'Required';
-        if (form.genre === 'Other' && !form.genreOther.trim()) e.genreOther = 'Required';
-        if (!form.duration.trim()) e.duration = 'Required';
-        if (!form.releaseDate.trim()) e.releaseDate = 'Required';
-        if (form.firstReleaseAnywhere === null) e.firstReleaseAnywhere = 'Required';
 
-        if (!form.trackType) e.trackType = 'Required';
-        if (form.trackType === 'other' && !form.trackTypeOther.trim()) e.trackTypeOther = 'Required';
+        if (!isDraft) {
+            // Only validate all fields for publish
+            if (!form.legalFullName.trim()) e.legalFullName = 'Required';
+            if (!form.stageName.trim()) e.stageName = 'Required';
+            if (!form.email.trim()) e.email = 'Required';
+            else if (!EMAIL_REGEX.test(form.email)) e.email = 'Invalid email';
+            if (!form.country) e.country = 'Required';
+            if (form.country === 'other' && !form.countryOther.trim()) e.countryOther = 'Required';
 
-        if (!form.masterOwnership) e.masterOwnership = 'Required';
-        if (form.masterOwnership === 'shared' && !form.masterOwnershipPercentage.trim()) e.masterOwnershipPercentage = 'Required';
+            if (!form.genre) e.genre = 'Required';
+            if (form.genre === 'Other' && !form.genreOther.trim()) e.genreOther = 'Required';
+            if (!form.duration.trim()) e.duration = 'Required';
+            if (!form.releaseDate.trim()) e.releaseDate = 'Required';
+            if (form.firstReleaseAnywhere === null) e.firstReleaseAnywhere = 'Required';
 
-        if (!form.compositionOwnership) e.compositionOwnership = 'Required';
+            if (!form.trackType) e.trackType = 'Required';
+            if (form.trackType === 'other' && !form.trackTypeOther.trim()) e.trackTypeOther = 'Required';
+            if (!form.masterOwnership) e.masterOwnership = 'Required';
+            if (form.masterOwnership === 'shared' && !form.masterOwnershipPercentage.trim()) e.masterOwnershipPercentage = 'Required';
+            if (!form.compositionOwnership) e.compositionOwnership = 'Required';
 
-        if (splitTotal !== 100) e.splits = `Split total is ${splitTotal}% — must equal 100%`;
-        form.splits.forEach((s, i) => {
-            if (!s.name.trim()) e[`split_${i}_name`] = 'Required';
-            if (!s.percentage.trim()) e[`split_${i}_pct`] = 'Required';
-        });
+            if (splitTotal !== 100) e.splits = `Split total is ${splitTotal}% — must equal 100%`;
+            form.splits.forEach((s, i) => {
+                if (!s.name.trim()) e[`split_${i}_name`] = 'Required';
+                if (!s.percentage.trim()) e[`split_${i}_pct`] = 'Required';
+            });
 
-        if (form.hasSamples === null) e.hasSamples = 'Required';
-        if (form.isFirstRelease === null) e.isFirstRelease = 'Required';
-        if (!form.paymentMethod) e.paymentMethod = 'Required';
-        if (!form.accountHolderName.trim()) e.accountHolderName = 'Required';
-        if (!form.ibanOrAddress.trim()) e.ibanOrAddress = 'Required';
-
-        if (form.legalConfirmations.some((c) => !c)) e.legal = 'All confirmations must be checked';
+            if (form.hasSamples === null) e.hasSamples = 'Required';
+            if (form.isFirstRelease === null) e.isFirstRelease = 'Required';
+            if (!form.paymentMethod) e.paymentMethod = 'Required';
+            if (!form.accountHolderName.trim()) e.accountHolderName = 'Required';
+            if (!form.ibanOrAddress.trim()) e.ibanOrAddress = 'Required';
+            if (form.legalConfirmations.some((c) => !c)) e.legal = 'All confirmations must be checked';
+        }
 
         setErrors(e);
         return Object.keys(e).length === 0;
     };
 
-    const handlePublish = () => {
+    // ── Core save function (used by both Publish and Save Draft) ──
+    const saveSong = async (isPublished: boolean) => {
+        if (!profile?.id) {
+            const msg = 'You must be logged in as a creator to upload tracks.';
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+            return;
+        }
+
+        const isDraft = !isPublished;
         setSubmitted(true);
-        if (validate()) {
-            if (Platform.OS === 'web') {
-                alert('Form validated! Backend integration coming soon.');
-            } else {
-                Alert.alert('Success', 'Form validated! Backend integration coming soon.');
+        if (!validate(isDraft)) return;
+
+        if (isPublished) setPublishing(true);
+        else setSavingDraft(true);
+
+        try {
+            // 1. Upload audio file to Supabase Storage if selected
+            let audioPath: string | null = null;
+            if (audioFile) {
+                const ext = audioFile.name.split('.').pop() || 'mp3';
+                const storagePath = `${profile.id}/${Date.now()}.${ext}`;
+                audioPath = await uploadToStorage('audio', storagePath, audioFile.uri, audioFile.mimeType || 'audio/mpeg');
+                if (!audioPath) {
+                    const msg = 'Failed to upload audio file. Please try again.';
+                    Platform.OS === 'web' ? alert(msg) : Alert.alert('Upload Error', msg);
+                    if (isPublished) setPublishing(false);
+                    else setSavingDraft(false);
+                    return;
+                }
             }
+
+            // 2. Upload cover image if selected
+            let coverPath: string | null = null;
+            if (coverFile) {
+                const ext = coverFile.name.split('.').pop() || 'jpg';
+                const storagePath = `${profile.id}/${Date.now()}-cover.${ext}`;
+                coverPath = await uploadToStorage('covers', storagePath, coverFile.uri, coverFile.mimeType || 'image/jpeg');
+                // Cover is optional, don't block on failure
+            }
+
+            // 3. Parse duration and date
+            const durationSec = parseDuration(form.duration) || undefined;
+            const releaseDate = parseDate(form.releaseDate) || undefined;
+            const genre = form.genre === 'Other' ? form.genreOther : form.genre;
+
+            // 4. Create song in Supabase
+            const song = await createSong({
+                creatorId: profile.id,
+                title: form.trackTitle.trim(),
+                album: form.albumEp || undefined,
+                genre: genre || undefined,
+                description: form.albumEp ? `${form.trackTitle} from ${form.albumEp}` : undefined,
+                durationSeconds: durationSec,
+                audioPath: audioPath || undefined,
+                coverPath: coverPath || undefined,
+                releaseDate,
+                isPublished,
+                trackType: form.trackType || undefined,
+                masterOwnership: form.masterOwnership || undefined,
+                masterOwnershipPct: form.masterOwnershipPercentage ? parseFloat(form.masterOwnershipPercentage) : undefined,
+                compositionOwnership: form.compositionOwnership || undefined,
+                compositionOwnerName: form.compositionOwnerName || undefined,
+                compositionOwnershipPct: form.compositionOwnershipPercentage ? parseFloat(form.compositionOwnershipPercentage) : undefined,
+            });
+
+            if (!song) {
+                const msg = 'Failed to save song. Please try again.';
+                Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+                if (isPublished) setPublishing(false);
+                else setSavingDraft(false);
+                return;
+            }
+
+            // 5. Create split sheet if splits are valid (total = 100)
+            if (splitTotal === 100 && form.splits.length > 0) {
+                const splitData = form.splits.map((s) => ({
+                    partyEmail: s.email || profile.email || 'unknown@mu6.io',
+                    partyName: s.name,
+                    role: s.role.toLowerCase(),
+                    sharePercent: parseFloat(s.percentage) || 0,
+                    linkedProfileId: s.email === profile.email ? profile.id : undefined,
+                    linkedWalletAddress: s.email === profile.email ? (profile.walletAddress || undefined) : undefined,
+                }));
+
+                await upsertSplitSheet(song.id, splitData);
+            }
+
+            // 6. Success — navigate to My Songs
+            const msg = isPublished
+                ? 'Your track has been published on MU6!'
+                : 'Your draft has been saved.';
+
+            if (Platform.OS === 'web') {
+                alert(msg);
+            } else {
+                Alert.alert('Success', msg);
+            }
+
+            router.replace('/(artist)/songs');
+        } catch (err: any) {
+            console.error('[upload] Save error:', err);
+            const msg = err?.message || 'An unexpected error occurred.';
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+        } finally {
+            setPublishing(false);
+            setSavingDraft(false);
         }
     };
 
+    const handlePublish = () => saveSong(true);
+    const handleSaveDraft = () => saveSong(false);
+
+    const isSaving = publishing || savingDraft;
     const errorCount = Object.keys(errors).length;
     const Container = isWeb ? View : SafeAreaView;
 
@@ -167,7 +404,7 @@ export default function CreatorUploadScreen() {
                 contentContainerStyle={{
                     padding: isWeb ? 40 : 16,
                     paddingBottom: 80,
-                    maxWidth: isWeb ? 860 : undefined, // Increased width
+                    maxWidth: isWeb ? 860 : undefined,
                     width: '100%' as any,
                     alignSelf: 'center' as any,
                 }}
@@ -196,7 +433,7 @@ export default function CreatorUploadScreen() {
                             borderWidth: 1, borderColor: isDark ? 'rgba(139,92,246,0.3)' : 'rgba(139,92,246,0.2)',
                         }}>
                             <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6', textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                                Creator: Artist
+                                Creator: {profile?.displayName || 'Artist'}
                             </Text>
                         </View>
                         <Text style={{ fontSize: 14, color: isDark ? colors.text.muted : '#475569' }}>
@@ -274,11 +511,19 @@ export default function CreatorUploadScreen() {
                             horizontal
                         />
                     </FormField>
-                    <FormField label="Audio File" error={errors.audioFileName} style={{ marginBottom: 0 }}>
+                    <FormField label="Audio File" error={errors.audioFileName}>
                         <FilePickerField
                             fileName={form.audioFileName}
-                            onPress={() => set('audioFileName', form.audioFileName ? '' : 'my-track.wav')}
+                            onPress={handlePickAudio}
                             accept="WAV, FLAC, or MP3 — Max 50MB"
+                        />
+                    </FormField>
+                    <FormField label="Cover Image" style={{ marginBottom: 0 }}>
+                        <FilePickerField
+                            fileName={coverFile?.name || ''}
+                            onPress={handlePickCover}
+                            accept="JPG or PNG — Recommended 1000x1000"
+                            icon="document"
                         />
                     </FormField>
                 </SectionCard>
@@ -636,10 +881,11 @@ export default function CreatorUploadScreen() {
                     <AnimatedPressable
                         preset="button"
                         onPress={handlePublish}
+                        disabled={isSaving}
                         style={{
                             flex: isWeb ? 1 : undefined,
                             flexDirection: 'row',
-                            backgroundColor: '#38b4ba',
+                            backgroundColor: publishing ? '#2d9a9f' : '#38b4ba',
                             borderRadius: 12,
                             paddingVertical: 14,
                             alignItems: 'center',
@@ -648,15 +894,23 @@ export default function CreatorUploadScreen() {
                             shadowOffset: { width: 0, height: 4 },
                             shadowOpacity: 0.25,
                             shadowRadius: 12,
+                            opacity: isSaving ? 0.7 : 1,
                         }}
                     >
-                        <Send size={16} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Publish Song</Text>
+                        {publishing ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                            <>
+                                <Send size={16} color="#fff" style={{ marginRight: 8 }} />
+                                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Publish Song</Text>
+                            </>
+                        )}
                     </AnimatedPressable>
 
                     <AnimatedPressable
                         preset="button"
-                        onPress={() => {}}
+                        onPress={handleSaveDraft}
+                        disabled={isSaving}
                         style={{
                             flex: isWeb ? 1 : undefined,
                             flexDirection: 'row',
@@ -667,10 +921,17 @@ export default function CreatorUploadScreen() {
                             justifyContent: 'center',
                             borderWidth: 1,
                             borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+                            opacity: isSaving ? 0.7 : 1,
                         }}
                     >
-                        <Save size={16} color={isDark ? colors.text.secondary : '#64748b'} style={{ marginRight: 8 }} />
-                        <Text style={{ color: isDark ? colors.text.secondary : '#475569', fontWeight: '700', fontSize: 15 }}>Save Draft</Text>
+                        {savingDraft ? (
+                            <ActivityIndicator size="small" color={isDark ? colors.text.secondary : '#64748b'} />
+                        ) : (
+                            <>
+                                <Save size={16} color={isDark ? colors.text.secondary : '#64748b'} style={{ marginRight: 8 }} />
+                                <Text style={{ color: isDark ? colors.text.secondary : '#475569', fontWeight: '700', fontSize: 15 }}>Save Draft</Text>
+                            </>
+                        )}
                     </AnimatedPressable>
                 </View>
 

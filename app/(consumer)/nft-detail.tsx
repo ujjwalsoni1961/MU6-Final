@@ -18,7 +18,7 @@ import {
     useMintToken,
     useBuyListing,
 } from '../../src/hooks/useData';
-import { NFT } from '../../src/types';
+import type { NFT } from '../../src/types';
 
 type ViewMode = 'release' | 'listing';
 
@@ -31,8 +31,9 @@ export default function NFTDetailScreen() {
     const router = useRouter();
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
-    const { walletAddress } = useAuth();
+    const { walletAddress, role } = useAuth();
     const account = useActiveAccount();
+    const isCreator = role === 'creator' || role === 'admin';
 
     // Determine view mode: primary (release) or secondary (listing)
     const viewMode: ViewMode = modeParam === 'listing' ? 'listing' : 'release';
@@ -122,12 +123,16 @@ export default function NFTDetailScreen() {
     const actionSuccess = mintHook.success || buyHook.success;
 
     // Determine button state
-    let buttonLabel = isPrimary ? 'Mint Now' : 'Buy Now';
+    // Minting is creator-only; consumers can only buy from marketplace listings
+    const canMint = isPrimary && isCreator;
+    const canBuy = !isPrimary && !isOwnListing;
+
+    let buttonLabel = canMint ? 'Mint Now' : (isPrimary ? 'Primary Sale · Creator Only' : 'Buy Now');
     let buttonDisabled = false;
     let buttonColor = '#8b5cf6';
 
     if (actionLoading) {
-        buttonLabel = isPrimary ? 'Minting...' : 'Purchasing...';
+        buttonLabel = canMint ? 'Minting...' : 'Purchasing...';
         buttonDisabled = true;
     } else if (actionSuccess) {
         buttonLabel = 'Success!';
@@ -135,6 +140,10 @@ export default function NFTDetailScreen() {
         buttonColor = '#10b981';
     } else if (isSoldOut) {
         buttonLabel = 'Sold Out';
+        buttonDisabled = true;
+        buttonColor = '#64748b';
+    } else if (isPrimary && !isCreator) {
+        // Consumers can't mint — primary sales are creator-only
         buttonDisabled = true;
         buttonColor = '#64748b';
     } else if (isOwnListing) {
@@ -273,7 +282,7 @@ export default function NFTDetailScreen() {
                             {/* Action Button */}
                             <AnimatedPressable
                                 preset="button"
-                                onPress={isPrimary ? handleMint : handleBuyListing}
+                                onPress={canMint ? handleMint : handleBuyListing}
                                 disabled={buttonDisabled}
                                 style={{
                                     backgroundColor: buttonColor,
@@ -293,7 +302,7 @@ export default function NFTDetailScreen() {
                                 ) : (
                                     <>
                                         {!buttonDisabled && (
-                                            isPrimary
+                                            canMint
                                                 ? <Zap size={18} color="#ffffff" />
                                                 : <ShoppingCart size={18} color="#ffffff" />
                                         )}
