@@ -101,6 +101,33 @@ export async function getTokenURI(tokenId: bigint): Promise<string> {
     });
 }
 
+/** Read the active claim condition from the DropERC721 contract */
+export async function getActiveClaimCondition(): Promise<{
+    pricePerToken: bigint;
+    currency: string;
+    maxClaimableSupply: bigint;
+    supplyClaimed: bigint;
+    quantityLimitPerWallet: bigint;
+}> {
+    const conditionId = await readContract({
+        contract: getSongNFTContract(),
+        method: 'function getActiveClaimConditionId() view returns (uint256)',
+        params: [],
+    });
+    const condition = await readContract({
+        contract: getSongNFTContract(),
+        method: 'function getClaimConditionById(uint256 _conditionId) view returns ((uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata))',
+        params: [conditionId],
+    });
+    return {
+        pricePerToken: condition.pricePerToken,
+        currency: condition.currency,
+        maxClaimableSupply: condition.maxClaimableSupply,
+        supplyClaimed: condition.supplyClaimed,
+        quantityLimitPerWallet: condition.quantityLimitPerWallet,
+    };
+}
+
 /** Get marketplace listing count */
 export async function getTotalListings(): Promise<bigint> {
     return readContract({
@@ -420,12 +447,28 @@ export async function mintToken(
 
         // On-chain claim if account available
         if (account && isContractReady()) {
-            const priceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
+            // Read the actual on-chain claim condition to get the correct price.
+            // The contract enforces its own price — we must match it exactly,
+            // regardless of what the DB release price says.
+            let priceWei: bigint;
+            let currency: string;
+            try {
+                const condition = await getActiveClaimCondition();
+                priceWei = condition.pricePerToken;
+                currency = condition.currency;
+                console.log('[blockchain] claim condition price:', priceWei.toString(), 'currency:', currency);
+            } catch (condErr) {
+                // Fallback to DB price if we can't read the condition
+                console.warn('[blockchain] Could not read claim condition, falling back to DB price:', condErr);
+                priceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
+                currency = NATIVE_TOKEN;
+            }
+
             const claimResult = await claimSongNFT(
                 account,
                 buyerWallet,
                 1,
-                NATIVE_TOKEN,
+                currency,
                 priceWei,
             );
             if (!claimResult.success) {
