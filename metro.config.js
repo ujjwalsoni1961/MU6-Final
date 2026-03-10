@@ -11,17 +11,30 @@ config.resolver.unstable_conditionNames = [
     'require',
 ];
 
-// Stub out native-only modules that thirdweb dynamically imports
-// but aren't needed for our auth flow (in-app wallet + MetaMask + Rabby).
-// Thirdweb bundles Coinbase wallet code that tries to import these at runtime,
-// including deep sub-paths like @coinbase/wallet-mobile-sdk/build/...
-// We provide full stub packages with the correct directory structure.
+// Stub out native-only modules that thirdweb statically/dynamically imports
+// but aren't installed. These are for wallet types we don't use (Coinbase)
+// and native crypto modules that thirdweb's in-app wallet code references.
+// Without stubs, Metro fails to resolve them and the app crashes.
 const stubsDir = path.resolve(__dirname, 'src/lib/stubs');
-config.resolver.extraNodeModules = {
-    ...config.resolver.extraNodeModules,
-    '@coinbase/wallet-mobile-sdk': path.resolve(stubsDir, '@coinbase/wallet-mobile-sdk'),
-    '@coinbase/wallet-sdk': path.resolve(stubsDir, '@coinbase/wallet-sdk'),
-    '@mobile-wallet-protocol/client': path.resolve(stubsDir, '@mobile-wallet-protocol/client'),
-};
+const stubModules = [
+    // Coinbase wallet (removed from supportedWallets but thirdweb still bundles code)
+    '@coinbase/wallet-mobile-sdk',
+    '@coinbase/wallet-sdk',
+    '@mobile-wallet-protocol/client',
+    // Native crypto & auth modules (thirdweb in-app wallet internals)
+    'react-native-passkey',
+    'react-native-aes-gcm-crypto',
+    'react-native-quick-crypto',
+    'expo-web-browser',
+    // AWS SDK (thirdweb wallet migration/recovery code)
+    '@aws-sdk/client-kms',
+    '@aws-sdk/client-lambda',
+    '@aws-sdk/credential-providers',
+];
+const extraNodeModules = { ...config.resolver.extraNodeModules };
+for (const mod of stubModules) {
+    extraNodeModules[mod] = path.resolve(stubsDir, mod);
+}
+config.resolver.extraNodeModules = extraNodeModules;
 
 module.exports = withNativeWind(config, { input: './src/styles/global.css' });
