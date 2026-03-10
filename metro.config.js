@@ -28,7 +28,7 @@ const stubModules = [
     'react-native-passkey',
     'react-native-aes-gcm-crypto',
     'react-native-quick-crypto',
-    'expo-web-browser',
+    // Note: expo-web-browser is now properly installed (needed for social auth)
     // AWS SDK (thirdweb wallet migration/recovery code)
     '@aws-sdk/client-kms',
     '@aws-sdk/client-lambda',

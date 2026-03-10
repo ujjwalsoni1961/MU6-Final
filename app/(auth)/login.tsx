@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, Platform, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -14,13 +14,13 @@ import { thirdwebClient, activeChain, supportedWallets } from '../../src/lib/thi
 const isWeb = Platform.OS === 'web';
 
 /* ─── Shared Thirdweb Connect Embed wrapper ─── */
-function WalletConnect() {
+function WalletConnect({ isDark }: { isDark?: boolean }) {
     return (
         <ConnectEmbed
             client={thirdwebClient}
             chain={activeChain}
             wallets={supportedWallets}
-            theme="dark"
+            theme={isDark ? 'dark' : 'light'}
             modalSize="compact"
             showThirdwebBranding={false}
             header={{
@@ -69,7 +69,7 @@ function RoleButton({ label, icon, color, onPress }: {
 /* ─── Web Login ─── */
 function WebLogin() {
     const router = useRouter();
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
     const { isConnected, isLoading, role } = useAuth();
 
     // Auto-redirect after wallet connects and profile syncs
@@ -137,7 +137,7 @@ function WebLogin() {
                     </Text>
 
                     {/* Thirdweb Connect Embed – replaces mock wallet button */}
-                    <WalletConnect />
+                    <WalletConnect isDark={isDark} />
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 20 }}>
                         <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
@@ -167,6 +167,7 @@ function WebLogin() {
 /* ─── Mobile Login ─── */
 function MobileLogin() {
     const router = useRouter();
+    const { colors, isDark } = useTheme();
     const { isConnected, isLoading, role } = useAuth();
 
     // Auto-redirect after wallet connects
@@ -186,7 +187,7 @@ function MobileLogin() {
         return (
             <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
                 <ActivityIndicator size="large" color="#38b4ba" />
-                <Text style={{ color: '#94a3b8', marginTop: 16, fontSize: 14 }}>
+                <Text style={{ color: colors.text.secondary, marginTop: 16, fontSize: 14 }}>
                     Setting up your profile...
                 </Text>
             </SafeAreaView>
@@ -194,23 +195,42 @@ function MobileLogin() {
     }
 
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center' }}>
-            <Image
-                source={require('../../assets/mu6-logo.png')}
-                style={{ width: 140, height: 140, marginBottom: 16 }}
-                contentFit="contain"
-            />
-            <Text style={{
-                fontSize: 18, color: '#f1f5f9', marginTop: 4, letterSpacing: 2,
-                textShadowColor: 'rgba(56,180,186,0.5)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10
-            }}>
-                MUSIC. OWNED.
-            </Text>
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
+            <ScrollView
+                contentContainerStyle={{
+                    flexGrow: 1,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    paddingHorizontal: 24,
+                    paddingVertical: 40,
+                }}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
+                <Image
+                    source={require('../../assets/mu6-logo.png')}
+                    style={{ width: 120, height: 120, marginBottom: 12 }}
+                    contentFit="contain"
+                />
+                <Text style={{
+                    fontSize: 16,
+                    color: colors.text.primary,
+                    letterSpacing: 3,
+                    opacity: 0.6,
+                    marginBottom: 32,
+                }}>
+                    MUSIC  OWNED
+                </Text>
 
-            <View style={{ marginTop: 40, width: 320, alignItems: 'center' }}>
-                {/* Thirdweb Connect Embed – replaces mock wallet button */}
-                <WalletConnect />
-            </View>
+                {/*
+                  Thirdweb ConnectEmbed – matches app theme.
+                  The embed’s internal root has flex:1 which collapses inside
+                  ScrollView. Wrapping with minHeight ensures it renders.
+                */}
+                <View style={{ width: '100%', maxWidth: 380, minHeight: 320 }}>
+                    <WalletConnect isDark={isDark} />
+                </View>
+            </ScrollView>
         </SafeAreaView>
     );
 }
