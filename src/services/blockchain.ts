@@ -12,6 +12,9 @@
 import { prepareContractCall, readContract, sendTransaction } from 'thirdweb';
 import type { Account } from 'thirdweb/wallets';
 import {
+    setClaimConditions as sdkSetClaimConditions,
+} from 'thirdweb/extensions/erc721';
+import {
     CONTRACTS,
     getSongNFTContract,
     getMarketplaceContract,
@@ -154,45 +157,39 @@ export async function getTotalListings(): Promise<bigint> {
 // WRITE: NFT Minting (DropERC721)
 // ────────────────────────────────────────────
 
-/** Maximum uint256 — used as "unlimited" for quantityLimitPerWallet */
-const MAX_UINT256 = BigInt('115792089237316195423570985008687907853269984665640564039457584007913129639935');
-
 /**
  * Set claim conditions on the DropERC721 so that `claim()` does not revert
  * with "!Tokens".  DropERC721 requires at least one active claim-condition
  * phase before any tokens can be claimed.
  *
+ * Uses the Thirdweb SDK v5 high-level `setClaimConditions` extension which
+ * handles ABI encoding, price conversion, and currency resolution correctly.
+ *
  * NOTE: DropERC721 has ONE global set of claim conditions (not per-token).
  * Every call here replaces the previous conditions (resetClaimEligibility = true).
  *
  * @param account        The admin/minter account that can set claim conditions
- * @param pricePerToken  Price in wei (pass 0n for free claims)
+ * @param priceEth       Price in ETH/MATIC (human-readable, e.g. 0.01)
  * @param maxClaimable   Maximum number of tokens that can be claimed under this phase
- * @param currency       Token address for payment (NATIVE_TOKEN for MATIC/ETH)
  */
 export async function setClaimConditionsForRelease(
     account: Account,
-    pricePerToken: bigint,
+    priceEth: number,
     maxClaimable: bigint,
-    currency: string = NATIVE_TOKEN,
 ): Promise<{ success: boolean; error?: string }> {
     try {
-        // Build a single public claim-condition phase
-        const claimCondition = {
-            startTimestamp: BigInt(0),                          // active immediately
-            maxClaimableSupply: maxClaimable,                   // total tokens claimable
-            supplyClaimed: BigInt(0),                           // none claimed yet in this phase
-            quantityLimitPerWallet: MAX_UINT256,                // no per-wallet limit
-            merkleRoot: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`, // public (no allowlist)
-            pricePerToken,
-            currency: currency as `0x${string}`,
-            metadata: '',                                       // no metadata
-        };
-
-        const tx = prepareContractCall({
+        const tx = sdkSetClaimConditions({
             contract: getSongNFTContract(),
-            method: 'function setClaimConditions((uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata)[] _conditions, bool _resetClaimEligibility)',
-            params: [[claimCondition], true],
+            phases: [
+                {
+                    maxClaimableSupply: maxClaimable,
+                    maxClaimablePerWallet: maxClaimable, // no per-wallet limit
+                    price: priceEth,
+                    currencyAddress: NATIVE_TOKEN,
+                    startTime: new Date(0), // active immediately
+                },
+            ],
+            resetClaimEligibility: true,
         });
 
         const result = await sendTransaction({ account, transaction: tx });
@@ -532,10 +529,9 @@ export async function createNFTRelease(
                 //    set a public claim phase with the release price.
                 try {
                     const totalMinted = await getNextTokenIdToMint();
-                    const priceWei = BigInt(Math.floor((config.priceEth || 0) * 1e18));
                     const ccResult = await setClaimConditionsForRelease(
                         account,
-                        priceWei,
+                        config.priceEth || 0,
                         totalMinted, // allow claiming up to all lazy-minted tokens
                     );
                     if (!ccResult.success) {
@@ -613,7 +609,7 @@ export async function mintToken(
                 const totalMinted = await getNextTokenIdToMint();
                 const ccResult = await setClaimConditionsForRelease(
                     account,
-                    priceWei,
+                    release.price_eth || 0,
                     totalMinted,
                 );
                 if (!ccResult.success) {
