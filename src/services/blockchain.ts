@@ -217,6 +217,45 @@ export async function claimSongNFT(
 const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
 /**
+ * Check if the marketplace is approved to transfer NFTs on behalf of the owner,
+ * and approve if not. Required before creating a listing.
+ */
+export async function ensureMarketplaceApproval(
+    account: Account,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const owner = account.address as `0x${string}`;
+        const operator = CONTRACTS.MARKETPLACE as `0x${string}`;
+
+        // Check current approval status
+        const isApproved = await readContract({
+            contract: getSongNFTContract(),
+            method: 'function isApprovedForAll(address owner, address operator) view returns (bool)',
+            params: [owner, operator],
+        });
+
+        if (isApproved) {
+            console.log('[blockchain] Marketplace already approved for', owner);
+            return { success: true };
+        }
+
+        // Approve the marketplace to transfer NFTs
+        console.log('[blockchain] Approving marketplace for', owner);
+        const tx = prepareContractCall({
+            contract: getSongNFTContract(),
+            method: 'function setApprovalForAll(address operator, bool approved)',
+            params: [operator, true],
+        });
+        await sendTransaction({ account, transaction: tx });
+        console.log('[blockchain] Marketplace approval granted');
+        return { success: true };
+    } catch (err: any) {
+        console.error('[blockchain] ensureMarketplaceApproval error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
  * Create a direct listing on the marketplace.
  */
 export async function createListing(
@@ -539,6 +578,13 @@ export async function listForSale(
         // On-chain listing
         let chainListingId: string | undefined;
         if (account && isMarketplaceReady()) {
+            // Step 1: Ensure the marketplace has approval to transfer the seller's NFTs
+            const approvalResult = await ensureMarketplaceApproval(account);
+            if (!approvalResult.success) {
+                return { success: false, error: `Marketplace approval failed: ${approvalResult.error}` };
+            }
+
+            // Step 2: Create the listing
             const now = BigInt(Math.floor(Date.now() / 1000));
             const oneYear = now + BigInt(365 * 24 * 60 * 60);
             const priceWei = BigInt(Math.floor(config.priceEth * 1e18));
