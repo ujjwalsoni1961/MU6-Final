@@ -9,7 +9,7 @@
  *  - Auth-scoped queries (likes, follows, owned NFTs)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/database';
 import * as blockchain from '../services/blockchain';
@@ -212,23 +212,38 @@ function useAsync<T>(fetcher: () => Promise<T>, initial: T, deps: any[] = []): A
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [tick, setTick] = useState(0);
+    const prevDepsRef = useRef<any[]>(deps);
 
     const refresh = useCallback(() => setTick((t) => t + 1), []);
 
     useEffect(() => {
         let cancelled = false;
-        setLoading(true);
+
+        // Check if deps changed (excluding tick)
+        const depsChanged = prevDepsRef.current.some((dep, i) => dep !== deps[i]) || prevDepsRef.current.length !== deps.length;
+        prevDepsRef.current = deps;
+
+        // Only set hard loading if it's initial load or deps changed
+        if (tick === 0 || depsChanged) {
+            setLoading(true);
+            setData(initial); // Reset data on dep change
+        }
+
         setError(null);
         fetcher()
             .then((result) => {
-                if (!cancelled) setData(result);
+                if (!cancelled) {
+                    setData(result);
+                    setLoading(false); // Only set loading false once we have data
+                }
             })
             .catch((err) => {
-                if (!cancelled) setError(err?.message || 'Unknown error');
-            })
-            .finally(() => {
-                if (!cancelled) setLoading(false);
+                if (!cancelled) {
+                    setError(err?.message || 'Unknown error');
+                    setLoading(false); // Make sure to stop loading on error too
+                }
             });
+            
         return () => {
             cancelled = true;
         };

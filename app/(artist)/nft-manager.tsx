@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View, Text, ScrollView, FlatList, Platform, useWindowDimensions,
     ActivityIndicator, Modal, TextInput, Alert,
@@ -12,7 +12,7 @@ import { useCreatorNFTs, useCreatorSongs, useCreateNFTRelease } from '../../src/
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 
 const isWeb = Platform.OS === 'web';
 
@@ -31,8 +31,15 @@ export default function NFTManagerScreen() {
     const account = useActiveAccount();
     const router = useRouter();
     const { data: creatorNFTs, loading, refresh: refreshNFTs } = useCreatorNFTs();
-    const { data: creatorSongs } = useCreatorSongs();
+    const { data: creatorSongs, refresh: refreshSongs } = useCreatorSongs();
     const createRelease = useCreateNFTRelease();
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshNFTs();
+            refreshSongs();
+        }, [refreshNFTs, refreshSongs])
+    );
 
     const numCols = isWeb ? (width > 1000 ? 3 : 2) : 2;
     const Container = isWeb ? View : SafeAreaView;

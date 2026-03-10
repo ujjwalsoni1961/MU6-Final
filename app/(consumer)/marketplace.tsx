@@ -1,7 +1,7 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Zap, Tag } from 'lucide-react-native';
 import TabPill from '../../src/components/shared/TabPill';
 import NFTCard from '../../src/components/shared/NFTCard';
@@ -29,9 +29,16 @@ export default function MarketplaceScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
 
     // Both data sources
-    const { data: nftReleases, loading: releasesLoading } = useNFTReleases();
-    const { data: listings, loading: listingsLoading } = useMarketplaceListings();
+    const { data: nftReleases, loading: releasesLoading, refresh: refreshReleases } = useNFTReleases();
+    const { data: listings, loading: listingsLoading, refresh: refreshListings } = useMarketplaceListings();
     const loading = releasesLoading || listingsLoading;
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshReleases();
+            refreshListings();
+        }, [refreshReleases, refreshListings])
+    );
 
     // Merge drops + listings into a unified list
     const allItems: MarketplaceItem[] = useMemo(() => {

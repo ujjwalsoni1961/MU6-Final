@@ -1,8 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import { BadgeCheck } from 'lucide-react-native';
 import TabPill from '../../src/components/shared/TabPill';
@@ -73,9 +73,17 @@ export default function LibraryScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
 
     // Real data hooks
-    const { data: likedSongs, loading: loadingSongs } = useLikedSongs();
-    const { data: artists, loading: loadingArtists } = useArtists(20);
-    const { data: ownedNFTs, loading: loadingNFTs } = useOwnedNFTs();
+    const { data: likedSongs, loading: loadingSongs, refresh: refreshLiked } = useLikedSongs();
+    const { data: artists, loading: loadingArtists, refresh: refreshArtists } = useArtists(20);
+    const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshLiked();
+            refreshArtists();
+            refreshNFTs();
+        }, [refreshLiked, refreshArtists, refreshNFTs])
+    );
 
     const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
 

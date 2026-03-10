@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, ScrollView, FlatList, Platform, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet, Brush, ChevronRight } from 'lucide-react-native';
 import GlassCard from '../../src/components/shared/GlassCard';
 import NFTCard from '../../src/components/shared/NFTCard';
@@ -53,9 +53,17 @@ export default function ProfileScreen() {
     const { isDark, colors } = useTheme();
 
     // Real data hooks
-    const { data: ownedNFTs, loading: loadingNFTs } = useOwnedNFTs();
-    const { data: likedSongs } = useLikedSongs();
-    const { data: recentTxns, loading: loadingTxns } = useAdminTransactions(5);
+    const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
+    const { data: likedSongs, refresh: refreshLiked } = useLikedSongs();
+    const { data: recentTxns, loading: loadingTxns, refresh: refreshTxns } = useAdminTransactions(5);
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshNFTs();
+            refreshLiked();
+            refreshTxns();
+        }, [refreshNFTs, refreshLiked, refreshTxns])
+    );
 
     const displayName = profile?.displayName || 'Anonymous';
     const avatarUri = profile?.avatarPath

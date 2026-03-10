@@ -4,7 +4,7 @@ import {
     Animated, ActivityIndicator, Modal, TextInput, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Gem, Tag, X, DollarSign } from 'lucide-react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import TabPill from '../../src/components/shared/TabPill';
@@ -39,6 +39,12 @@ export default function CollectionScreen() {
 
     // Real data — owned NFTs with listing status
     const { data: ownedNFTs, loading, refresh } = useOwnedNFTsWithStatus();
+
+    useFocusEffect(
+        useCallback(() => {
+            refresh();
+        }, [refresh])
+    );
 
     // Mutation hooks
     const listForSaleHook = useListForSale();

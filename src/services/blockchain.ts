@@ -59,6 +59,18 @@ export interface BuyConfig {
 /** Native token address placeholder used by Thirdweb contracts */
 const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
+/**
+ * max uint256 – used as "unlimited" maxClaimableSupply.
+ * DropERC721 already enforces nextTokenIdToClaim < nextTokenIdToMint,
+ * so setting maxClaimable to this value is safe and avoids stale caps
+ * that cause the "!Tokens" revert.
+ */
+const MAX_UINT256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
+
+/** Supabase URL for edge function calls */
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
 /** Check if an address is the native token (ETH/MATIC) */
 function isNativeToken(addr: string): boolean {
     const lower = addr.toLowerCase();
@@ -222,6 +234,49 @@ export async function lazyMintSongNFT(
         return { success: true, batchId: result.transactionHash };
     } catch (err: any) {
         console.error('[blockchain] lazyMint error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Server-side lazy mint via the Supabase Edge Function `nft-admin`.
+ * Uses the Thirdweb server wallet (0x76BCC…) which has MINTER_ROLE,
+ * so it can lazy-mint on behalf of any artist without them needing
+ * admin permissions on the contract.
+ */
+export async function serverLazyMint(
+    amount: number,
+    baseURI: string,
+    contractAddress?: string,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
+        console.log('[blockchain] serverLazyMint: calling edge function', { amount, baseURI });
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+                action: 'lazyMint',
+                amount,
+                baseURI,
+                contractAddress: contractAddress || CONTRACTS.SONG_NFT,
+            }),
+        });
+
+        const result = await response.json();
+        console.log('[blockchain] serverLazyMint response:', JSON.stringify(result));
+
+        if (!response.ok || !result.success) {
+            return { success: false, error: result.error || `HTTP ${response.status}` };
+        }
+
+        return { success: true };
+    } catch (err: any) {
+        console.error('[blockchain] serverLazyMint error:', err);
         return { success: false, error: err.message };
     }
 }
@@ -514,32 +569,18 @@ export async function createNFTRelease(
             return { success: false, error: dbError.message };
         }
 
-        // 2. Lazy-mint on-chain if account is available
-        if (account && isContractReady()) {
-            const mintResult = await lazyMintSongNFT(
-                account,
+        // 2. Lazy-mint on-chain via server wallet (edge function)
+        //    The server wallet has MINTER_ROLE on the contract, so it can
+        //    lazy-mint tokens on behalf of any artist.
+        if (isContractReady()) {
+            const mintResult = await serverLazyMint(
                 config.totalSupply,
                 config.metadataUri,
             );
             if (!mintResult.success) {
-                console.warn('[blockchain] On-chain lazy mint failed, DB record still created:', mintResult.error);
+                console.warn('[blockchain] Server lazy mint failed, DB record still created:', mintResult.error);
             } else {
-                // 3. Set claim conditions so claim() doesn't revert with "!Tokens".
-                //    We read nextTokenIdToMint to know the total supply cap, then
-                //    set a public claim phase with the release price.
-                try {
-                    const totalMinted = await getNextTokenIdToMint();
-                    const ccResult = await setClaimConditionsForRelease(
-                        account,
-                        config.priceEth || 0,
-                        totalMinted, // allow claiming up to all lazy-minted tokens
-                    );
-                    if (!ccResult.success) {
-                        console.warn('[blockchain] setClaimConditions failed (NFTs minted but may not be claimable):', ccResult.error);
-                    }
-                } catch (ccErr: any) {
-                    console.warn('[blockchain] setClaimConditions threw (NFTs minted but may not be claimable):', ccErr.message);
-                }
+                console.log('[blockchain] Server lazy mint succeeded');
             }
         }
 
@@ -606,11 +647,10 @@ export async function mintToken(
                 priceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
                 currency = NATIVE_TOKEN;
 
-                const totalMinted = await getNextTokenIdToMint();
                 const ccResult = await setClaimConditionsForRelease(
                     account,
                     release.price_eth || 0,
-                    totalMinted,
+                    MAX_UINT256, // unlimited – contract enforces via nextTokenIdToMint
                 );
                 if (!ccResult.success) {
                     return { success: false, error: `Failed to set claim conditions: ${ccResult.error}` };
