@@ -12,6 +12,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/database';
+import * as blockchain from '../services/blockchain';
 import type {
     Song as DbSong,
     ArtistProfile as DbArtist,
@@ -526,6 +527,163 @@ export function useAdminTransactions(limit = 50) {
         [] as Transaction[],
         [limit],
     );
+}
+
+// ────────────────────────────────────────────
+// PLATFORM STATS (Admin)
+// ────────────────────────────────────────────
+
+// ────────────────────────────────────────────
+// NFT MUTATION HOOKS
+// ────────────────────────────────────────────
+
+interface MutationState {
+    loading: boolean;
+    error: string | null;
+    success: boolean;
+}
+
+/** Create an NFT release (creator) */
+export function useCreateNFTRelease() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        config: blockchain.MintConfig,
+        account?: any, // thirdweb Account
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            const result = await blockchain.createNFTRelease(config, account);
+            if (!result.success) {
+                setState({ loading: false, error: result.error || 'Failed to create NFT release', success: false });
+                return null;
+            }
+            setState({ loading: false, error: null, success: true });
+            return result.releaseId;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return null;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
+
+    return { ...state, execute, reset };
+}
+
+/** Mint (claim) an NFT token from a release */
+export function useMintToken() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        releaseId: string,
+        buyerWallet: string,
+        account?: any,
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            const result = await blockchain.mintToken(releaseId, buyerWallet, account);
+            if (!result.success) {
+                setState({ loading: false, error: result.error || 'Mint failed', success: false });
+                return null;
+            }
+            setState({ loading: false, error: null, success: true });
+            return result.tokenId;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return null;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
+
+    return { ...state, execute, reset };
+}
+
+/** List an owned NFT for sale on the marketplace */
+export function useListForSale() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        config: { nftTokenId: string; priceEth: number; sellerWallet: string },
+        account?: any,
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            const result = await blockchain.listForSale(config, account);
+            if (!result.success) {
+                setState({ loading: false, error: result.error || 'Listing failed', success: false });
+                return null;
+            }
+            setState({ loading: false, error: null, success: true });
+            return result.listingId;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return null;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
+
+    return { ...state, execute, reset };
+}
+
+/** Buy an NFT from a marketplace listing (secondary sale) */
+export function useBuyListing() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        listingId: string,
+        buyerWallet: string,
+        account?: any,
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            const result = await blockchain.buyListingFlow({ listingId, buyerWallet }, account);
+            if (!result.success) {
+                setState({ loading: false, error: result.error || 'Purchase failed', success: false });
+                return false;
+            }
+            setState({ loading: false, error: null, success: true });
+            return true;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return false;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
+
+    return { ...state, execute, reset };
+}
+
+/** Cancel a marketplace listing */
+export function useCancelListing() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        listingId: string,
+        sellerWallet: string,
+        account?: any,
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            const result = await blockchain.cancelListingFlow(listingId, sellerWallet, account);
+            if (!result.success) {
+                setState({ loading: false, error: result.error || 'Cancel failed', success: false });
+                return false;
+            }
+            setState({ loading: false, error: null, success: true });
+            return true;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return false;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
+
+    return { ...state, execute, reset };
 }
 
 // ────────────────────────────────────────────
