@@ -603,10 +603,23 @@ export async function mintToken(
                 currency = condition.currency;
                 console.log('[blockchain] claim condition price:', priceWei.toString(), 'currency:', currency);
             } catch (condErr) {
-                // Fallback to DB price if we can't read the condition
-                console.warn('[blockchain] Could not read claim condition, falling back to DB price:', condErr);
+                // No active claim condition exists — this happens for releases
+                // created before setClaimConditions was wired into createNFTRelease.
+                // We set one now using the DB price so the claim can proceed.
+                console.warn('[blockchain] No active claim condition found, setting one now:', condErr);
                 priceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
                 currency = NATIVE_TOKEN;
+
+                const totalMinted = await getNextTokenIdToMint();
+                const ccResult = await setClaimConditionsForRelease(
+                    account,
+                    priceWei,
+                    totalMinted,
+                );
+                if (!ccResult.success) {
+                    return { success: false, error: `Failed to set claim conditions: ${ccResult.error}` };
+                }
+                console.log('[blockchain] claim conditions set successfully, proceeding with claim');
             }
 
             const claimResult = await claimSongNFT(
