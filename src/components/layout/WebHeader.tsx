@@ -6,6 +6,7 @@ import { User, Search, ChevronDown, LogOut, Settings, Wallet, X, Clock, Trending
 import { Image } from 'expo-image';
 import { useSongs } from '../../hooks/useData';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface WebHeaderProps {
     scrollY?: Animated.Value;
@@ -17,6 +18,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
     const [showDropdown, setShowDropdown] = useState(false);
     const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { isDark, colors, toggleTheme } = useTheme();
+    const { signOut } = useAuth();
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
@@ -375,7 +377,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                             label={isDark ? "Light Mode" : "Dark Mode"}
                             onPress={() => { toggleTheme(isDark ? 'light' : 'dark'); }}
                         />
-                        <DropdownItem icon={<LogOut size={16} color={colors.status.error} />} label="Logout" labelColor={colors.status.error} onPress={() => { setShowDropdown(false); router.replace('/(auth)/login'); }} />
+                        <DropdownItem icon={<LogOut size={16} color={colors.status.error} />} label="Logout" labelColor={colors.status.error} onPress={async () => { setShowDropdown(false); await signOut(); router.replace('/(auth)/login'); }} />
                     </Pressable>
                 )}
             </View>

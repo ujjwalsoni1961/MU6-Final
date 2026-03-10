@@ -13,6 +13,7 @@ import {
 const isWeb = Platform.OS === 'web';
 
 import { useTheme } from '../../src/context/ThemeContext';
+import { useAuth } from '../../src/context/AuthContext';
 
 /* ─── Setting Row ─── */
 function SettingRow({ icon, label, subtitle, danger, onPress, isSwitch, switchValue, onSwitchChange }: {
@@ -71,15 +72,21 @@ function Divider() {
 export default function SettingsScreen() {
     const router = useRouter();
     const { isDark, colors, toggleTheme } = useTheme();
+    const { signOut } = useAuth();
     const Container = isWeb ? View : SafeAreaView;
+
+    const doLogout = async () => {
+        await signOut();
+        router.replace('/(auth)/login');
+    };
 
     const handleLogout = () => {
         if (isWeb) {
-            router.replace('/(auth)/login');
+            doLogout();
         } else {
             Alert.alert('Log Out', 'Are you sure you want to log out?', [
                 { text: 'Cancel', style: 'cancel' },
-                { text: 'Log Out', style: 'destructive', onPress: () => router.replace('/(auth)/login') },
+                { text: 'Log Out', style: 'destructive', onPress: doLogout },
             ]);
         }
     };

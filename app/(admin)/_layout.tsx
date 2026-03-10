@@ -3,6 +3,7 @@ import { View, Text, Platform } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { LayoutDashboard, Users, Music, ArrowLeftRight, FileCode, ChevronLeft, Shield } from 'lucide-react-native';
+import { useAuth } from '../../src/context/AuthContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -48,6 +49,7 @@ function SidebarItem({ label, Icon, active, onPress }: {
 function AdminSidebar() {
     const router = useRouter();
     const pathname = usePathname();
+    const { signOut } = useAuth();
 
     const navItems = [
         { path: '/(admin)/dashboard', match: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
@@ -76,7 +78,7 @@ function AdminSidebar() {
                 <AnimatedPressable
                     preset="icon"
                     hapticType="none"
-                    onPress={() => router.replace('/(auth)/login')}
+                    onPress={async () => { await signOut(); router.replace('/(auth)/login'); }}
                     style={{
                         marginLeft: 8,
                         width: 24,

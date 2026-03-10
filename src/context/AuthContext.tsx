@@ -50,7 +50,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const signingOutRef = useRef(false);
 
     const walletAddress = account?.address || null;
-    const isConnected = !!walletAddress;
+    // During sign-out, treat as disconnected even if the wallet hook
+    // hasn't cleared yet. This prevents stale isConnected=true state
+    // from causing redirect loops.
+    const isConnected = !!walletAddress && !signingOutRef.current;
 
     // Sync wallet connection to Supabase profile
     const syncProfile = useCallback(async (address: string) => {
@@ -134,6 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Clear profile state immediately
         setProfile(null);
+        setIsLoading(false);
 
         // Disconnect the wallet
         if (wallet) {
@@ -144,11 +148,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
-        // Small delay to let the wallet state propagate,
-        // then reset the signing-out flag
-        setTimeout(() => {
-            signingOutRef.current = false;
-        }, 500);
+        // Give wallet hooks time to clear, then reset the flag.
+        // We use a promise so callers can `await signOut()` and
+        // navigate only after the full cleanup is done.
+        await new Promise<void>((resolve) => {
+            setTimeout(() => {
+                signingOutRef.current = false;
+                resolve();
+            }, 300);
+        });
     }, [wallet, disconnect]);
 
     // Auto-sync when wallet connects/changes
