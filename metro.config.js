@@ -4,14 +4,13 @@ const path = require('path');
 const config = getDefaultConfig(__dirname);
 
 // Required for thirdweb v5 SDK – enables named package exports resolution.
-// Order matters: react-native first, then browser, then import/require.
-// IMPORTANT: Do NOT add 'node' — it causes @noble/hashes/crypto to resolve
-// to cryptoNode.js which imports Node's built-in crypto (unavailable in RN).
+// Order matters: react-native first, then browser, then require.
+// Do NOT add 'node' (resolves @noble/hashes to Node crypto).
+// Do NOT add 'import' before 'require' (causes __extends interop errors).
 config.resolver.unstable_enablePackageExports = true;
 config.resolver.unstable_conditionNames = [
     'react-native',
     'browser',
-    'import',
     'require',
 ];
 
@@ -43,12 +42,29 @@ for (const mod of stubModules) {
 }
 config.resolver.extraNodeModules = extraNodeModules;
 
-// Handle node: protocol imports (e.g. 'node:crypto', 'node:fs')
-// Metro doesn't understand the node: prefix natively.
-// Redirect them to our stubs or empty modules.
-const nodeBuiltinStub = path.resolve(stubsDir, 'crypto'); // reuse crypto stub
+// Path to the WalletConnect receiver stub (prevents __extends crash on mobile).
+// The real receiver/index.js statically imports @walletconnect/sign-client which
+// triggers CJS interop failure on React Native. We only need this stub on native
+// platforms; web uses the real module fine.
+const wcReceiverStub = path.resolve(stubsDir, 'walletconnect-receiver-stub.js');
+
+// Handle node: protocol imports AND WalletConnect receiver redirect.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-    // Strip 'node:' prefix and redirect to stub
+    // ── Fix: Redirect WalletConnect receiver to stub on native platforms ──
+    // wallets.native.js does:
+    //   export { ... } from "../wallets/wallet-connect/receiver/index.js";
+    // That module statically imports @walletconnect/sign-client whose CJS bundle
+    // does `class Engine extends IEngine` where IEngine = require("@walletconnect/types").
+    // Under Metro's react-native condition this CJS chain breaks (__extends of undefined).
+    // Since MU6 doesn't use the WC receiver API, redirect to a no-op stub.
+    if (
+        (platform === 'ios' || platform === 'android') &&
+        moduleName.includes('wallet-connect/receiver')
+    ) {
+        return { type: 'sourceFile', filePath: wcReceiverStub };
+    }
+
+    // ── Strip 'node:' prefix and redirect to stub ──
     if (moduleName.startsWith('node:')) {
         const bare = moduleName.slice(5); // e.g. 'node:crypto' -> 'crypto'
         const stubPath = path.resolve(stubsDir, bare, 'index.js');
@@ -59,6 +75,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         // For any other node: built-in, return empty module
         return { type: 'sourceFile', filePath: path.resolve(__dirname, 'src/lib/empty-module.js') };
     }
+
     // Default resolution for everything else
     return context.resolveRequest(context, moduleName, platform);
 };
