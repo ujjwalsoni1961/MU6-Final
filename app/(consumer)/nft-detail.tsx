@@ -31,9 +31,8 @@ export default function NFTDetailScreen() {
     const router = useRouter();
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
-    const { walletAddress, role } = useAuth();
+    const { walletAddress } = useAuth();
     const account = useActiveAccount();
-    const isCreator = role === 'creator' || role === 'admin';
 
     // Determine view mode: primary (release) or secondary (listing)
     const viewMode: ViewMode = modeParam === 'listing' ? 'listing' : 'release';
@@ -123,11 +122,11 @@ export default function NFTDetailScreen() {
     const actionSuccess = mintHook.success || buyHook.success;
 
     // Determine button state
-    // Minting is creator-only; consumers can only buy from marketplace listings
-    const canMint = isPrimary && isCreator;
+    // Both creators and consumers can mint from primary sales
+    const canMint = isPrimary;
     const canBuy = !isPrimary && !isOwnListing;
 
-    let buttonLabel = canMint ? 'Mint Now' : (isPrimary ? 'Primary Sale · Creator Only' : 'Buy Now');
+    let buttonLabel = canMint ? 'Collect Now' : 'Buy Now';
     let buttonDisabled = false;
     let buttonColor = '#8b5cf6';
 
@@ -140,10 +139,6 @@ export default function NFTDetailScreen() {
         buttonColor = '#10b981';
     } else if (isSoldOut) {
         buttonLabel = 'Sold Out';
-        buttonDisabled = true;
-        buttonColor = '#64748b';
-    } else if (isPrimary && !isCreator) {
-        // Consumers can't mint — primary sales are creator-only
         buttonDisabled = true;
         buttonColor = '#64748b';
     } else if (isOwnListing) {

@@ -12,6 +12,7 @@ import { useCreatorNFTs, useCreatorSongs, useCreateNFTRelease } from '../../src/
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
+import { useRouter } from 'expo-router';
 
 const isWeb = Platform.OS === 'web';
 
@@ -28,6 +29,7 @@ export default function NFTManagerScreen() {
     const { isDark, colors } = useTheme();
     const { profile } = useAuth();
     const account = useActiveAccount();
+    const router = useRouter();
     const { data: creatorNFTs, loading, refresh: refreshNFTs } = useCreatorNFTs();
     const { data: creatorSongs } = useCreatorSongs();
     const createRelease = useCreateNFTRelease();
@@ -165,6 +167,8 @@ export default function NFTManagerScreen() {
                                 editionNumber={item.editionNumber}
                                 totalEditions={item.totalEditions}
                                 rarity={item.rarity}
+                                variant="manage"
+                                onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } })}
                             />
                         </View>
                     )}
