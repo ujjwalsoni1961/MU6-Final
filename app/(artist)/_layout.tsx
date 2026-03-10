@@ -134,6 +134,7 @@ export default function CreatorLayout() {
             <Tabs.Screen name="songs" options={{ title: 'Songs', tabBarIcon: ({ color, size }) => <Music size={size} color={color} /> }} />
             <Tabs.Screen name="earnings" options={{ title: 'Earnings', tabBarIcon: ({ color, size }) => <DollarSign size={size} color={color} /> }} />
             <Tabs.Screen name="nft-manager" options={{ title: 'NFTs', tabBarIcon: ({ color, size }) => <Gem size={size} color={color} /> }} />
+            <Tabs.Screen name="split-editor" options={{ href: null }} />
         </Tabs>
     );
 

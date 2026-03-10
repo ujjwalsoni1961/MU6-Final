@@ -20,8 +20,10 @@ import type {
     NFTToken as DbNFTToken,
     MarketplaceListing as DbListing,
     CreatorDashboardStats,
+    CreatorRoyaltySummary,
     SplitEntry,
     StreamEntry,
+    RoyaltyShare as DbRoyaltyShare,
 } from '../services/database';
 import type { Song, Artist, NFT, Transaction, User } from '../types';
 
@@ -459,6 +461,90 @@ export function useCreatorNFTs() {
         [] as NFT[],
         [profile?.id],
     );
+}
+
+// ────────────────────────────────────────────
+// ROYALTY & SPLIT SHEET HOOKS
+// ────────────────────────────────────────────
+
+/** Creator's full royalty summary (stream + NFT revenue, per-song breakdown) */
+export function useCreatorRoyalties() {
+    const { profile } = useAuth();
+    return useAsync(
+        async () => {
+            if (!profile?.id) return null;
+            return db.getCreatorRoyaltySummary(profile.id);
+        },
+        null as CreatorRoyaltySummary | null,
+        [profile?.id],
+    );
+}
+
+/** Recent royalty share entries for current user (for transaction history) */
+export function useRoyaltyHistory(limit = 50) {
+    const { profile } = useAuth();
+    return useAsync(
+        async () => {
+            if (!profile?.id) return [];
+            return db.getRoyaltySharesByProfile(profile.id, { limit });
+        },
+        [] as DbRoyaltyShare[],
+        [profile?.id, limit],
+    );
+}
+
+/** Split sheet for a specific song */
+export function useSongSplitSheet(songId: string | undefined) {
+    return useAsync(
+        async () => {
+            if (!songId) return [];
+            return db.getSplitsBySong(songId);
+        },
+        [] as SplitEntry[],
+        [songId],
+    );
+}
+
+/** Mutation hook: upsert a split sheet */
+export function useUpsertSplitSheet() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        songId: string,
+        splits: Array<{
+            partyEmail: string;
+            partyName: string;
+            role: string;
+            sharePercent: number;
+            linkedProfileId?: string;
+            linkedWalletAddress?: string;
+        }>,
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            // Validate SUM = 100
+            const total = splits.reduce((sum, s) => sum + s.sharePercent, 0);
+            if (Math.abs(total - 100) > 0.01) {
+                setState({ loading: false, error: `Split percentages must sum to 100% (currently ${total.toFixed(2)}%)`, success: false });
+                return null;
+            }
+
+            const result = await db.upsertSplitSheet(songId, splits);
+            if (result.length === 0) {
+                setState({ loading: false, error: 'Failed to save split sheet', success: false });
+                return null;
+            }
+            setState({ loading: false, error: null, success: true });
+            return result;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return null;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
+
+    return { ...state, execute, reset };
 }
 
 // ────────────────────────────────────────────

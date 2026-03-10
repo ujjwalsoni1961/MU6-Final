@@ -432,20 +432,35 @@ export async function mintToken(
             }
         }
 
-        // Create token record in Supabase
+        // Create token record in Supabase (idempotent: ON CONFLICT DO NOTHING)
+        // If a previous attempt already created the row (e.g. on-chain succeeded,
+        // app crashed before DB write confirmation), we skip the duplicate.
         const { data: token, error: tokenErr } = await supabaseAdmin
             .from('nft_tokens')
-            .insert({
-                nft_release_id: releaseId,
-                token_id: tokenId,
-                owner_wallet_address: buyerWallet.toLowerCase(),
-            })
+            .upsert(
+                {
+                    nft_release_id: releaseId,
+                    token_id: tokenId,
+                    owner_wallet_address: buyerWallet.toLowerCase(),
+                },
+                { onConflict: 'nft_release_id,token_id', ignoreDuplicates: true },
+            )
             .select()
             .single();
 
-        if (tokenErr) return { success: false, error: tokenErr.message };
+        if (tokenErr && !tokenErr.message?.includes('duplicate')) {
+            return { success: false, error: tokenErr.message };
+        }
 
-        return { success: true, tokenId: token.id };
+        // If upsert skipped (duplicate), fetch the existing token
+        const tokenRecord = token || (await supabaseAdmin
+            .from('nft_tokens')
+            .select('id')
+            .eq('nft_release_id', releaseId)
+            .eq('token_id', tokenId)
+            .single()).data;
+
+        return { success: true, tokenId: tokenRecord?.id || tokenId };
     } catch (err: any) {
         return { success: false, error: err.message };
     }
@@ -586,33 +601,58 @@ export async function buyListingFlow(
             })
             .eq('id', listing.nft_token_id);
 
-        // Record secondary sale royalty (5% to creator)
+        // Record secondary sale royalty (5% to creator) — idempotent via unique source_reference
         const salePriceEur = parseFloat(listing.price_eth) * 2500; // rough ETH→EUR; replace with oracle
         const royaltyAmountEur = salePriceEur * 0.05;
         const creatorId = listing.nft_token?.release?.song?.creator_id;
+        const sourceRef = `sale:${config.listingId}`;
 
         if (creatorId && royaltyAmountEur > 0) {
+            // Idempotent insert — if this sale was already recorded (retry scenario), skip
             const { data: royaltyEvent } = await supabaseAdmin
                 .from('royalty_events')
-                .insert({
-                    song_id: listing.nft_token.release.song.id,
-                    source_type: 'secondary_sale',
-                    source_reference: config.listingId,
-                    gross_amount_eur: royaltyAmountEur,
-                })
+                .upsert(
+                    {
+                        song_id: listing.nft_token.release.song.id,
+                        source_type: 'secondary_sale' as const,
+                        source_reference: sourceRef,
+                        gross_amount_eur: royaltyAmountEur,
+                    },
+                    { onConflict: 'source_type,source_reference', ignoreDuplicates: true },
+                )
                 .select()
                 .single();
 
             if (royaltyEvent) {
-                await supabaseAdmin
-                    .from('royalty_shares')
-                    .insert({
+                // Distribute to split sheet parties (or 100% to creator if no splits)
+                const { data: splits } = await supabaseAdmin
+                    .from('song_rights_splits')
+                    .select('*')
+                    .eq('song_id', listing.nft_token.release.song.id);
+
+                if (splits && splits.length > 0) {
+                    const shareRows = splits.map((s: any) => ({
                         royalty_event_id: royaltyEvent.id,
-                        linked_profile_id: creatorId,
-                        share_type: 'direct',
-                        share_percent: 100,
-                        amount_eur: royaltyAmountEur,
-                    });
+                        party_email: s.party_email,
+                        linked_profile_id: s.linked_profile_id,
+                        wallet_address: s.linked_wallet_address,
+                        share_type: 'split' as const,
+                        share_percent: parseFloat(s.share_percent),
+                        amount_eur: royaltyAmountEur * parseFloat(s.share_percent) / 100,
+                    }));
+                    await supabaseAdmin.from('royalty_shares').insert(shareRows);
+                } else {
+                    // No split sheet — 100% to creator
+                    await supabaseAdmin
+                        .from('royalty_shares')
+                        .insert({
+                            royalty_event_id: royaltyEvent.id,
+                            linked_profile_id: creatorId,
+                            share_type: 'direct',
+                            share_percent: 100,
+                            amount_eur: royaltyAmountEur,
+                        });
+                }
             }
         }
 

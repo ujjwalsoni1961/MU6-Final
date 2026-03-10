@@ -103,6 +103,53 @@ export interface StreamEntry {
     isQualified: boolean;
 }
 
+export interface RoyaltyEvent {
+    id: string;
+    songId: string;
+    sourceType: 'stream' | 'primary_sale' | 'secondary_sale';
+    sourceReference: string;
+    grossAmountEur: number;
+    accountingPeriod: string | null;
+    createdAt: string;
+    // Joined
+    song?: Song;
+}
+
+export interface RoyaltyShare {
+    id: string;
+    royaltyEventId: string;
+    partyEmail: string | null;
+    linkedProfileId: string | null;
+    walletAddress: string | null;
+    shareType: 'split' | 'direct';
+    nftReleaseId: string | null;
+    nftTokenId: string | null;
+    sharePercent: number;
+    amountEur: number;
+    createdAt: string;
+    // Joined
+    royaltyEvent?: RoyaltyEvent;
+    profile?: ArtistProfile;
+}
+
+export interface CreatorRoyaltySummary {
+    streamRevenue: number;
+    primarySaleRevenue: number;
+    secondarySaleRevenue: number;
+    totalRevenue: number;
+    streamCount: number;
+    totalNFTsSold: number;
+    perSongBreakdown: Array<{
+        songId: string;
+        songTitle: string;
+        coverImage: string;
+        streamRevenue: number;
+        nftRevenue: number;
+        totalRevenue: number;
+        streamCount: number;
+    }>;
+}
+
 // ────────────────────────────────────────────
 // SONGS
 // ────────────────────────────────────────────
@@ -692,6 +739,167 @@ export async function getStreamsByCreator(
 }
 
 // ────────────────────────────────────────────
+// ROYALTIES
+// ────────────────────────────────────────────
+
+/** Get full royalty summary for a creator across all their songs */
+export async function getCreatorRoyaltySummary(profileId: string): Promise<CreatorRoyaltySummary> {
+    // Get creator's songs
+    const { data: songs } = await supabase
+        .from('songs')
+        .select('id, title, cover_path, plays_count')
+        .eq('creator_id', profileId);
+
+    const songList = songs || [];
+    const songIds = songList.map((s) => s.id);
+
+    if (songIds.length === 0) {
+        return {
+            streamRevenue: 0, primarySaleRevenue: 0, secondarySaleRevenue: 0,
+            totalRevenue: 0, streamCount: 0, totalNFTsSold: 0, perSongBreakdown: [],
+        };
+    }
+
+    // Get all royalty shares for this profile
+    const { data: shares } = await supabaseAdmin
+        .from('royalty_shares')
+        .select(`
+            amount_eur,
+            royalty_event:royalty_events!royalty_event_id (
+                song_id, source_type
+            )
+        `)
+        .eq('linked_profile_id', profileId);
+
+    const shareList = shares || [];
+
+    // Aggregate by source type
+    let streamRevenue = 0;
+    let primarySaleRevenue = 0;
+    let secondarySaleRevenue = 0;
+    let streamCount = 0;
+    const songMap = new Map<string, { streamRev: number; nftRev: number; streamCount: number }>();
+
+    for (const s of shareList) {
+        const event = s.royalty_event as any;
+        const amt = parseFloat(s.amount_eur) || 0;
+        const songId = event?.song_id;
+        const sourceType = event?.source_type;
+
+        if (sourceType === 'stream') {
+            streamRevenue += amt;
+            streamCount++;
+        } else if (sourceType === 'primary_sale') {
+            primarySaleRevenue += amt;
+        } else if (sourceType === 'secondary_sale') {
+            secondarySaleRevenue += amt;
+        }
+
+        if (songId) {
+            const existing = songMap.get(songId) || { streamRev: 0, nftRev: 0, streamCount: 0 };
+            if (sourceType === 'stream') {
+                existing.streamRev += amt;
+                existing.streamCount++;
+            } else {
+                existing.nftRev += amt;
+            }
+            songMap.set(songId, existing);
+        }
+    }
+
+    // Get NFTs minted count
+    let totalNFTsSold = 0;
+    if (songIds.length > 0) {
+        const { data: releases } = await supabase
+            .from('nft_releases')
+            .select('minted_count')
+            .in('song_id', songIds);
+        totalNFTsSold = releases?.reduce((sum, r) => sum + (r.minted_count || 0), 0) || 0;
+    }
+
+    // Build per-song breakdown
+    const perSongBreakdown = songList.map((song) => {
+        const data = songMap.get(song.id) || { streamRev: 0, nftRev: 0, streamCount: 0 };
+        return {
+            songId: song.id,
+            songTitle: song.title,
+            coverImage: song.cover_path || '',
+            streamRevenue: data.streamRev,
+            nftRevenue: data.nftRev,
+            totalRevenue: data.streamRev + data.nftRev,
+            streamCount: data.streamCount,
+        };
+    }).sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    return {
+        streamRevenue,
+        primarySaleRevenue,
+        secondarySaleRevenue,
+        totalRevenue: streamRevenue + primarySaleRevenue + secondarySaleRevenue,
+        streamCount,
+        totalNFTsSold,
+        perSongBreakdown,
+    };
+}
+
+/** Get royalty events for a specific song */
+export async function getRoyaltyEventsBySong(
+    songId: string,
+    options?: { sourceType?: string; limit?: number },
+): Promise<RoyaltyEvent[]> {
+    let query = supabaseAdmin
+        .from('royalty_events')
+        .select('*')
+        .eq('song_id', songId)
+        .order('created_at', { ascending: false });
+
+    if (options?.sourceType) {
+        query = query.eq('source_type', options.sourceType);
+    }
+    if (options?.limit) {
+        query = query.limit(options.limit);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+        console.error('[db] getRoyaltyEventsBySong error:', error);
+        return [];
+    }
+    return (data || []).map(mapRoyaltyEventRow);
+}
+
+/** Get royalty shares for a specific profile */
+export async function getRoyaltySharesByProfile(
+    profileId: string,
+    options?: { limit?: number },
+): Promise<RoyaltyShare[]> {
+    let query = supabaseAdmin
+        .from('royalty_shares')
+        .select(`
+            *,
+            royalty_event:royalty_events!royalty_event_id (
+                *,
+                song:songs!song_id (
+                    id, title, cover_path
+                )
+            )
+        `)
+        .eq('linked_profile_id', profileId)
+        .order('created_at', { ascending: false });
+
+    if (options?.limit) {
+        query = query.limit(options.limit);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+        console.error('[db] getRoyaltySharesByProfile error:', error);
+        return [];
+    }
+    return (data || []).map(mapRoyaltyShareRow);
+}
+
+// ────────────────────────────────────────────
 // PLATFORM SETTINGS
 // ────────────────────────────────────────────
 
@@ -832,6 +1040,37 @@ function mapStreamRow(row: any): StreamEntry {
         startedAt: row.started_at,
         durationSeconds: row.duration_seconds,
         isQualified: row.is_qualified,
+    };
+}
+
+function mapRoyaltyEventRow(row: any): RoyaltyEvent {
+    return {
+        id: row.id,
+        songId: row.song_id,
+        sourceType: row.source_type,
+        sourceReference: row.source_reference,
+        grossAmountEur: parseFloat(row.gross_amount_eur) || 0,
+        accountingPeriod: row.accounting_period,
+        createdAt: row.created_at,
+        song: row.song ? mapSongRow(row.song) : undefined,
+    };
+}
+
+function mapRoyaltyShareRow(row: any): RoyaltyShare {
+    return {
+        id: row.id,
+        royaltyEventId: row.royalty_event_id,
+        partyEmail: row.party_email,
+        linkedProfileId: row.linked_profile_id,
+        walletAddress: row.wallet_address,
+        shareType: row.share_type,
+        nftReleaseId: row.nft_release_id,
+        nftTokenId: row.nft_token_id,
+        sharePercent: parseFloat(row.share_percent) || 0,
+        amountEur: parseFloat(row.amount_eur) || 0,
+        createdAt: row.created_at,
+        royaltyEvent: row.royalty_event ? mapRoyaltyEventRow(row.royalty_event) : undefined,
+        profile: row.profile ? mapArtistRow(row.profile) : undefined,
     };
 }
 
