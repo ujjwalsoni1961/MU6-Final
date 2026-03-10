@@ -8,6 +8,8 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useAdminTransactions } from '../../src/hooks/useData';
+import { useWalletBalance } from 'thirdweb/react';
+import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 
 const isWeb = Platform.OS === 'web';
 
@@ -17,6 +19,18 @@ export default function WalletScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
     const router = useRouter();
     const { walletAddress } = useAuth();
+
+    // Fetch real on-chain balance
+    const { data: balanceData, isLoading: balanceLoading } = useWalletBalance({
+        chain: activeChain,
+        address: walletAddress || undefined,
+        client: thirdwebClient,
+    });
+
+    const displayBalance = balanceData
+        ? parseFloat(balanceData.displayValue).toFixed(4)
+        : '0.00';
+    const balanceSymbol = balanceData?.symbol || 'POL';
 
     // Real recent transactions
     const { data: recentTxns } = useAdminTransactions(5);
@@ -76,7 +90,8 @@ export default function WalletScreen() {
                             Total Balance
                         </Text>
                         <Text style={{ fontSize: 42, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
-                            0.00 <Text style={{ fontSize: 24, color: colors.text.muted }}>POL</Text>
+                            {balanceLoading ? '...' : displayBalance}{' '}
+                            <Text style={{ fontSize: 24, color: colors.text.muted }}>{balanceSymbol}</Text>
                         </Text>
                         <Text style={{ fontSize: 16, color: colors.text.tertiary, marginTop: 4 }}>
                             Polygon Amoy Testnet
