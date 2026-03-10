@@ -77,6 +77,7 @@ export interface MarketplaceListing {
     sellerWallet: string;
     priceEth: number;
     isActive: boolean;
+    chainListingId: string | null;
     listedAt: string;
     soldAt: string | null;
     buyerWallet: string | null;
@@ -988,6 +989,101 @@ export async function getAudioUrl(path: string, expiresIn = 3600): Promise<strin
 }
 
 // ────────────────────────────────────────────
+// MARKETPLACE (Extended)
+// ────────────────────────────────────────────
+
+/** Get the active listing for a specific NFT token (if any) */
+export async function getActiveListingForToken(nftTokenId: string): Promise<MarketplaceListing | null> {
+    const { data, error } = await supabaseAdmin
+        .from('marketplace_listings')
+        .select('*')
+        .eq('nft_token_id', nftTokenId)
+        .eq('is_active', true)
+        .maybeSingle();
+
+    if (error || !data) return null;
+    return mapListingRow(data);
+}
+
+/** Get owned NFTs with their listing status for the collection view */
+export async function getOwnedNFTsWithListingStatus(walletAddress: string): Promise<Array<{
+    token: NFTToken;
+    activeListing: MarketplaceListing | null;
+}>> {
+    // Step 1: Get all tokens owned by this wallet
+    const { data: tokens, error: tokensError } = await supabaseAdmin
+        .from('nft_tokens')
+        .select(`
+            *,
+            release:nft_releases!nft_release_id (
+                *,
+                song:songs!song_id (
+                    id, title, cover_path, creator_id,
+                    creator:profiles!creator_id (
+                        id, display_name, avatar_path
+                    )
+                )
+            )
+        `)
+        .eq('owner_wallet_address', walletAddress.toLowerCase())
+        .order('minted_at', { ascending: false });
+
+    if (tokensError || !tokens || tokens.length === 0) return [];
+
+    // Step 2: Get active listings for these tokens
+    const tokenIds = tokens.map((t: any) => t.id);
+    const { data: listings } = await supabaseAdmin
+        .from('marketplace_listings')
+        .select('*')
+        .in('nft_token_id', tokenIds)
+        .eq('is_active', true);
+
+    // Build a map: nft_token_id -> active listing
+    const listingMap = new Map<string, any>();
+    (listings || []).forEach((l: any) => {
+        listingMap.set(l.nft_token_id, l);
+    });
+
+    return tokens.map((t: any) => ({
+        token: mapNFTTokenRow(t),
+        activeListing: listingMap.has(t.id) ? mapListingRow(listingMap.get(t.id)) : null,
+    }));
+}
+
+/** Update the price of an active marketplace listing */
+export async function updateListingPrice(
+    listingId: string,
+    newPriceEth: number,
+    sellerWallet: string,
+): Promise<{ success: boolean; error?: string }> {
+    const { error } = await supabaseAdmin
+        .from('marketplace_listings')
+        .update({ price_eth: newPriceEth })
+        .eq('id', listingId)
+        .eq('seller_wallet', sellerWallet.toLowerCase())
+        .eq('is_active', true);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+}
+
+/** Cancel an active marketplace listing (DB side only) */
+export async function cancelListingDb(
+    listingId: string,
+    sellerWallet: string,
+): Promise<{ success: boolean; error?: string }> {
+    const { error } = await supabaseAdmin
+        .from('marketplace_listings')
+        .update({ is_active: false })
+        .eq('id', listingId)
+        .eq('seller_wallet', sellerWallet.toLowerCase())
+        .eq('is_active', true);
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+}
+
+// ────────────────────────────────────────────
 // ROW MAPPERS (snake_case → camelCase)
 // ────────────────────────────────────────────
 
@@ -1062,6 +1158,7 @@ function mapListingRow(row: any): MarketplaceListing {
         sellerWallet: row.seller_wallet,
         priceEth: parseFloat(row.price_eth),
         isActive: row.is_active,
+        chainListingId: row.chain_listing_id || null,
         listedAt: row.listed_at,
         soldAt: row.sold_at,
         buyerWallet: row.buyer_wallet,

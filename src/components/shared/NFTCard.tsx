@@ -17,8 +17,8 @@ interface NFTCardProps {
     editionNumber: number;
     totalEditions: number;
     rarity: 'common' | 'rare' | 'legendary';
-    /** 'collect' (default) for consumer marketplace, 'manage' for artist NFT Manager */
-    variant?: 'collect' | 'manage';
+    /** 'collect' (default) for consumer marketplace, 'manage' for artist NFT Manager, 'collection' for owned NFTs (no bottom button) */
+    variant?: 'collect' | 'manage' | 'collection';
     onPress?: () => void;
 }
 
@@ -84,22 +84,24 @@ export default function NFTCard({
                 }}>
                     EDITION #{editionNumber} / {totalEditions}
                 </Text>
-                <AnimatedPressable
-                    preset="button"
-                    onPress={onPress}
-                    style={{
-                        backgroundColor: variant === 'manage' ? (isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.12)') : '#8b5cf6',
-                        borderRadius: isWeb ? 10 : 14,
-                        paddingVertical: 10,
-                        alignItems: 'center' as const,
-                        marginTop: 8,
-                        ...(variant === 'manage' ? { borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' } : {}),
-                    }}
-                >
-                    <Text style={{ color: variant === 'manage' ? '#8b5cf6' : '#ffffff', fontWeight: '700', fontSize: 13 }}>
-                        {variant === 'manage' ? 'View Details' : 'Collect Now'}
-                    </Text>
-                </AnimatedPressable>
+                {variant !== 'collection' && (
+                    <AnimatedPressable
+                        preset="button"
+                        onPress={onPress}
+                        style={{
+                            backgroundColor: variant === 'manage' ? (isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.12)') : '#8b5cf6',
+                            borderRadius: isWeb ? 10 : 14,
+                            paddingVertical: 10,
+                            alignItems: 'center' as const,
+                            marginTop: 8,
+                            ...(variant === 'manage' ? { borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' } : {}),
+                        }}
+                    >
+                        <Text style={{ color: variant === 'manage' ? '#8b5cf6' : '#ffffff', fontWeight: '700', fontSize: 13 }}>
+                            {variant === 'manage' ? 'View Details' : 'Collect Now'}
+                        </Text>
+                    </AnimatedPressable>
+                )}
             </View>
         </AnimatedPressable>
     );

@@ -25,7 +25,7 @@ import type {
     StreamEntry,
     RoyaltyShare as DbRoyaltyShare,
 } from '../services/database';
-import type { Song, Artist, NFT, Transaction, User } from '../types';
+import type { Song, Artist, NFT, Transaction, User, OwnedNFT } from '../types';
 
 // ────────────────────────────────────────────
 // Storage URL helpers
@@ -817,6 +817,82 @@ export function useCancelListing() {
 
     const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
 
+    return { ...state, execute, reset };
+}
+
+// ────────────────────────────────────────────
+// COLLECTION (Owned NFTs with listing status)
+// ────────────────────────────────────────────
+
+/** User's owned NFTs WITH listing status (for collection page) */
+export function useOwnedNFTsWithStatus() {
+    const { walletAddress } = useAuth();
+    return useAsync(
+        async () => {
+            if (!walletAddress) return [];
+            const results = await db.getOwnedNFTsWithListingStatus(walletAddress);
+            return results.map(({ token, activeListing }): OwnedNFT => {
+                const baseNFT = adaptNFTToken(token);
+                return {
+                    ...baseNFT,
+                    tokenDbId: token.id,
+                    onChainTokenId: token.tokenId,
+                    ownershipStatus: activeListing ? 'listed' : 'unlisted',
+                    activeListingId: activeListing?.id,
+                    activeListingPrice: activeListing?.priceEth,
+                    chainListingId: activeListing?.chainListingId || undefined,
+                };
+            });
+        },
+        [] as OwnedNFT[],
+        [walletAddress],
+    );
+}
+
+/** Update listing price mutation hook */
+export function useUpdateListingPrice() {
+    const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
+
+    const execute = useCallback(async (
+        listingId: string,
+        newPriceEth: number,
+        sellerWallet: string,
+        chainListingId?: string,
+        onChainTokenId?: string,
+        account?: any,
+    ) => {
+        setState({ loading: true, error: null, success: false });
+        try {
+            // On-chain update if we have chain listing info
+            if (account && chainListingId && onChainTokenId && blockchain.isMarketplaceReady()) {
+                const priceWei = BigInt(Math.floor(newPriceEth * 1e18));
+                const result = await blockchain.updateListingOnChain(
+                    account,
+                    BigInt(chainListingId),
+                    BigInt(onChainTokenId),
+                    priceWei,
+                );
+                if (!result.success) {
+                    setState({ loading: false, error: result.error || 'On-chain update failed', success: false });
+                    return false;
+                }
+            }
+
+            // Update in DB
+            const dbResult = await db.updateListingPrice(listingId, newPriceEth, sellerWallet);
+            if (!dbResult.success) {
+                setState({ loading: false, error: dbResult.error || 'DB update failed', success: false });
+                return false;
+            }
+            setState({ loading: false, error: null, success: true });
+            return true;
+        } catch (err: any) {
+            setState({ loading: false, error: err.message, success: false });
+            return false;
+        }
+    }, []);
+
+    const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
     return { ...state, execute, reset };
 }
 

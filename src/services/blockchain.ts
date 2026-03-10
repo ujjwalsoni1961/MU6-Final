@@ -589,6 +589,18 @@ export async function listForSale(
             return { success: false, error: 'Not the token owner' };
         }
 
+        // Prevent duplicate active listings
+        const { data: existingListing } = await supabaseAdmin
+            .from('marketplace_listings')
+            .select('id')
+            .eq('nft_token_id', config.nftTokenId)
+            .eq('is_active', true)
+            .maybeSingle();
+
+        if (existingListing) {
+            return { success: false, error: 'This NFT already has an active listing. Cancel or update the existing listing first.' };
+        }
+
         // On-chain listing
         let chainListingId: string | undefined;
         if (account && isMarketplaceReady()) {
@@ -800,4 +812,88 @@ export async function cancelListingFlow(
 
     if (error) return { success: false, error: error.message };
     return { success: true };
+}
+
+/**
+ * Update a direct listing price on-chain.
+ * MarketplaceV3 doesn't support price-only updates, so we cancel + recreate.
+ */
+export async function updateListingOnChain(
+    account: Account,
+    oldChainListingId: bigint,
+    tokenId: bigint,
+    newPricePerToken: bigint,
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    try {
+        // Cancel the old listing
+        const cancelResult = await cancelListingOnChain(account, oldChainListingId);
+        if (!cancelResult.success) {
+            return { success: false, error: `Failed to cancel old listing: ${cancelResult.error}` };
+        }
+
+        // Create new listing with updated price
+        const now = BigInt(Math.floor(Date.now() / 1000));
+        const oneYear = now + BigInt(365 * 24 * 60 * 60);
+
+        const result = await createListing(account, {
+            assetContract: CONTRACTS.SONG_NFT,
+            tokenId,
+            quantity: BigInt(1),
+            currency: NATIVE_TOKEN,
+            pricePerToken: newPricePerToken,
+            startTimestamp: now,
+            endTimestamp: oneYear,
+            reserved: false,
+        });
+
+        if (!result.success) {
+            return { success: false, error: `Failed to create updated listing: ${result.error}` };
+        }
+        return { success: true, txHash: result.txHash };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Update listing price: on-chain cancel+recreate + DB update.
+ */
+export async function updateListingFlow(
+    config: {
+        listingId: string;
+        newPriceEth: number;
+        sellerWallet: string;
+        chainListingId?: string;
+        onChainTokenId?: string;
+    },
+    account?: Account,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        // On-chain update if we have chain listing info
+        if (account && config.chainListingId && config.onChainTokenId && isMarketplaceReady()) {
+            const priceWei = BigInt(Math.floor(config.newPriceEth * 1e18));
+            const result = await updateListingOnChain(
+                account,
+                BigInt(config.chainListingId),
+                BigInt(config.onChainTokenId),
+                priceWei,
+            );
+            if (!result.success) {
+                return { success: false, error: result.error };
+            }
+        }
+
+        // DB update
+        const { error } = await supabaseAdmin
+            .from('marketplace_listings')
+            .update({ price_eth: config.newPriceEth })
+            .eq('id', config.listingId)
+            .eq('seller_wallet', config.sellerWallet.toLowerCase())
+            .eq('is_active', true);
+
+        if (error) return { success: false, error: error.message };
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
 }

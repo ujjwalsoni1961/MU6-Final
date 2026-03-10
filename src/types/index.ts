@@ -78,3 +78,16 @@ export interface User {
     joinedDate: string;
     status: 'active' | 'suspended';
 }
+
+/** Listing status for an owned NFT in the collection view */
+export type NFTOwnershipStatus = 'unlisted' | 'listed' | 'sold';
+
+/** Extended NFT type with ownership/listing details for collection view */
+export interface OwnedNFT extends NFT {
+    tokenDbId: string;
+    onChainTokenId: string;
+    ownershipStatus: NFTOwnershipStatus;
+    activeListingId?: string;
+    activeListingPrice?: number;
+    chainListingId?: string;
+}

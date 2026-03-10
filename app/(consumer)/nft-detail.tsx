@@ -148,9 +148,9 @@ export default function NFTDetailScreen() {
         buttonDisabled = true;
         buttonColor = '#64748b';
     } else if (isOwnListing) {
-        buttonLabel = 'Your Listing';
-        buttonDisabled = true;
-        buttonColor = '#64748b';
+        buttonLabel = 'Manage Listing';
+        buttonDisabled = false;
+        buttonColor = '#8b5cf6';
     } else if (!walletAddress) {
         buttonLabel = 'Connect Wallet';
         buttonDisabled = true;
@@ -283,7 +283,7 @@ export default function NFTDetailScreen() {
                             {/* Action Button */}
                             <AnimatedPressable
                                 preset="button"
-                                onPress={canMint ? handleMint : handleBuyListing}
+                                onPress={isOwnListing ? () => router.push('/(consumer)/collection') : canMint ? handleMint : handleBuyListing}
                                 disabled={buttonDisabled}
                                 style={{
                                     backgroundColor: buttonColor,
