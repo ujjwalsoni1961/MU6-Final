@@ -863,6 +863,8 @@ export function useUpdateListingPrice() {
     ) => {
         setState({ loading: true, error: null, success: false });
         try {
+            let newChainListingId: string | undefined;
+
             // On-chain update if we have chain listing info
             if (account && chainListingId && onChainTokenId && blockchain.isMarketplaceReady()) {
                 const priceWei = BigInt(Math.floor(newPriceEth * 1e18));
@@ -876,14 +878,25 @@ export function useUpdateListingPrice() {
                     setState({ loading: false, error: result.error || 'On-chain update failed', success: false });
                     return false;
                 }
+                newChainListingId = result.newListingId;
             }
 
-            // Update in DB
+            // Update price in DB
             const dbResult = await db.updateListingPrice(listingId, newPriceEth, sellerWallet);
             if (!dbResult.success) {
                 setState({ loading: false, error: dbResult.error || 'DB update failed', success: false });
                 return false;
             }
+
+            // Also update chain_listing_id in DB if a new one was created (cancel+recreate)
+            if (newChainListingId) {
+                const { supabaseAdmin: admin } = await import('../lib/supabase');
+                await admin
+                    .from('marketplace_listings')
+                    .update({ chain_listing_id: newChainListingId })
+                    .eq('id', listingId);
+            }
+
             setState({ loading: false, error: null, success: true });
             return true;
         } catch (err: any) {

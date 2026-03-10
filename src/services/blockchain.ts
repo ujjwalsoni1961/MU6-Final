@@ -197,7 +197,7 @@ export async function claimSongNFT(
                 allowlistProof,
                 '0x' as `0x${string}`,
             ],
-            value: pricePerToken * BigInt(quantity), // send native token if paying in ETH/MATIC
+            value: isNativeToken(currency) ? pricePerToken * BigInt(quantity) : BigInt(0), // only send native token value for ETH/MATIC payments
         });
 
         const result = await sendTransaction({ account, transaction: tx });
@@ -215,6 +215,21 @@ export async function claimSongNFT(
 
 /** Native token address placeholder used by MarketplaceV3 */
 const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+/** Check if an address is the native token (ETH/MATIC) */
+function isNativeToken(addr: string): boolean {
+    const lower = addr.toLowerCase();
+    return lower === NATIVE_TOKEN.toLowerCase() || lower === '0x0000000000000000000000000000000000000000';
+}
+
+/**
+ * Check if a chain_listing_id is a valid numeric listing ID (not a tx hash).
+ * Legacy listings stored a 0x-prefixed 66-char tx hash instead of a numeric ID.
+ */
+function isValidChainListingId(id: string): boolean {
+    if (id.startsWith('0x') && id.length === 66) return false; // tx hash
+    return /^\d+$/.test(id); // must be a purely numeric string
+}
 
 /**
  * Check if the marketplace is approved to transfer NFTs on behalf of the owner,
@@ -272,6 +287,14 @@ export async function createListing(
     },
 ): Promise<{ success: boolean; listingId?: string; txHash?: string; error?: string }> {
     try {
+        // Read totalListings BEFORE creating — MarketplaceV3 uses sequential 0-based IDs,
+        // so the next listing will get this ID.
+        const nextListingId = await readContract({
+            contract: getMarketplaceContract(),
+            method: 'function totalListings() view returns (uint256)',
+            params: [],
+        });
+
         const listingParams = {
             assetContract: params.assetContract as `0x${string}`,
             tokenId: params.tokenId,
@@ -290,8 +313,8 @@ export async function createListing(
         });
 
         const result = await sendTransaction({ account, transaction: tx });
-        console.log('[blockchain] createListing tx:', result.transactionHash);
-        return { success: true, txHash: result.transactionHash };
+        console.log('[blockchain] createListing tx:', result.transactionHash, 'listingId:', nextListingId.toString());
+        return { success: true, listingId: nextListingId.toString(), txHash: result.transactionHash };
     } catch (err: any) {
         console.error('[blockchain] createListing error:', err);
         return { success: false, error: err.message };
@@ -557,6 +580,16 @@ export async function mintToken(
             .eq('token_id', tokenId)
             .single()).data;
 
+        // Increment minted_count on the release so supply tracking is accurate
+        const { error: countError } = await supabaseAdmin.rpc('increment_minted_count', { release_id: releaseId }).single();
+        if (countError) {
+            // Fallback: direct update if RPC not available
+            await supabaseAdmin
+                .from('nft_releases')
+                .update({ minted_count: release.minted_count + 1 })
+                .eq('id', releaseId);
+        }
+
         return { success: true, tokenId: tokenRecord?.id || tokenId };
     } catch (err: any) {
         return { success: false, error: err.message };
@@ -629,7 +662,7 @@ export async function listForSale(
             if (!result.success) {
                 return { success: false, error: `On-chain listing failed: ${result.error}` };
             }
-            chainListingId = result.txHash;
+            chainListingId = result.listingId;
         }
 
         // Supabase record
@@ -681,17 +714,21 @@ export async function buyListingFlow(
 
         // On-chain buy
         if (account && isMarketplaceReady() && listing.chain_listing_id) {
-            const priceWei = BigInt(Math.floor(parseFloat(listing.price_eth) * 1e18));
-            const result = await buyFromListing(
-                account,
-                BigInt(listing.chain_listing_id),
-                config.buyerWallet,
-                BigInt(1),
-                NATIVE_TOKEN,
-                priceWei,
-            );
-            if (!result.success) {
-                return { success: false, error: `On-chain buy failed: ${result.error}` };
+            if (!isValidChainListingId(listing.chain_listing_id)) {
+                console.warn('[blockchain] buyListingFlow: chain_listing_id is a legacy tx hash, skipping on-chain buy:', listing.chain_listing_id);
+            } else {
+                const priceWei = BigInt(Math.floor(parseFloat(listing.price_eth) * 1e18));
+                const result = await buyFromListing(
+                    account,
+                    BigInt(listing.chain_listing_id),
+                    config.buyerWallet,
+                    BigInt(1),
+                    NATIVE_TOKEN,
+                    priceWei,
+                );
+                if (!result.success) {
+                    return { success: false, error: `On-chain buy failed: ${result.error}` };
+                }
             }
         }
 
@@ -796,11 +833,15 @@ export async function cancelListingFlow(
 
     if (!listing) return { success: false, error: 'Listing not found' };
 
-    // Cancel on-chain if exists
+    // Cancel on-chain if exists and is a valid numeric listing ID
     if (account && isMarketplaceReady() && listing.chain_listing_id) {
-        const result = await cancelListingOnChain(account, BigInt(listing.chain_listing_id));
-        if (!result.success) {
-            return { success: false, error: `On-chain cancel failed: ${result.error}` };
+        if (!isValidChainListingId(listing.chain_listing_id)) {
+            console.warn('[blockchain] cancelListingFlow: chain_listing_id is a legacy tx hash, skipping on-chain cancel:', listing.chain_listing_id);
+        } else {
+            const result = await cancelListingOnChain(account, BigInt(listing.chain_listing_id));
+            if (!result.success) {
+                return { success: false, error: `On-chain cancel failed: ${result.error}` };
+            }
         }
     }
 
@@ -823,7 +864,7 @@ export async function updateListingOnChain(
     oldChainListingId: bigint,
     tokenId: bigint,
     newPricePerToken: bigint,
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; newListingId?: string; txHash?: string; error?: string }> {
     try {
         // Cancel the old listing
         const cancelResult = await cancelListingOnChain(account, oldChainListingId);
@@ -849,7 +890,7 @@ export async function updateListingOnChain(
         if (!result.success) {
             return { success: false, error: `Failed to create updated listing: ${result.error}` };
         }
-        return { success: true, txHash: result.txHash };
+        return { success: true, newListingId: result.listingId, txHash: result.txHash };
     } catch (err: any) {
         return { success: false, error: err.message };
     }
@@ -867,32 +908,44 @@ export async function updateListingFlow(
         onChainTokenId?: string;
     },
     account?: Account,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; newChainListingId?: string; error?: string }> {
     try {
+        let newChainListingId: string | undefined;
+
         // On-chain update if we have chain listing info
         if (account && config.chainListingId && config.onChainTokenId && isMarketplaceReady()) {
-            const priceWei = BigInt(Math.floor(config.newPriceEth * 1e18));
-            const result = await updateListingOnChain(
-                account,
-                BigInt(config.chainListingId),
-                BigInt(config.onChainTokenId),
-                priceWei,
-            );
-            if (!result.success) {
-                return { success: false, error: result.error };
+            if (!isValidChainListingId(config.chainListingId)) {
+                console.warn('[blockchain] updateListingFlow: chain_listing_id is a legacy tx hash, skipping on-chain update:', config.chainListingId);
+            } else {
+                const priceWei = BigInt(Math.floor(config.newPriceEth * 1e18));
+                const result = await updateListingOnChain(
+                    account,
+                    BigInt(config.chainListingId),
+                    BigInt(config.onChainTokenId),
+                    priceWei,
+                );
+                if (!result.success) {
+                    return { success: false, error: result.error };
+                }
+                newChainListingId = result.newListingId;
             }
         }
 
-        // DB update
+        // DB update — also update chain_listing_id if a new one was created
+        const updatePayload: Record<string, any> = { price_eth: config.newPriceEth };
+        if (newChainListingId) {
+            updatePayload.chain_listing_id = newChainListingId;
+        }
+
         const { error } = await supabaseAdmin
             .from('marketplace_listings')
-            .update({ price_eth: config.newPriceEth })
+            .update(updatePayload)
             .eq('id', config.listingId)
             .eq('seller_wallet', config.sellerWallet.toLowerCase())
             .eq('is_active', true);
 
         if (error) return { success: false, error: error.message };
-        return { success: true };
+        return { success: true, newChainListingId };
     } catch (err: any) {
         return { success: false, error: err.message };
     }
