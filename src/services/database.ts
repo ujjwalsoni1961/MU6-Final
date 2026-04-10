@@ -1506,6 +1506,108 @@ function mapRoyaltyShareRow(row: any): RoyaltyShare {
 }
 
 // ────────────────────────────────────────────
+// BANK DETAILS & PAYOUT REQUESTS
+// ────────────────────────────────────────────
+
+export interface BankDetails {
+    bankName: string;
+    accountHolderName: string;
+    accountNumber: string;
+    routingCode: string;
+}
+
+export interface PayoutRequest {
+    id: string;
+    profileId: string;
+    amountEur: number;
+    paymentMethod: string;
+    paymentDetails: BankDetails | null;
+    status: string;
+    requestedAt: string;
+    processedAt: string | null;
+    adminNotes: string | null;
+}
+
+/** Get bank details from a user's profile */
+export async function getBankDetails(profileId: string): Promise<BankDetails | null> {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('bank_details')
+        .eq('id', profileId)
+        .single();
+
+    if (error || !data?.bank_details) return null;
+    return data.bank_details as BankDetails;
+}
+
+/** Save bank details to a user's profile */
+export async function saveBankDetails(
+    profileId: string,
+    bankDetails: BankDetails,
+): Promise<boolean> {
+    const { error } = await supabase
+        .from('profiles')
+        .update({ bank_details: bankDetails })
+        .eq('id', profileId);
+
+    if (error) {
+        console.error('[db] saveBankDetails error:', error);
+        return false;
+    }
+    return true;
+}
+
+/** Create a payout request */
+export async function createPayoutRequest(
+    profileId: string,
+    amountEur: number,
+    bankDetails: BankDetails,
+): Promise<string | null> {
+    const { data, error } = await supabase
+        .from('payout_requests')
+        .insert({
+            profile_id: profileId,
+            amount_eur: amountEur,
+            payment_method: 'bank_transfer',
+            payment_details: bankDetails,
+            status: 'pending',
+        })
+        .select('id')
+        .single();
+
+    if (error || !data) {
+        console.error('[db] createPayoutRequest error:', error);
+        return null;
+    }
+    return data.id;
+}
+
+/** Get payout requests for a specific user */
+export async function getPayoutRequests(profileId: string): Promise<PayoutRequest[]> {
+    const { data, error } = await supabase
+        .from('payout_requests')
+        .select('*')
+        .eq('profile_id', profileId)
+        .order('requested_at', { ascending: false });
+
+    if (error || !data) {
+        console.error('[db] getPayoutRequests error:', error);
+        return [];
+    }
+    return data.map((row: any) => ({
+        id: row.id,
+        profileId: row.profile_id,
+        amountEur: parseFloat(row.amount_eur) || 0,
+        paymentMethod: row.payment_method,
+        paymentDetails: row.payment_details,
+        status: row.status,
+        requestedAt: row.requested_at,
+        processedAt: row.processed_at,
+        adminNotes: row.admin_notes,
+    }));
+}
+
+// ────────────────────────────────────────────
 // Utility
 // ────────────────────────────────────────────
 

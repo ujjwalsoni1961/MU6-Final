@@ -221,7 +221,7 @@ export default function WalletScreen() {
                         </Text>
 
                         <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
-                            <AnimatedPressable preset="button" style={{ flex: 1 }}>
+                            <AnimatedPressable preset="button" style={{ flex: 1 }} onPress={() => router.push('/(consumer)/deposit')}>
                                 <View style={{
                                     backgroundColor: colors.text.primary,
                                     paddingVertical: 14, borderRadius: 16,
@@ -231,7 +231,7 @@ export default function WalletScreen() {
                                     <Text style={{ color: colors.text.inverse, fontSize: 15, fontWeight: '700' }}>Deposit</Text>
                                 </View>
                             </AnimatedPressable>
-                            <AnimatedPressable preset="button" style={{ flex: 1 }}>
+                            <AnimatedPressable preset="button" style={{ flex: 1 }} onPress={() => router.push('/(consumer)/withdraw')}>
                                 <View style={{
                                     backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
                                     paddingVertical: 14, borderRadius: 16,
