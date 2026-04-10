@@ -10,7 +10,7 @@ import {
     ChevronLeft, ChevronRight, X,
     User, Wallet, Bell, Headphones, Palette,
     Shield, Lock, HelpCircle, Bug, FileText, Eye,
-    LogOut, Moon, Sun, Brush
+    LogOut, Moon, Sun, Brush, Building2
 } from 'lucide-react-native';
 
 const isWeb = Platform.OS === 'web';
@@ -244,6 +244,13 @@ export default function SettingsScreen() {
                         label="Wallet"
                         subtitle="Connected wallets & transactions"
                         onPress={() => router.push('/(consumer)/wallet')}
+                    />
+                    <Divider />
+                    <SettingRow
+                        icon={<Building2 size={18} color="#38b4ba" />}
+                        label="Bank Details"
+                        subtitle="Manage bank account for withdrawals"
+                        onPress={() => router.push('/(consumer)/bank-details')}
                     />
                     {role === 'listener' && (
                         <>
