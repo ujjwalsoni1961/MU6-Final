@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Platform, Alert, StyleSheet, Switch } from 'react-native';
+import {
+    View, Text, ScrollView, Platform, Alert, StyleSheet, Switch,
+    Modal, Linking,
+} from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
-    ChevronLeft, ChevronRight,
+    ChevronLeft, ChevronRight, X,
     User, Wallet, Bell, Headphones, Palette,
     Shield, Lock, HelpCircle, Bug, FileText, Eye,
     LogOut, Moon, Sun, Brush
@@ -69,11 +72,113 @@ function Divider() {
     return <View style={[styles.divider, { backgroundColor: isWeb ? (isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc') : 'rgba(0,0,0,0.04)' }]} />;
 }
 
+/* ─── Bottom Sheet Modal ─── */
+function SettingsModal({ visible, onClose, title, children }: {
+    visible: boolean; onClose: () => void; title: string; children: React.ReactNode;
+}) {
+    const { isDark, colors } = useTheme();
+    return (
+        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+            <AnimatedPressable
+                preset="icon"
+                onPress={onClose}
+                style={styles.modalOverlay}
+            >
+                <View />
+            </AnimatedPressable>
+            <View style={[styles.modalContainer, {
+                backgroundColor: isDark ? '#0f172a' : '#fff',
+                borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+            }]}>
+                {/* Handle bar */}
+                <View style={styles.modalHandle}>
+                    <View style={[styles.handleBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : '#cbd5e1' }]} />
+                </View>
+
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                    <Text style={[styles.modalTitle, { color: colors.text.primary }]}>{title}</Text>
+                    <AnimatedPressable preset="icon" onPress={onClose} style={[styles.modalCloseBtn, {
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9',
+                    }]}>
+                        <X size={18} color={colors.text.secondary} />
+                    </AnimatedPressable>
+                </View>
+
+                {/* Content */}
+                <View style={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+                    {children}
+                </View>
+            </View>
+        </Modal>
+    );
+}
+
+/* ─── Toggle Setting Row (for modals) ─── */
+function ToggleRow({ label, subtitle, value, onToggle }: {
+    label: string; subtitle?: string; value: boolean; onToggle: (v: boolean) => void;
+}) {
+    const { isDark, colors } = useTheme();
+    return (
+        <View style={styles.toggleRow}>
+            <View style={{ flex: 1 }}>
+                <Text style={[styles.toggleLabel, { color: colors.text.primary }]}>{label}</Text>
+                {subtitle && <Text style={[styles.toggleSubtitle, { color: colors.text.secondary }]}>{subtitle}</Text>}
+            </View>
+            <Switch
+                value={value}
+                onValueChange={onToggle}
+                trackColor={{ false: '#767577', true: '#38b4ba' }}
+                thumbColor={Platform.OS === 'ios' ? '#fff' : (value ? '#fff' : '#f4f3f4')}
+                ios_backgroundColor="#3e3e3e"
+            />
+        </View>
+    );
+}
+
+/* ─── Quality Option (for Audio Quality modal) ─── */
+function QualityOption({ label, subtitle, selected, onPress }: {
+    label: string; subtitle: string; selected: boolean; onPress: () => void;
+}) {
+    const { isDark, colors } = useTheme();
+    return (
+        <AnimatedPressable preset="row" onPress={onPress} style={[styles.qualityRow, {
+            backgroundColor: selected ? (isDark ? 'rgba(56,180,186,0.1)' : 'rgba(56,180,186,0.06)') : 'transparent',
+            borderColor: selected ? '#38b4ba' : (isDark ? 'rgba(255,255,255,0.06)' : '#f1f5f9'),
+        }]}>
+            <View style={{ flex: 1 }}>
+                <Text style={[styles.toggleLabel, { color: selected ? '#38b4ba' : colors.text.primary }]}>{label}</Text>
+                <Text style={[styles.toggleSubtitle, { color: colors.text.secondary }]}>{subtitle}</Text>
+            </View>
+            {selected && <View style={styles.qualityDot} />}
+        </AnimatedPressable>
+    );
+}
+
 export default function SettingsScreen() {
     const router = useRouter();
     const { isDark, colors, toggleTheme } = useTheme();
     const { signOut, role } = useAuth();
     const Container = isWeb ? View : SafeAreaView;
+
+    // Modal states
+    const [notifModal, setNotifModal] = useState(false);
+    const [audioModal, setAudioModal] = useState(false);
+    const [privacyModal, setPrivacyModal] = useState(false);
+    const [securityModal, setSecurityModal] = useState(false);
+
+    // Notification preferences
+    const [notifNewReleases, setNotifNewReleases] = useState(true);
+    const [notifUpdates, setNotifUpdates] = useState(true);
+    const [notifRecommendations, setNotifRecommendations] = useState(false);
+    const [notifNFTActivity, setNotifNFTActivity] = useState(true);
+
+    // Audio quality
+    const [audioQuality, setAudioQuality] = useState<'low' | 'normal' | 'high' | 'lossless'>('high');
+
+    // Privacy
+    const [profilePublic, setProfilePublic] = useState(true);
+    const [showListeningActivity, setShowListeningActivity] = useState(true);
 
     const doLogout = async () => {
         await signOut();
@@ -89,6 +194,12 @@ export default function SettingsScreen() {
                 { text: 'Log Out', style: 'destructive', onPress: doLogout },
             ]);
         }
+    };
+
+    const openExternalLink = (url: string) => {
+        Linking.openURL(url).catch(() => {
+            Alert.alert('Error', 'Could not open link.');
+        });
     };
 
     return (
@@ -121,9 +232,19 @@ export default function SettingsScreen() {
                 {/* Account */}
                 <SectionHeader title="Account" />
                 <SectionCard>
-                    <SettingRow icon={<User size={18} color="#38b4ba" />} label="Edit Profile" subtitle="Name, avatar, bio" />
+                    <SettingRow
+                        icon={<User size={18} color="#38b4ba" />}
+                        label="Edit Profile"
+                        subtitle="Name, avatar, bio"
+                        onPress={() => router.push('/(consumer)/edit-profile')}
+                    />
                     <Divider />
-                    <SettingRow icon={<Wallet size={18} color="#38b4ba" />} label="Wallet" subtitle="Connected wallets & transactions" />
+                    <SettingRow
+                        icon={<Wallet size={18} color="#38b4ba" />}
+                        label="Wallet"
+                        subtitle="Connected wallets & transactions"
+                        onPress={() => router.push('/(consumer)/wallet')}
+                    />
                     {role === 'listener' && (
                         <>
                             <Divider />
@@ -140,9 +261,19 @@ export default function SettingsScreen() {
                 {/* Preferences */}
                 <SectionHeader title="Preferences" />
                 <SectionCard>
-                    <SettingRow icon={<Bell size={18} color="#38b4ba" />} label="Notifications" subtitle="Alerts, updates, recommendations" />
+                    <SettingRow
+                        icon={<Bell size={18} color="#38b4ba" />}
+                        label="Notifications"
+                        subtitle="Alerts, updates, recommendations"
+                        onPress={() => setNotifModal(true)}
+                    />
                     <Divider />
-                    <SettingRow icon={<Headphones size={18} color="#38b4ba" />} label="Audio Quality" subtitle="Streaming & download quality" />
+                    <SettingRow
+                        icon={<Headphones size={18} color="#38b4ba" />}
+                        label="Audio Quality"
+                        subtitle="Streaming & download quality"
+                        onPress={() => setAudioModal(true)}
+                    />
                     <Divider />
                     <SettingRow
                         icon={isDark ? <Moon size={18} color="#38b4ba" /> : <Sun size={18} color="#38b4ba" />}
@@ -157,21 +288,48 @@ export default function SettingsScreen() {
                 {/* Privacy & Security */}
                 <SectionHeader title="Privacy & Security" />
                 <SectionCard>
-                    <SettingRow icon={<Eye size={18} color="#38b4ba" />} label="Privacy" subtitle="Profile visibility, listening activity" />
+                    <SettingRow
+                        icon={<Eye size={18} color="#38b4ba" />}
+                        label="Privacy"
+                        subtitle="Profile visibility, listening activity"
+                        onPress={() => setPrivacyModal(true)}
+                    />
                     <Divider />
-                    <SettingRow icon={<Lock size={18} color="#38b4ba" />} label="Security" subtitle="Two-factor authentication" />
+                    <SettingRow
+                        icon={<Lock size={18} color="#38b4ba" />}
+                        label="Security"
+                        subtitle="Two-factor authentication"
+                        onPress={() => setSecurityModal(true)}
+                    />
                 </SectionCard>
 
                 {/* Support */}
                 <SectionHeader title="Support" />
                 <SectionCard>
-                    <SettingRow icon={<HelpCircle size={18} color="#38b4ba" />} label="Help Center" subtitle="FAQs & support articles" />
+                    <SettingRow
+                        icon={<HelpCircle size={18} color="#38b4ba" />}
+                        label="Help Center"
+                        subtitle="FAQs & support articles"
+                        onPress={() => openExternalLink('mailto:support@mu6.app?subject=Help Request')}
+                    />
                     <Divider />
-                    <SettingRow icon={<Bug size={18} color="#38b4ba" />} label="Report a Bug" />
+                    <SettingRow
+                        icon={<Bug size={18} color="#38b4ba" />}
+                        label="Report a Bug"
+                        onPress={() => openExternalLink('mailto:support@mu6.app?subject=Bug Report&body=Please describe the bug you encountered:')}
+                    />
                     <Divider />
-                    <SettingRow icon={<FileText size={18} color="#38b4ba" />} label="Terms of Service" />
+                    <SettingRow
+                        icon={<FileText size={18} color="#38b4ba" />}
+                        label="Terms of Service"
+                        onPress={() => openExternalLink('https://mu6.app/terms')}
+                    />
                     <Divider />
-                    <SettingRow icon={<Shield size={18} color="#38b4ba" />} label="Privacy Policy" />
+                    <SettingRow
+                        icon={<Shield size={18} color="#38b4ba" />}
+                        label="Privacy Policy"
+                        onPress={() => openExternalLink('https://mu6.app/privacy')}
+                    />
                 </SectionCard>
 
                 {/* Log Out */}
@@ -184,6 +342,110 @@ export default function SettingsScreen() {
                 {/* Version */}
                 <Text style={styles.version}>MU6 v1.0.0 • Powered by thirdweb</Text>
             </ScrollView>
+
+            {/* ─── Notifications Modal ─── */}
+            <SettingsModal visible={notifModal} onClose={() => setNotifModal(false)} title="Notifications">
+                <ToggleRow
+                    label="New Releases"
+                    subtitle="Get notified when artists you follow release new music"
+                    value={notifNewReleases}
+                    onToggle={setNotifNewReleases}
+                />
+                <ToggleRow
+                    label="App Updates"
+                    subtitle="Important updates and announcements"
+                    value={notifUpdates}
+                    onToggle={setNotifUpdates}
+                />
+                <ToggleRow
+                    label="Recommendations"
+                    subtitle="Personalized music recommendations"
+                    value={notifRecommendations}
+                    onToggle={setNotifRecommendations}
+                />
+                <ToggleRow
+                    label="NFT Activity"
+                    subtitle="Price changes, sales, and transfers"
+                    value={notifNFTActivity}
+                    onToggle={setNotifNFTActivity}
+                />
+            </SettingsModal>
+
+            {/* ─── Audio Quality Modal ─── */}
+            <SettingsModal visible={audioModal} onClose={() => setAudioModal(false)} title="Audio Quality">
+                <Text style={{ color: colors.text.secondary, fontSize: 13, marginBottom: 16 }}>
+                    Higher quality uses more data. Choose the best option for your connection.
+                </Text>
+                <QualityOption
+                    label="Low"
+                    subtitle="64 kbps • Saves data"
+                    selected={audioQuality === 'low'}
+                    onPress={() => setAudioQuality('low')}
+                />
+                <QualityOption
+                    label="Normal"
+                    subtitle="128 kbps • Balanced"
+                    selected={audioQuality === 'normal'}
+                    onPress={() => setAudioQuality('normal')}
+                />
+                <QualityOption
+                    label="High"
+                    subtitle="256 kbps • Recommended"
+                    selected={audioQuality === 'high'}
+                    onPress={() => setAudioQuality('high')}
+                />
+                <QualityOption
+                    label="Lossless"
+                    subtitle="FLAC • Studio quality"
+                    selected={audioQuality === 'lossless'}
+                    onPress={() => setAudioQuality('lossless')}
+                />
+            </SettingsModal>
+
+            {/* ─── Privacy Modal ─── */}
+            <SettingsModal visible={privacyModal} onClose={() => setPrivacyModal(false)} title="Privacy">
+                <ToggleRow
+                    label="Public Profile"
+                    subtitle="Allow other users to see your profile and collection"
+                    value={profilePublic}
+                    onToggle={setProfilePublic}
+                />
+                <ToggleRow
+                    label="Listening Activity"
+                    subtitle="Show what you're currently listening to"
+                    value={showListeningActivity}
+                    onToggle={setShowListeningActivity}
+                />
+            </SettingsModal>
+
+            {/* ─── Security Modal ─── */}
+            <SettingsModal visible={securityModal} onClose={() => setSecurityModal(false)} title="Security">
+                <View style={[styles.securityInfoCard, {
+                    backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : 'rgba(56,180,186,0.05)',
+                    borderColor: isDark ? 'rgba(56,180,186,0.2)' : 'rgba(56,180,186,0.15)',
+                }]}>
+                    <Shield size={24} color="#38b4ba" />
+                    <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 15, marginTop: 12 }}>
+                        Wallet-Based Security
+                    </Text>
+                    <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+                        Your account is secured by your Web3 wallet. There are no passwords to manage — authentication is handled through your connected wallet or email verification.
+                    </Text>
+                </View>
+                <View style={[styles.securityInfoCard, {
+                    backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.05)',
+                    borderColor: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.15)',
+                    marginTop: 12,
+                }]}>
+                    <Lock size={24} color="#8b5cf6" />
+                    <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 15, marginTop: 12 }}>
+                        Two-Factor Authentication
+                    </Text>
+                    <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+                        2FA is built into your wallet. When you sign in with email, a one-time verification code provides your second factor.
+                    </Text>
+                </View>
+            </SettingsModal>
         </Container>
     );
 }
@@ -257,5 +519,85 @@ const styles = StyleSheet.create({
         fontSize: 11,
         textAlign: 'center',
         marginTop: 24,
+    },
+    // Modal styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+    },
+    modalContainer: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        maxHeight: '70%',
+    },
+    modalHandle: {
+        alignItems: 'center',
+        paddingVertical: 12,
+    },
+    handleBar: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingBottom: 16,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+    },
+    modalCloseBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    toggleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255,255,255,0.04)',
+    },
+    toggleLabel: {
+        fontWeight: '600',
+        fontSize: 14,
+    },
+    toggleSubtitle: {
+        fontSize: 11,
+        marginTop: 2,
+    },
+    qualityRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 8,
+    },
+    qualityDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: '#38b4ba',
+    },
+    securityInfoCard: {
+        alignItems: 'center',
+        padding: 24,
+        borderRadius: 16,
+        borderWidth: 1,
     },
 });

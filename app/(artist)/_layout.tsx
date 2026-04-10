@@ -2,8 +2,9 @@ import React from 'react';
 import { View, Text, Platform } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Tabs, useRouter, usePathname } from 'expo-router';
-import { LayoutDashboard, Upload, Music, DollarSign, Gem, ChevronLeft } from 'lucide-react-native';
+import { LayoutDashboard, Upload, Music, DollarSign, Gem, Settings, LogOut } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -11,6 +12,7 @@ const isWeb = Platform.OS === 'web';
 function SidebarItem({ path, match, label, Icon, active, onPress }: {
     path: string; match: string; label: string; Icon: any; active: boolean; onPress: () => void;
 }) {
+    const { isDark, colors } = useTheme();
     return (
         <AnimatedPressable
             preset="row"
@@ -30,10 +32,10 @@ function SidebarItem({ path, match, label, Icon, active, onPress }: {
                 borderColor: active ? 'rgba(56,180,186,0.15)' : 'transparent',
             }}
         >
-            <Icon size={18} color={active ? '#38b4ba' : '#64748b'} />
+            <Icon size={18} color={active ? '#38b4ba' : isDark ? '#64748b' : '#94a3b8'} />
             <Text
                 style={{
-                    color: active ? '#38b4ba' : '#475569',
+                    color: active ? '#38b4ba' : colors.text.secondary,
                     fontSize: 14,
                     fontWeight: active ? '600' : '500',
                     marginLeft: 12,
@@ -50,6 +52,7 @@ function CreatorSidebar() {
     const router = useRouter();
     const pathname = usePathname();
     const { signOut } = useAuth();
+    const { isDark, colors } = useTheme();
 
     const navItems = [
         { path: '/(artist)/dashboard', match: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
@@ -57,62 +60,87 @@ function CreatorSidebar() {
         { path: '/(artist)/songs', match: '/songs', label: 'My Songs', Icon: Music },
         { path: '/(artist)/earnings', match: '/earnings', label: 'Earnings', Icon: DollarSign },
         { path: '/(artist)/nft-manager', match: '/nft-manager', label: 'NFT Manager', Icon: Gem },
+        { path: '/(artist)/settings', match: '/settings', label: 'Settings', Icon: Settings },
     ];
+
+    const handleLogout = async () => {
+        await signOut();
+        router.replace('/(auth)/login');
+    };
 
     return (
         <View
             style={{
                 width: 200,
-                backgroundColor: '#fafcfd',
+                backgroundColor: colors.bg.base,
                 borderRightWidth: 1,
-                borderRightColor: '#f1f5f9',
+                borderRightColor: isDark ? 'rgba(255,255,255,0.05)' : '#f1f5f9',
                 paddingTop: 24,
                 paddingHorizontal: 12,
+                justifyContent: 'space-between',
+                paddingBottom: 20,
             }}
         >
-            {/* Logo + Back */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginBottom: 32 }}>
-                <Text style={{ fontSize: 24, fontWeight: '800', color: '#0f172a', letterSpacing: -2, fontStyle: 'italic' }}>
-                    MU6
-                </Text>
-                <AnimatedPressable
-                    preset="icon"
-                    hapticType="none"
-                    onPress={async () => { await signOut(); router.replace('/(auth)/login'); }}
-                    style={{
-                        marginLeft: 8,
-                        width: 24,
-                        height: 24,
-                        borderRadius: 12,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                    }}
-                >
-                    <ChevronLeft size={16} color="#94a3b8" />
-                </AnimatedPressable>
+            <View>
+                {/* Logo */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginBottom: 32 }}>
+                    <Text style={{ fontSize: 24, fontWeight: '800', color: colors.text.primary, letterSpacing: -2, fontStyle: 'italic' }}>
+                        MU6
+                    </Text>
+                    <View style={{
+                        marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2,
+                        borderRadius: 4, backgroundColor: 'rgba(139,92,246,0.1)',
+                    }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: '#8b5cf6', letterSpacing: 1 }}>CREATOR</Text>
+                    </View>
+                </View>
+
+                {/* Nav */}
+                {navItems.map(({ path, match, label, Icon }) => {
+                    const active = pathname === match || pathname.startsWith(match);
+                    return (
+                        <SidebarItem
+                            key={path}
+                            path={path}
+                            match={match}
+                            label={label}
+                            Icon={Icon}
+                            active={active}
+                            onPress={() => router.push(path as any)}
+                        />
+                    );
+                })}
             </View>
 
-            {/* Nav */}
-            {navItems.map(({ path, match, label, Icon }) => {
-                const active = pathname === match || pathname.startsWith(match);
-                return (
-                    <SidebarItem
-                        key={path}
-                        path={path}
-                        match={match}
-                        label={label}
-                        Icon={Icon}
-                        active={active}
-                        onPress={() => router.push(path as any)}
-                    />
-                );
-            })}
+            {/* Logout button at bottom */}
+            <AnimatedPressable
+                preset="row"
+                hapticType="light"
+                onPress={handleLogout}
+                style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    borderRadius: 10,
+                    backgroundColor: 'rgba(239,68,68,0.06)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(239,68,68,0.12)',
+                }}
+            >
+                <LogOut size={16} color="#ef4444" />
+                <Text style={{ color: '#ef4444', fontSize: 13, fontWeight: '600', marginLeft: 10 }}>
+                    Logout
+                </Text>
+            </AnimatedPressable>
         </View>
     );
 }
 
 /* ─── Layout Entry Point ─── */
 export default function CreatorLayout() {
+    const { isDark, colors } = useTheme();
+
     const tabScreens = (
         <Tabs
             screenOptions={{
@@ -120,15 +148,15 @@ export default function CreatorLayout() {
                 tabBarActiveTintColor: '#38b4ba',
                 tabBarInactiveTintColor: '#94a3b8',
                 tabBarStyle: isWeb ? { display: 'none' } : {
-                    backgroundColor: 'rgba(255,255,255,0.5)',
+                    backgroundColor: isDark ? '#030711' : 'rgba(255,255,255,0.5)',
                     borderTopWidth: 1,
-                    borderTopColor: 'rgba(255,255,255,0.4)',
+                    borderTopColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.4)',
                     paddingBottom: 4,
                     paddingTop: 4,
                     height: 56,
                 },
                 tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
-                sceneStyle: { backgroundColor: isWeb ? '#f8fafc' : 'transparent' },
+                sceneStyle: { backgroundColor: colors.bg.base },
             }}
         >
             <Tabs.Screen name="dashboard" options={{ title: 'Dashboard', tabBarIcon: ({ color, size }) => <LayoutDashboard size={size} color={color} /> }} />
@@ -136,13 +164,16 @@ export default function CreatorLayout() {
             <Tabs.Screen name="songs" options={{ title: 'Songs', tabBarIcon: ({ color, size }) => <Music size={size} color={color} /> }} />
             <Tabs.Screen name="earnings" options={{ title: 'Earnings', tabBarIcon: ({ color, size }) => <DollarSign size={size} color={color} /> }} />
             <Tabs.Screen name="nft-manager" options={{ title: 'NFTs', tabBarIcon: ({ color, size }) => <Gem size={size} color={color} /> }} />
+            <Tabs.Screen name="settings" options={{ href: null }} />
             <Tabs.Screen name="split-editor" options={{ href: null }} />
+            <Tabs.Screen name="edit-artist-profile" options={{ href: null }} />
+            <Tabs.Screen name="edit-song" options={{ href: null }} />
         </Tabs>
     );
 
     if (isWeb) {
         return (
-            <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: '#f8fafc' }}>
+            <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: colors.bg.base }}>
                 <CreatorSidebar />
                 <View style={{ flex: 1 }}>
                     {tabScreens}

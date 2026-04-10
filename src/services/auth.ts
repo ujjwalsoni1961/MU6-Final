@@ -7,7 +7,7 @@
  * - Role check helpers for route guards
  */
 
-import { supabaseAdmin, supabase } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import type { UserProfile } from '../context/AuthContext';
 
 // ── Profile sync (called by AuthContext on wallet connect) ──
@@ -18,7 +18,7 @@ export async function ensureSupabaseProfile(
 ): Promise<UserProfile | null> {
     try {
         // 1. Try to find existing profile
-        const { data: existing, error: fetchError } = await supabaseAdmin
+        const { data: existing, error: fetchError } = await supabase
             .from('profiles')
             .select('*')
             .eq('wallet_address', walletAddress.toLowerCase())
@@ -27,7 +27,7 @@ export async function ensureSupabaseProfile(
         if (existing && !fetchError) {
             // Update email if provided and different
             if (email && email !== existing.email) {
-                await supabaseAdmin
+                await supabase
                     .from('profiles')
                     .update({ email })
                     .eq('id', existing.id);
@@ -38,7 +38,7 @@ export async function ensureSupabaseProfile(
 
         // 2. Create new profile
         const newId = generateUUID();
-        const { data: created, error: createError } = await supabaseAdmin
+        const { data: created, error: createError } = await supabase
             .from('profiles')
             .upsert(
                 {
@@ -85,11 +85,12 @@ export async function updateProfile(
         bio: string;
         email: string;
         avatar_path: string;
+        cover_path: string;
         creator_type: string;
         country: string;
     }>,
 ): Promise<UserProfile | null> {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
         .from('profiles')
         .update(updates)
         .eq('id', profileId)
@@ -122,6 +123,81 @@ export async function upgradeToCreator(
     });
 }
 
+/**
+ * Create or update a profile as an artist in one step.
+ * Called from the artist-login flow where info is collected BEFORE wallet connect.
+ * Thirdweb auto-creates the wallet, then we save the collected info + wallet address.
+ */
+export async function createArtistProfile(
+    walletAddress: string,
+    artistData: {
+        displayName: string;
+        email: string;
+        creatorType: string;
+        country: string;
+        legalName?: string;
+    },
+): Promise<UserProfile | null> {
+    try {
+        const wallet = walletAddress.toLowerCase();
+
+        // Check if profile already exists
+        const { data: existing } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('wallet_address', wallet)
+            .maybeSingle();
+
+        if (existing) {
+            // Already exists — update role + info if needed
+            const { data: updated, error } = await supabase
+                .from('profiles')
+                .update({
+                    role: 'creator',
+                    display_name: artistData.displayName,
+                    email: artistData.email,
+                    creator_type: artistData.creatorType,
+                    country: artistData.country,
+                })
+                .eq('id', existing.id)
+                .select()
+                .single();
+
+            if (error || !updated) return null;
+            return mapDbToProfile(updated);
+        }
+
+        // Create new profile directly as creator
+        const newId = generateUUID();
+        const { data: created, error: createError } = await supabase
+            .from('profiles')
+            .upsert(
+                {
+                    id: newId,
+                    wallet_address: wallet,
+                    display_name: artistData.displayName,
+                    email: artistData.email,
+                    creator_type: artistData.creatorType,
+                    country: artistData.country,
+                    role: 'creator',
+                },
+                { onConflict: 'wallet_address' },
+            )
+            .select()
+            .single();
+
+        if (createError || !created) {
+            console.error('[auth] Artist profile creation error:', createError);
+            return null;
+        }
+
+        return mapDbToProfile(created);
+    } catch (err) {
+        console.error('[auth] createArtistProfile error:', err);
+        return null;
+    }
+}
+
 // ── Role checks ──
 
 export function isCreator(profile: UserProfile | null): boolean {
@@ -144,6 +220,7 @@ function mapDbToProfile(row: any): UserProfile {
         creatorType: row.creator_type,
         role: row.role,
         avatarPath: row.avatar_path,
+        coverPath: row.cover_path,
         isVerified: row.is_verified,
         country: row.country,
     };

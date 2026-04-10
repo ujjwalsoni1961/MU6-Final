@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TrendingUp, DollarSign, Music, Gem, Users, ArrowRight } from 'lucide-react-native';
+import { TrendingUp, DollarSign, Music, Gem, Users, ArrowRight, UserCog, Settings, LogOut } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
@@ -100,7 +100,7 @@ function TopSongRow({ rank, song }: { rank: number; song: any }) {
 
 /* ─── Main Screen ─── */
 export default function CreatorDashboardScreen() {
-    const { profile } = useAuth();
+    const { profile, signOut } = useAuth();
     const { isDark, colors } = useTheme();
     const router = useRouter();
     const { data: dashboard, loading: loadingDashboard } = useCreatorDashboard();
@@ -210,7 +210,33 @@ export default function CreatorDashboardScreen() {
                     <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>
                         Quick Actions
                     </Text>
-                    <View style={{ flexDirection: isWeb ? 'row' : 'column', gap: 8 }}>
+                    <View style={{ flexDirection: isWeb ? 'row' : 'column', gap: 8, flexWrap: 'wrap' }}>
+                        <AnimatedPressable
+                            preset="row"
+                            hapticType="light"
+                            onPress={() => router.push('/(artist)/edit-artist-profile' as any)}
+                            style={{
+                                flex: 1, flexDirection: 'row', alignItems: 'center',
+                                padding: isWeb ? 18 : 14, borderRadius: 14,
+                                backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'),
+                                borderWidth: 1,
+                                borderColor: isDark ? 'rgba(255,255,255,0.06)' : (isWeb ? '#f1f5f9' : 'rgba(255,255,255,0.4)'),
+                            }}
+                        >
+                            <View style={{
+                                width: 38, height: 38, borderRadius: 10,
+                                backgroundColor: 'rgba(56,180,186,0.1)',
+                                alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                            }}>
+                                <UserCog size={18} color="#38b4ba" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text.primary }}>Edit Profile</Text>
+                                <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }}>Update your artist info</Text>
+                            </View>
+                            <ArrowRight size={16} color={colors.text.muted} />
+                        </AnimatedPressable>
+
                         <AnimatedPressable
                             preset="row"
                             hapticType="light"
@@ -261,6 +287,57 @@ export default function CreatorDashboardScreen() {
                                 <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }}>Detailed royalty breakdown</Text>
                             </View>
                             <ArrowRight size={16} color={colors.text.muted} />
+                        </AnimatedPressable>
+
+                        <AnimatedPressable
+                            preset="row"
+                            hapticType="light"
+                            onPress={() => router.push('/(artist)/settings' as any)}
+                            style={{
+                                flex: 1, flexDirection: 'row', alignItems: 'center',
+                                padding: isWeb ? 18 : 14, borderRadius: 14,
+                                backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'),
+                                borderWidth: 1,
+                                borderColor: isDark ? 'rgba(255,255,255,0.06)' : (isWeb ? '#f1f5f9' : 'rgba(255,255,255,0.4)'),
+                            }}
+                        >
+                            <View style={{
+                                width: 38, height: 38, borderRadius: 10,
+                                backgroundColor: 'rgba(139,92,246,0.1)',
+                                alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                            }}>
+                                <Settings size={18} color="#8b5cf6" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text.primary }}>Settings</Text>
+                                <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }}>Payout, account & preferences</Text>
+                            </View>
+                            <ArrowRight size={16} color={colors.text.muted} />
+                        </AnimatedPressable>
+
+                        <AnimatedPressable
+                            preset="row"
+                            hapticType="light"
+                            onPress={async () => { await signOut(); router.replace('/(auth)/login'); }}
+                            style={{
+                                flex: 1, flexDirection: 'row', alignItems: 'center',
+                                padding: isWeb ? 18 : 14, borderRadius: 14,
+                                backgroundColor: isDark ? 'rgba(239,68,68,0.04)' : '#fef2f2',
+                                borderWidth: 1,
+                                borderColor: isDark ? 'rgba(239,68,68,0.1)' : '#fecaca',
+                            }}
+                        >
+                            <View style={{
+                                width: 38, height: 38, borderRadius: 10,
+                                backgroundColor: 'rgba(239,68,68,0.1)',
+                                alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                            }}>
+                                <LogOut size={18} color="#ef4444" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '700', color: '#ef4444' }}>Logout</Text>
+                                <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }}>Sign out of your account</Text>
+                            </View>
                         </AnimatedPressable>
                     </View>
                 </View>

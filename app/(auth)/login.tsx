@@ -7,6 +7,7 @@ import { ConnectEmbed } from 'thirdweb/react';
 
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
+import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { thirdwebClient, activeChain, supportedWallets } from '../../src/lib/thirdweb';
 
 const isWeb = Platform.OS === 'web';
@@ -99,6 +100,18 @@ function WebLogin() {
 
                     {/* Thirdweb Connect Embed – auto-creates in-app wallet via email/Google/Apple */}
                     <WalletConnect isDark={isDark} />
+
+                    {/* Artist registration link */}
+                    <AnimatedPressable
+                        preset="button"
+                        onPress={() => router.push('/(auth)/artist-login')}
+                        style={{ alignItems: 'center', marginTop: 20 }}
+                    >
+                        <Text style={{ fontSize: 13, color: '#64748b' }}>
+                            Are you an artist?{' '}
+                            <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Register here</Text>
+                        </Text>
+                    </AnimatedPressable>
                 </View>
             </View>
         </View>
@@ -109,18 +122,17 @@ function WebLogin() {
 function MobileLogin() {
     const router = useRouter();
     const { colors, isDark } = useTheme();
-    const { isConnected, isLoading, role } = useAuth();
+    const { isConnected, isLoading, role, signOut } = useAuth();
 
-    // Auto-redirect after wallet connects
+    // Auto-redirect after wallet connects — consumers and admins only
     useEffect(() => {
         if (isConnected && !isLoading && role) {
             if (role === 'admin') {
                 router.replace('/(admin)/dashboard');
-            } else if (role === 'creator') {
-                router.replace('/(artist)/dashboard');
-            } else {
+            } else if (role === 'listener') {
                 router.replace('/(consumer)/home');
             }
+            // role === 'creator' → do NOT redirect, show blocked message below
         }
     }, [isConnected, isLoading, role]);
 
@@ -131,6 +143,36 @@ function MobileLogin() {
                 <Text style={{ color: colors.text.secondary, marginTop: 16, fontSize: 14 }}>
                     Setting up your profile...
                 </Text>
+            </SafeAreaView>
+        );
+    }
+
+    // Artist on mobile — blocked
+    if (isConnected && role === 'creator') {
+        return (
+            <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent', justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+                <Text style={{ fontSize: 48, marginBottom: 20 }}>🎤</Text>
+                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, textAlign: 'center', marginBottom: 12 }}>
+                    Artist Dashboard{'\n'}Desktop Only
+                </Text>
+                <Text style={{ fontSize: 15, color: colors.text.secondary, textAlign: 'center', lineHeight: 22, marginBottom: 32, maxWidth: 300 }}>
+                    The Artist Dashboard is only available on desktop. Please log in from your computer to manage your music.
+                </Text>
+                <AnimatedPressable
+                    preset="button"
+                    onPress={async () => {
+                        await signOut();
+                        router.replace('/(auth)/login');
+                    }}
+                    style={{
+                        backgroundColor: 'rgba(255,255,255,0.06)',
+                        paddingHorizontal: 28, paddingVertical: 14,
+                        borderRadius: 14, borderWidth: 1,
+                        borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                    }}
+                >
+                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>Sign Out</Text>
+                </AnimatedPressable>
             </SafeAreaView>
         );
     }
@@ -165,7 +207,7 @@ function MobileLogin() {
 
                 {/*
                   Thirdweb ConnectEmbed – matches app theme.
-                  The embed’s internal root has flex:1 which collapses inside
+                  The embed's internal root has flex:1 which collapses inside
                   ScrollView. Wrapping with minHeight ensures it renders.
                 */}
                 <View style={{ width: '100%', maxWidth: 380, minHeight: 400 }}>

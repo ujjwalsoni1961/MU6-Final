@@ -1,14 +1,16 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
-import { BadgeCheck } from 'lucide-react-native';
+import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
+import { BadgeCheck, X } from 'lucide-react-native';
 import TabPill from '../../src/components/shared/TabPill';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import SongRow from '../../src/components/shared/SongRow';
 import NFTCard from '../../src/components/shared/NFTCard';
+import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { Song, NFT, Artist } from '../../src/types';
 import { useLikedSongs, useArtists, useOwnedNFTs } from '../../src/hooks/useData';
 
@@ -45,7 +47,7 @@ function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
                 borderWidth: 1.5,
                 borderColor: isWeb ? (isDark ? colors.border.base : '#e2e8f0') : (isDark ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.4)'),
             }}>
-                <Image source={{ uri: item.avatar }} style={{ width: 46, height: 46, borderRadius: 23 }} contentFit="cover" />
+                <AvatarDisplay uri={item.avatar} size={46} />
             </View>
             <View style={{ flex: 1, marginLeft: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -76,6 +78,18 @@ export default function LibraryScreen() {
     const { data: likedSongs, loading: loadingSongs, refresh: refreshLiked } = useLikedSongs();
     const { data: artists, loading: loadingArtists, refresh: refreshArtists } = useArtists(20);
     const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
+
+    const [groupModalVisible, setGroupModalVisible] = useState(false);
+    const [selectedGroup, setSelectedGroup] = useState<NFT[]>([]);
+
+    const groupedNFTs = React.useMemo(() => {
+        const groups: Record<string, NFT[]> = {};
+        for (const nft of (ownedNFTs || [])) {
+            if (!groups[nft.songId]) groups[nft.songId] = [];
+            groups[nft.songId].push(nft);
+        }
+        return Object.values(groups);
+    }, [ownedNFTs]);
 
     useFocusEffect(
         useCallback(() => {
@@ -149,23 +163,27 @@ export default function LibraryScreen() {
             <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 {activeTab === 'NFTs' ? (
                     <FlatList
-                        data={ownedNFTs}
+                        data={loadingNFTs ? [] : groupedNFTs}
                         ListHeaderComponent={renderHeader}
-                        renderItem={({ item }: { item: NFT }) => (
-                            <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
-                                <NFTCard
-                                    cover={item.coverImage}
-                                    title={item.songTitle}
-                                    artist={item.artistName}
-                                    price={item.price}
-                                    editionNumber={item.editionNumber}
-                                    totalEditions={item.totalEditions}
-                                    rarity={item.rarity}
-                                    onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } })}
-                                />
-                            </View>
-                        )}
-                        keyExtractor={(item) => item.id}
+                        renderItem={({ item }: { item: NFT[] }) => {
+                            const firstItem = item[0];
+                            const badgeText = `${item.length} Owned`;
+                            return (
+                                <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
+                                    <NFTGroupCard
+                                        cover={firstItem.coverImage}
+                                        title={firstItem.songTitle}
+                                        artist={firstItem.artistName}
+                                        badgeText={badgeText}
+                                        onPress={() => {
+                                            setSelectedGroup(item);
+                                            setGroupModalVisible(true);
+                                        }}
+                                    />
+                                </View>
+                            );
+                        }}
+                        keyExtractor={(item) => item[0].id}
                         numColumns={numCols}
                         key={`grid-${numCols}`}
                         showsVerticalScrollIndicator={false}
@@ -212,6 +230,67 @@ export default function LibraryScreen() {
                     />
                 )}
             </View>
+
+            {/* ── Group Details Modal ── */}
+            <Modal
+                visible={groupModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setGroupModalVisible(false)}
+            >
+                <View style={{
+                    flex: 1,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    justifyContent: 'flex-end',
+                }}>
+                    <View style={{
+                        backgroundColor: isDark ? '#1a1a2e' : '#ffffff',
+                        borderTopLeftRadius: 28,
+                        borderTopRightRadius: 28,
+                        paddingTop: 8,
+                        paddingBottom: Math.max(insets.bottom, 20),
+                        maxHeight: '85%',
+                    }}>
+                        <View style={{
+                            width: 40, height: 4, borderRadius: 2,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
+                            alignSelf: 'center', marginBottom: 16,
+                        }} />
+                        
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 12 }}>
+                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
+                                {selectedGroup[0]?.songTitle || 'Collection'}
+                            </Text>
+                            <AnimatedPressable preset="icon" onPress={() => setGroupModalVisible(false)}>
+                                <X size={22} color={colors.text.secondary} />
+                            </AnimatedPressable>
+                        </View>
+
+                        <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 40 }}>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                                {selectedGroup.map((item) => (
+                                    <View key={item.id} style={{ width: '50%', padding: 6 }}>
+                                        <NFTCard
+                                            cover={item.coverImage}
+                                            title={item.songTitle}
+                                            artist={item.artistName}
+                                            price={item.price}
+                                            editionNumber={item.editionNumber}
+                                            totalEditions={item.totalEditions}
+                                            rarity={item.rarity}
+                                            variant="collection"
+                                            onPress={() => {
+                                                setGroupModalVisible(false);
+                                                router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } });
+                                            }}
+                                        />
+                                    </View>
+                                ))}
+                            </View>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
         </ScreenScaffold>
     );
 }

@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Platform, ActivityIndicator, Share as RNShare, Alert, ActionSheetIOS } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Play, Heart, Clock, ChevronLeft, Share, MoreHorizontal } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import GlassCard from '../../src/components/shared/GlassCard';
 import GenreTag from '../../src/components/shared/GenreTag';
@@ -103,12 +104,12 @@ export default function SongDetailScreen() {
                                 onPress={() => playSong(song)}
                                 style={{
                                     height: 56, paddingHorizontal: 32, borderRadius: 28,
-                                    backgroundColor: isDark ? '#22c55e' : '#dcfce7', flexDirection: 'row', alignItems: 'center', gap: 8,
-                                    shadowColor: '#22c55e', shadowOffset: { width: 0, height: 8 }, shadowOpacity: isDark ? 0.3 : 0.2, shadowRadius: 16, elevation: 6
+                                    backgroundColor: '#89d2d6', flexDirection: 'row', alignItems: 'center', gap: 8,
+                                    shadowColor: '#89d2d6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, elevation: 6
                                 }}
                             >
-                                <Play size={24} color={isDark ? '#000' : '#0f172a'} fill={isDark ? '#000' : '#0f172a'} />
-                                <Text style={{ fontSize: 17, fontWeight: '700', color: isDark ? '#000' : '#0f172a' }}>Play</Text>
+                                <Play size={24} color="#0f172a" fill="#0f172a" />
+                                <Text style={{ fontSize: 17, fontWeight: '700', color: '#0f172a' }}>Play</Text>
                             </AnimatedPressable>
 
                             <AnimatedPressable
@@ -124,20 +125,66 @@ export default function SongDetailScreen() {
                                 <Heart size={22} color={liked ? '#ef4444' : colors.text.primary} fill={liked ? '#ef4444' : 'transparent'} />
                             </AnimatedPressable>
 
-                            {[Share, MoreHorizontal].map((Icon, idx) => (
-                                <AnimatedPressable
-                                    key={idx}
-                                    preset="icon"
-                                    style={{
-                                        width: 56, height: 56, borderRadius: 28,
-                                        backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : '#fff',
-                                        alignItems: 'center', justifyContent: 'center',
-                                        borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9',
-                                    }}
-                                >
-                                    <Icon size={22} color={colors.text.primary} />
-                                </AnimatedPressable>
-                            ))}
+                            {/* Share Button */}
+                            <AnimatedPressable
+                                preset="icon"
+                                onPress={async () => {
+                                    const shareUrl = `https://mu6.app/song/${song.id}`;
+                                    const shareMessage = `🎵 Listen to "${song.title}" by ${song.artistName} on MU6`;
+                                    if (Platform.OS === 'web') {
+                                        if (navigator.share) {
+                                            try { await navigator.share({ title: song.title, text: shareMessage, url: shareUrl }); } catch {}
+                                        } else {
+                                            await Clipboard.setStringAsync(shareUrl);
+                                            alert('Link copied to clipboard!');
+                                        }
+                                    } else {
+                                        try { await RNShare.share({ message: `${shareMessage}\n${shareUrl}` }); } catch {}
+                                    }
+                                }}
+                                style={{
+                                    width: 56, height: 56, borderRadius: 28,
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : '#fff',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9',
+                                }}
+                            >
+                                <Share size={22} color={colors.text.primary} />
+                            </AnimatedPressable>
+
+                            {/* More Options Button */}
+                            <AnimatedPressable
+                                preset="icon"
+                                onPress={() => {
+                                    const options = ['Add to Playlist', 'View Artist', 'Report', 'Cancel'];
+                                    const cancelIdx = 3;
+                                    if (Platform.OS === 'ios') {
+                                        ActionSheetIOS.showActionSheetWithOptions(
+                                            { options, cancelButtonIndex: cancelIdx, destructiveButtonIndex: 2 },
+                                            (idx) => {
+                                                if (idx === 0) Alert.alert('Coming Soon', 'Playlists will be available in a future update.');
+                                                if (idx === 1) router.push({ pathname: '/(consumer)/artist-profile', params: { id: song._creatorId || '' } });
+                                                if (idx === 2) Alert.alert('Report Submitted', 'Thank you. We\'ll review this content.');
+                                            }
+                                        );
+                                    } else {
+                                        Alert.alert('Options', undefined, [
+                                            { text: 'Add to Playlist', onPress: () => Alert.alert('Coming Soon', 'Playlists will be available in a future update.') },
+                                            { text: 'View Artist', onPress: () => router.push({ pathname: '/(consumer)/artist-profile', params: { id: song._creatorId || '' } }) },
+                                            { text: 'Report', style: 'destructive', onPress: () => Alert.alert('Report Submitted', 'Thank you. We\'ll review this content.') },
+                                            { text: 'Cancel', style: 'cancel' },
+                                        ]);
+                                    }
+                                }}
+                                style={{
+                                    width: 56, height: 56, borderRadius: 28,
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : '#fff',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9',
+                                }}
+                            >
+                                <MoreHorizontal size={22} color={colors.text.primary} />
+                            </AnimatedPressable>
                         </View>
 
                         {/* Lyrics */}
@@ -198,7 +245,7 @@ export default function SongDetailScreen() {
                         {/* NFT Section */}
                         {nftRelease && (
                             <GlassCard intensity="heavy" style={{ marginBottom: 20, width: '100%' }}>
-                                <Text style={{ fontSize: 36, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, textAlign: 'center' }}>{nftRelease.price} ETH</Text>
+                                <Text style={{ fontSize: 36, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, textAlign: 'center' }}>{nftRelease.price} POL</Text>
                                 <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4, textAlign: 'center' }}>
                                     {nftRelease.editionNumber - 1} of {nftRelease.totalEditions} editions minted
                                 </Text>

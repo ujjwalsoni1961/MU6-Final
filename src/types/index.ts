@@ -91,3 +91,12 @@ export interface OwnedNFT extends NFT {
     activeListingPrice?: number;
     chainListingId?: string;
 }
+
+export interface TradeEvent {
+    id: string;      // Unique identifier for the event
+    type: 'mint' | 'sale';
+    date: string;    // ISO string timestamp
+    price: number;   // Price in ETH
+    fromWallet: string;
+    toWallet: string;
+}

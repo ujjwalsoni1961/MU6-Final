@@ -20,7 +20,7 @@ export default function PriceTag({ price, dark = false }: PriceTagProps) {
                     marginLeft: 4,
                 }}
             >
-                {price} ETH
+                {price} POL
             </Text>
         </GlassPill>
     );

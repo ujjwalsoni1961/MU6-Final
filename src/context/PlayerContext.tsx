@@ -11,7 +11,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Audio, AVPlaybackStatus } from 'expo-av';
+import { Audio, AVPlaybackStatus, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import { Platform } from 'react-native';
 import { Song } from '../types';
 import * as db from '../services/database';
@@ -50,9 +50,13 @@ async function ensureAudioMode() {
             allowsRecordingIOS: false,
             playsInSilentModeIOS: true,
             staysActiveInBackground: true,
-            shouldDuckAndroid: true,
+            interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+            shouldDuckAndroid: false,
+            interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+            playThroughEarpieceAndroid: false,
         });
         audioModeConfigured = true;
+        console.log('[Player] Audio mode configured successfully (DoNotMix, playsInSilent)');
     } catch (e) {
         console.warn('[Player] Failed to set audio mode:', e);
     }
@@ -68,6 +72,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [duration, setDuration] = useState(0);
     const [volume, setVolumeState] = useState(1);
     const [isBuffering, setIsBuffering] = useState(false);
+
+    // Eagerly configure audio mode on mount (critical for iOS volume)
+    useEffect(() => {
+        if (Platform.OS !== 'web') {
+            ensureAudioMode();
+        }
+    }, []);
 
     // Get current user for stream attribution
     const { profile } = useAuth();
@@ -159,13 +170,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 { uri: audioUri },
                 {
                     shouldPlay: true,
-                    volume: volume,
+                    volume: 1.0,
                     progressUpdateIntervalMillis: 500,
                 },
                 onPlaybackStatusUpdate,
             );
 
             soundRef.current = sound;
+
+            // Explicitly force volume to max after creation (iOS workaround)
+            try {
+                await sound.setVolumeAsync(1.0);
+            } catch (e) {
+                // ignore
+            }
+
             setIsBuffering(false);
             return true;
         } catch (err) {
@@ -173,7 +192,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             setIsBuffering(false);
             return false;
         }
-    }, [unloadSound, volume]);
+    }, [unloadSound]);
 
     // ── Playback status callback ──
 

@@ -9,7 +9,7 @@
  * Chain: Polygon Amoy testnet (80002) → Polygon mainnet (137) for production.
  */
 
-import { prepareContractCall, readContract, sendTransaction } from 'thirdweb';
+import { prepareContractCall, prepareTransaction, readContract, sendTransaction } from 'thirdweb';
 import type { Account } from 'thirdweb/wallets';
 import {
     setClaimConditions as sdkSetClaimConditions,
@@ -19,8 +19,10 @@ import {
     getSongNFTContract,
     getMarketplaceContract,
     getSplitContract,
+    thirdwebClient,
+    activeChain,
 } from '../lib/thirdweb';
-import { supabaseAdmin } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 // ────────────────────────────────────────────
 // Types
@@ -75,6 +77,47 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 function isNativeToken(addr: string): boolean {
     const lower = addr.toLowerCase();
     return lower === NATIVE_TOKEN.toLowerCase() || lower === '0x0000000000000000000000000000000000000000';
+}
+
+/**
+ * Transfer native MATIC from the platform server wallet to an artist's wallet.
+ * Uses the nft-admin edge function's `transferFunds` action.
+ * This is a best-effort call — if it fails, the DB revenue is still recorded.
+ */
+async function transferToArtistWallet(
+    recipientAddress: string,
+    amountWei: string,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
+        console.log('[blockchain] transferToArtistWallet:', { recipientAddress, amountWei });
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+                action: 'transferFunds',
+                recipientAddress,
+                amountWei,
+            }),
+        });
+
+        const result = await response.json();
+        console.log('[blockchain] transferToArtistWallet response:', JSON.stringify(result));
+
+        if (!response.ok || !result.success) {
+            console.warn('[blockchain] Transfer failed (non-blocking):', result.error || `HTTP ${response.status}`);
+            return { success: false, error: result.error || `HTTP ${response.status}` };
+        }
+
+        return { success: true };
+    } catch (err: any) {
+        console.warn('[blockchain] Transfer call failed (non-blocking):', err.message);
+        return { success: false, error: err.message };
+    }
 }
 
 // ────────────────────────────────────────────
@@ -282,7 +325,90 @@ export async function serverLazyMint(
 }
 
 /**
- * Step 2: Claim (mint) an NFT. Buyer calls this to mint from a lazy-minted batch.
+ * Server-side set claim conditions via the Supabase Edge Function `nft-admin`.
+ * Sets the price and supply limits for claiming NFTs on the DropERC721 contract.
+ * Uses the server wallet so the buyer doesn't need admin permissions.
+ */
+export async function serverSetClaimConditions(
+    priceWei: string,
+    contractAddress?: string,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
+        console.log('[blockchain] serverSetClaimConditions: calling edge function', { priceWei });
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+                action: 'setClaimConditions',
+                priceWei,
+                contractAddress: contractAddress || CONTRACTS.SONG_NFT,
+            }),
+        });
+
+        const result = await response.json();
+        console.log('[blockchain] serverSetClaimConditions response:', JSON.stringify(result));
+
+        if (!response.ok || !result.success) {
+            return { success: false, error: result.error || `HTTP ${response.status}` };
+        }
+
+        return { success: true };
+    } catch (err: any) {
+        console.error('[blockchain] serverSetClaimConditions error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Server-mediated NFT claim.
+ * The server wallet (which has MINTER_ROLE) calls the contract's claim function
+ * on behalf of the buyer. The NFT is minted directly to receiverAddress.
+ * The server pays the on-chain claim price from its own balance.
+ */
+export async function serverClaim(
+    receiverAddress: string,
+    onChainPriceWei: string,
+    contractAddress?: string,
+): Promise<{ success: boolean; txHash?: string; error?: string }> {
+    try {
+        const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
+        console.log('[blockchain] serverClaim: claiming NFT for', receiverAddress, 'at on-chain price', onChainPriceWei);
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+                action: 'serverClaim',
+                receiverAddress,
+                onChainPriceWei,
+                contractAddress: contractAddress || CONTRACTS.SONG_NFT,
+            }),
+        });
+
+        const result = await response.json();
+        console.log('[blockchain] serverClaim response:', JSON.stringify(result));
+
+        if (!response.ok || !result.success) {
+            return { success: false, error: result.error || `HTTP ${response.status}` };
+        }
+
+        return { success: true, txHash: result.txHash };
+    } catch (err: any) {
+        console.error('[blockchain] serverClaim error:', err);
+        return { success: false, error: err.message };
+    }
+}
+
+/**
+ * Step 2: Claim (purchase) an NFT. Buyer calls this to claim from a lazy-minted batch.
  * Respects claim conditions (price, allowlist, supply limits).
  */
 export async function claimSongNFT(
@@ -545,7 +671,7 @@ export async function createNFTRelease(
 }> {
     try {
         // 1. Create the release record in Supabase
-        const { data: release, error: dbError } = await supabaseAdmin
+        const { data: release, error: dbError } = await supabase
             .from('nft_releases')
             .insert({
                 song_id: config.songId,
@@ -578,9 +704,23 @@ export async function createNFTRelease(
                 config.metadataUri,
             );
             if (!mintResult.success) {
-                console.warn('[blockchain] Server lazy mint failed, DB record still created:', mintResult.error);
+                console.warn('[blockchain] Server lazy mint failed, rolling back DB record:', mintResult.error);
+                // Rollback the DB record since the on-chain lazy mint failed
+                await supabase.from('nft_releases').delete().eq('id', release.id);
+                return { success: false, error: `On-chain lazy mint failed: ${mintResult.error}` };
             } else {
                 console.log('[blockchain] Server lazy mint succeeded');
+            }
+
+            // 3. Set claim conditions with the correct price via server wallet.
+            //    This ensures the buyer is charged when they claim.
+            const priceWei = BigInt(Math.floor(config.priceEth * 1e18)).toString();
+            const ccResult = await serverSetClaimConditions(priceWei);
+            if (!ccResult.success) {
+                console.warn('[blockchain] Failed to set claim conditions (non-blocking):', ccResult.error);
+                // Don't roll back — the release exists, conditions can be set later
+            } else {
+                console.log('[blockchain] Claim conditions set with price:', config.priceEth, 'POL');
             }
         }
 
@@ -602,7 +742,7 @@ export async function mintToken(
     account?: Account,
 ): Promise<{ success: boolean; tokenId?: string; error?: string }> {
     try {
-        const { data: release } = await supabaseAdmin
+        const { data: release } = await supabase
             .from('nft_releases')
             .select('*')
             .eq('id', releaseId)
@@ -617,56 +757,56 @@ export async function mintToken(
         // DropERC721 uses 0-based sequential IDs: first claimed = 0, second = 1, etc.
         // We read it before claim so we know exactly which token ID was assigned.
         let onChainTokenId: string | null = null;
+        let paidOnChain = false;           // Only true if buyer actually paid
+        let confirmedPriceWei: bigint = BigInt(0);
 
-        // On-chain claim if account available
-        if (account && isContractReady()) {
-            // Read the on-chain totalSupply to know the next token ID
+        // ── PAYMENT-FIRST PURCHASE FLOW ──
+        // The on-chain `claim` function requires admin-set claim conditions which
+        // we cannot modify (server wallet lacks DEFAULT_ADMIN_ROLE). Instead:
+        // 1. Buyer sends the NFT price (from DB) directly to the server wallet
+        // 2. NFT ownership is recorded in the database
+        // 3. Server wallet transfers the artist's share to their wallet
+        // On-chain NFT claiming can be re-enabled once admin access is restored.
+        const releasePriceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
+
+        if (releasePriceWei > BigInt(0) && !account) {
+            return {
+                success: false,
+                error: 'Wallet not connected. Please connect your wallet to purchase this NFT.',
+            };
+        }
+
+        // Read on-chain totalSupply for token ID assignment (read-only, always works)
+        if (isContractReady()) {
             try {
                 const supply = await getTotalSupply();
-                onChainTokenId = supply.toString(); // next token = current supply (0-based)
-                console.log('[blockchain] next on-chain token ID will be:', onChainTokenId);
+                onChainTokenId = supply.toString();
+                console.log('[blockchain] on-chain totalSupply for token ID:', onChainTokenId);
             } catch (supplyErr) {
                 console.warn('[blockchain] Could not read totalSupply:', supplyErr);
             }
+        }
 
-            // Read the actual on-chain claim condition to get the correct price.
-            // The contract enforces its own price — we must match it exactly,
-            // regardless of what the DB release price says.
-            let priceWei: bigint;
-            let currency: string;
+        // Buyer sends POL to the server wallet as payment
+        if (account && releasePriceWei > BigInt(0)) {
+            console.log('[blockchain] Buyer paying', release.price_eth, 'POL to server wallet');
             try {
-                const condition = await getActiveClaimCondition();
-                priceWei = condition.pricePerToken;
-                currency = condition.currency;
-                console.log('[blockchain] claim condition price:', priceWei.toString(), 'currency:', currency);
-            } catch (condErr) {
-                // No active claim condition exists — this happens for releases
-                // created before setClaimConditions was wired into createNFTRelease.
-                // We set one now using the DB price so the claim can proceed.
-                console.warn('[blockchain] No active claim condition found, setting one now:', condErr);
-                priceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
-                currency = NATIVE_TOKEN;
-
-                const ccResult = await setClaimConditionsForRelease(
-                    account,
-                    release.price_eth || 0,
-                    MAX_UINT256, // unlimited – contract enforces via nextTokenIdToMint
-                );
-                if (!ccResult.success) {
-                    return { success: false, error: `Failed to set claim conditions: ${ccResult.error}` };
-                }
-                console.log('[blockchain] claim conditions set successfully, proceeding with claim');
-            }
-
-            const claimResult = await claimSongNFT(
-                account,
-                buyerWallet,
-                1,
-                currency,
-                priceWei,
-            );
-            if (!claimResult.success) {
-                return { success: false, error: `On-chain claim failed: ${claimResult.error}` };
+                const paymentTx = prepareTransaction({
+                    to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
+                    chain: activeChain,
+                    client: thirdwebClient,
+                    value: releasePriceWei,
+                });
+                const paymentResult = await sendTransaction({ account, transaction: paymentTx });
+                console.log('[blockchain] Buyer payment confirmed, tx:', paymentResult.transactionHash);
+                paidOnChain = true;
+                confirmedPriceWei = releasePriceWei;
+            } catch (payErr: any) {
+                console.error('[blockchain] Buyer payment failed:', payErr);
+                return {
+                    success: false,
+                    error: `Payment failed: ${payErr.message}. Your wallet was not charged.`,
+                };
             }
         }
 
@@ -676,7 +816,7 @@ export async function mintToken(
         // Create token record in Supabase (idempotent: ON CONFLICT DO NOTHING)
         // If a previous attempt already created the row (e.g. on-chain succeeded,
         // app crashed before DB write confirmation), we skip the duplicate.
-        const { data: token, error: tokenErr } = await supabaseAdmin
+        const { data: token, error: tokenErr } = await supabase
             .from('nft_tokens')
             .upsert(
                 {
@@ -694,7 +834,7 @@ export async function mintToken(
         }
 
         // If upsert skipped (duplicate), fetch the existing token
-        const tokenRecord = token || (await supabaseAdmin
+        const tokenRecord = token || (await supabase
             .from('nft_tokens')
             .select('id')
             .eq('nft_release_id', releaseId)
@@ -702,13 +842,88 @@ export async function mintToken(
             .single()).data;
 
         // Increment minted_count on the release so supply tracking is accurate
-        const { error: countError } = await supabaseAdmin.rpc('increment_minted_count', { release_id: releaseId }).single();
+        const { error: countError } = await supabase.rpc('increment_minted_count', { release_id: releaseId }).single();
         if (countError) {
             // Fallback: direct update if RPC not available
-            await supabaseAdmin
+            await supabase
                 .from('nft_releases')
                 .update({ minted_count: release.minted_count + 1 })
                 .eq('id', releaseId);
+        }
+
+        // ── Record Primary Sale Revenue ──
+        // ONLY record revenue when the buyer was ACTUALLY debited on-chain.
+        // confirmedPriceWei is set above only after a successful claim with a non-zero price.
+        if (paidOnChain && confirmedPriceWei > BigInt(0)) {
+            const salePriceEth = Number(confirmedPriceWei) / 1e18;
+            try {
+                // Look up the song's creator and their wallet
+                const { data: songData } = await supabase
+                    .from('songs')
+                    .select('id, creator_id')
+                    .eq('id', release.song_id)
+                    .single();
+
+                const creatorId = songData?.creator_id;
+                const sourceRef = `primary_sale:${releaseId}:${tokenId}`;
+                // Primary sale split: 5% platform fee (server keeps), 95% to artist
+                const salePricePol = salePriceEth;
+                const platformFeePol = salePricePol * 0.05;
+                const artistAmountPol = salePricePol * 0.95;
+                const artistAmountWei = BigInt(Math.floor(artistAmountPol * 1e18)).toString();
+
+                if (creatorId && salePricePol > 0) {
+                    // Create a royalty_event for the primary sale (idempotent)
+                    const { data: royaltyEvent } = await supabase
+                        .from('royalty_events')
+                        .upsert(
+                            {
+                                song_id: songData.id,
+                                source_type: 'primary_sale' as const,
+                                source_reference: sourceRef,
+                                gross_amount_eur: salePricePol,
+                            },
+                            { onConflict: 'source_type,source_reference', ignoreDuplicates: true },
+                        )
+                        .select()
+                        .single();
+
+                    if (royaltyEvent) {
+                        // Look up creator's wallet
+                        const { data: creatorProfile } = await supabase
+                            .from('profiles')
+                            .select('wallet_address')
+                            .eq('id', creatorId)
+                            .single();
+
+                        // Record royalty share (95% to artist)
+                        await supabase
+                            .from('royalty_shares')
+                            .insert({
+                                royalty_event_id: royaltyEvent.id,
+                                linked_profile_id: creatorId,
+                                wallet_address: creatorProfile?.wallet_address || null,
+                                share_type: 'direct',
+                                share_percent: 95,
+                                amount_eur: artistAmountPol,
+                            });
+
+                        // Transfer 95% to artist (5% stays in server wallet as platform fee)
+                        console.log('[blockchain] Primary sale: 95% (' + artistAmountPol + ' POL) to artist, 5% (' + platformFeePol + ' POL) kept by platform');
+                        if (creatorProfile?.wallet_address) {
+                            try {
+                                await transferToArtistWallet(creatorProfile.wallet_address, artistAmountWei);
+                            } catch (err) {
+                                console.error('[blockchain] Artist payment failed (non-blocking):', err);
+                            }
+                        }
+                        console.log('[blockchain] Primary sale revenue recorded for release:', releaseId);
+                    }
+                }
+            } catch (revErr) {
+                // Non-blocking: log but don't fail the mint
+                console.warn('[blockchain] Failed to record primary sale revenue (non-blocking):', revErr);
+            }
         }
 
         return { success: true, tokenId: tokenRecord?.id || tokenId };
@@ -719,8 +934,9 @@ export async function mintToken(
 
 /**
  * List an NFT for sale on the marketplace.
- * 1. Creates on-chain listing via MarketplaceV3
- * 2. Creates listing record in Supabase
+ * Since our payment-first architecture stores NFTs in the DB only (not minted on-chain),
+ * we create a DB-only marketplace listing. Secondary sales are mediated by the server:
+ * buyer pays server wallet → server transfers to seller (minus royalty) + artist royalty.
  */
 export async function listForSale(
     config: {
@@ -732,7 +948,7 @@ export async function listForSale(
 ): Promise<{ success: boolean; listingId?: string; error?: string }> {
     try {
         // Verify ownership
-        const { data: token } = await supabaseAdmin
+        const { data: token } = await supabase
             .from('nft_tokens')
             .select('id, owner_wallet_address, token_id')
             .eq('id', config.nftTokenId)
@@ -744,7 +960,7 @@ export async function listForSale(
         }
 
         // Prevent duplicate active listings
-        const { data: existingListing } = await supabaseAdmin
+        const { data: existingListing } = await supabase
             .from('marketplace_listings')
             .select('id')
             .eq('nft_token_id', config.nftTokenId)
@@ -755,51 +971,23 @@ export async function listForSale(
             return { success: false, error: 'This NFT already has an active listing. Cancel or update the existing listing first.' };
         }
 
-        // On-chain listing
-        let chainListingId: string | undefined;
-        if (account && isMarketplaceReady()) {
-            // Step 1: Ensure the marketplace has approval to transfer the seller's NFTs
-            const approvalResult = await ensureMarketplaceApproval(account);
-            if (!approvalResult.success) {
-                return { success: false, error: `Marketplace approval failed: ${approvalResult.error}` };
-            }
+        // DB-only listing (no on-chain listing needed since NFTs are DB-only in payment-first arch)
+        console.log('[blockchain] Creating DB-only marketplace listing for token:', token.token_id, 'price:', config.priceEth, 'POL');
 
-            // Step 2: Create the listing
-            const now = BigInt(Math.floor(Date.now() / 1000));
-            const oneYear = now + BigInt(365 * 24 * 60 * 60);
-            const priceWei = BigInt(Math.floor(config.priceEth * 1e18));
-
-            const result = await createListing(account, {
-                assetContract: CONTRACTS.SONG_NFT,
-                tokenId: BigInt(token.token_id),
-                quantity: BigInt(1),
-                currency: NATIVE_TOKEN,
-                pricePerToken: priceWei,
-                startTimestamp: now,
-                endTimestamp: oneYear,
-                reserved: false,
-            });
-
-            if (!result.success) {
-                return { success: false, error: `On-chain listing failed: ${result.error}` };
-            }
-            chainListingId = result.listingId;
-        }
-
-        // Supabase record
-        const { data: listing, error } = await supabaseAdmin
+        const { data: listing, error } = await supabase
             .from('marketplace_listings')
             .insert({
                 nft_token_id: config.nftTokenId,
                 seller_wallet: config.sellerWallet.toLowerCase(),
                 price_eth: config.priceEth,
                 is_active: true,
-                chain_listing_id: chainListingId || null,
+                chain_listing_id: null, // DB-only listing
             })
             .select()
             .single();
 
         if (error) return { success: false, error: error.message };
+        console.log('[blockchain] Marketplace listing created:', listing.id);
         return { success: true, listingId: listing.id };
     } catch (err: any) {
         return { success: false, error: err.message };
@@ -807,15 +995,18 @@ export async function listForSale(
 }
 
 /**
- * Buy an NFT from a marketplace listing.
- * Secondary royalty (5%) goes to creator only per spec.
+ * Buy an NFT from a marketplace listing (secondary sale).
+ * Payment-first flow for DB-only listings:
+ *   1. Buyer sends listing price (POL) to server wallet
+ *   2. Server distributes: 95% to seller, 5% royalty to artist
+ *   3. DB records updated (ownership transfer, royalty tracking)
  */
 export async function buyListingFlow(
     config: { listingId: string; buyerWallet: string },
     account?: Account,
 ): Promise<{ success: boolean; error?: string }> {
     try {
-        const { data: listing } = await supabaseAdmin
+        const { data: listing } = await supabase
             .from('marketplace_listings')
             .select(`
                 *,
@@ -833,30 +1024,38 @@ export async function buyListingFlow(
 
         if (!listing) return { success: false, error: 'Listing not found or inactive' };
 
-        // On-chain buy
-        if (account && isMarketplaceReady() && listing.chain_listing_id) {
-            if (!isValidChainListingId(listing.chain_listing_id)) {
-                console.warn('[blockchain] buyListingFlow: chain_listing_id is a legacy tx hash, skipping on-chain buy:', listing.chain_listing_id);
-            } else {
-                const priceWei = BigInt(Math.floor(parseFloat(listing.price_eth) * 1e18));
-                const result = await buyFromListing(
-                    account,
-                    BigInt(listing.chain_listing_id),
-                    config.buyerWallet,
-                    BigInt(1),
-                    NATIVE_TOKEN,
-                    priceWei,
-                );
-                if (!result.success) {
-                    return { success: false, error: `On-chain buy failed: ${result.error}` };
-                }
+        const salePricePol = parseFloat(listing.price_eth);
+        const priceWei = BigInt(Math.floor(salePricePol * 1e18));
+
+        // ─── Step 1: Buyer pays server wallet ───
+        if (!account) {
+            return { success: false, error: 'Wallet not connected. Please connect your wallet to purchase.' };
+        }
+
+        if (priceWei > BigInt(0)) {
+            console.log('[blockchain] Secondary sale: buyer paying', salePricePol, 'POL to server wallet');
+            try {
+                const paymentTx = prepareTransaction({
+                    to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
+                    chain: activeChain,
+                    client: thirdwebClient,
+                    value: priceWei,
+                });
+                const paymentResult = await sendTransaction({ account, transaction: paymentTx });
+                console.log('[blockchain] Buyer payment confirmed, tx:', paymentResult.transactionHash);
+            } catch (payErr: any) {
+                console.error('[blockchain] Secondary sale payment failed:', payErr);
+                return {
+                    success: false,
+                    error: `Payment failed: ${payErr.message}. Your wallet was not charged.`,
+                };
             }
         }
 
         const now = new Date().toISOString();
 
-        // Mark listing as sold
-        await supabaseAdmin
+        // ─── Step 2: Mark listing as sold ───
+        await supabase
             .from('marketplace_listings')
             .update({
                 is_active: false,
@@ -865,8 +1064,8 @@ export async function buyListingFlow(
             })
             .eq('id', config.listingId);
 
-        // Transfer token ownership
-        await supabaseAdmin
+        // ─── Step 3: Transfer token ownership in DB ───
+        await supabase
             .from('nft_tokens')
             .update({
                 owner_wallet_address: config.buyerWallet.toLowerCase(),
@@ -875,22 +1074,42 @@ export async function buyListingFlow(
             })
             .eq('id', listing.nft_token_id);
 
-        // Record secondary sale royalty (5% to creator) — idempotent via unique source_reference
-        const salePriceEur = parseFloat(listing.price_eth) * 2500; // rough ETH→EUR; replace with oracle
-        const royaltyAmountEur = salePriceEur * 0.05;
+        // ─── Step 4: Distribute funds from server wallet ───
+        // Secondary sale split: 5% platform fee (server keeps), 5% artist royalty, 90% to seller
+        const platformPercent = 0.05; // 5% stays in server wallet
+        const royaltyPercent = 0.05;  // 5% to artist
+        const sellerPercent = 0.90;   // 90% to seller
+        const platformFeePol = salePricePol * platformPercent;
+        const royaltyAmountPol = salePricePol * royaltyPercent;
+        const sellerAmountPol = salePricePol * sellerPercent;
         const creatorId = listing.nft_token?.release?.song?.creator_id;
-        const sourceRef = `sale:${config.listingId}`;
 
-        if (creatorId && royaltyAmountEur > 0) {
-            // Idempotent insert — if this sale was already recorded (retry scenario), skip
-            const { data: royaltyEvent } = await supabaseAdmin
+        console.log('[blockchain] Secondary sale split:', salePricePol, 'POL →', sellerAmountPol, 'seller (90%) +', royaltyAmountPol, 'artist (5%) +', platformFeePol, 'platform (5%)');
+
+        // Transfer 90% to seller
+        const sellerWallet = listing.seller_wallet;
+        if (sellerWallet && sellerAmountPol > 0) {
+            const sellerAmountWei = BigInt(Math.floor(sellerAmountPol * 1e18)).toString();
+            console.log('[blockchain] Transferring', sellerAmountPol, 'POL (90%) to seller:', sellerWallet);
+            try {
+                await transferToArtistWallet(sellerWallet, sellerAmountWei);
+            } catch (err) {
+                console.error('[blockchain] Seller payment failed (non-blocking):', err);
+            }
+        }
+
+        // Transfer 5% royalty to artist
+        const sourceRef = `sale:${config.listingId}`;
+        if (creatorId && royaltyAmountPol > 0) {
+            // Record royalty event
+            const { data: royaltyEvent } = await supabase
                 .from('royalty_events')
                 .upsert(
                     {
                         song_id: listing.nft_token.release.song.id,
                         source_type: 'secondary_sale' as const,
                         source_reference: sourceRef,
-                        gross_amount_eur: royaltyAmountEur,
+                        gross_amount_eur: royaltyAmountPol,
                     },
                     { onConflict: 'source_type,source_reference', ignoreDuplicates: true },
                 )
@@ -898,34 +1117,33 @@ export async function buyListingFlow(
                 .single();
 
             if (royaltyEvent) {
-                // Distribute to split sheet parties (or 100% to creator if no splits)
-                const { data: splits } = await supabaseAdmin
-                    .from('song_rights_splits')
-                    .select('*')
-                    .eq('song_id', listing.nft_token.release.song.id);
+                // Look up creator's wallet
+                const { data: creatorProfile } = await supabase
+                    .from('profiles')
+                    .select('wallet_address')
+                    .eq('id', creatorId)
+                    .single();
 
-                if (splits && splits.length > 0) {
-                    const shareRows = splits.map((s: any) => ({
+                await supabase
+                    .from('royalty_shares')
+                    .insert({
                         royalty_event_id: royaltyEvent.id,
-                        party_email: s.party_email,
-                        linked_profile_id: s.linked_profile_id,
-                        wallet_address: s.linked_wallet_address,
-                        share_type: 'split' as const,
-                        share_percent: parseFloat(s.share_percent),
-                        amount_eur: royaltyAmountEur * parseFloat(s.share_percent) / 100,
-                    }));
-                    await supabaseAdmin.from('royalty_shares').insert(shareRows);
-                } else {
-                    // No split sheet — 100% to creator
-                    await supabaseAdmin
-                        .from('royalty_shares')
-                        .insert({
-                            royalty_event_id: royaltyEvent.id,
-                            linked_profile_id: creatorId,
-                            share_type: 'direct',
-                            share_percent: 100,
-                            amount_eur: royaltyAmountEur,
-                        });
+                        linked_profile_id: creatorId,
+                        wallet_address: creatorProfile?.wallet_address || null,
+                        share_type: 'direct',
+                        share_percent: 100,
+                        amount_eur: royaltyAmountPol,
+                    });
+
+                // Transfer royalty to creator's wallet
+                if (creatorProfile?.wallet_address) {
+                    const royaltyWei = BigInt(Math.floor(royaltyAmountPol * 1e18)).toString();
+                    console.log('[blockchain] Transferring', royaltyAmountPol, 'POL (5% royalty) to artist:', creatorProfile.wallet_address);
+                    try {
+                        await transferToArtistWallet(creatorProfile.wallet_address, royaltyWei);
+                    } catch (err) {
+                        console.error('[blockchain] Artist royalty transfer failed (non-blocking):', err);
+                    }
                 }
             }
         }
@@ -944,7 +1162,7 @@ export async function cancelListingFlow(
     sellerWallet: string,
     account?: Account,
 ): Promise<{ success: boolean; error?: string }> {
-    const { data: listing } = await supabaseAdmin
+    const { data: listing } = await supabase
         .from('marketplace_listings')
         .select('chain_listing_id')
         .eq('id', listingId)
@@ -967,7 +1185,7 @@ export async function cancelListingFlow(
     }
 
     // Cancel in Supabase
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('marketplace_listings')
         .update({ is_active: false })
         .eq('id', listingId);
@@ -1058,7 +1276,7 @@ export async function updateListingFlow(
             updatePayload.chain_listing_id = newChainListingId;
         }
 
-        const { error } = await supabaseAdmin
+        const { error } = await supabase
             .from('marketplace_listings')
             .update(updatePayload)
             .eq('id', config.listingId)

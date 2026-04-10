@@ -3,6 +3,7 @@ import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-nativ
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { BadgeCheck } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -76,10 +77,9 @@ export default function CreatorProfileScreen() {
                         shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 20, elevation: 10,
                     }}
                 >
-                    <Image
-                        source={{ uri: artist.avatar }}
-                        style={{ width: 112, height: 112, borderRadius: 56 }}
-                        contentFit="cover"
+                    <AvatarDisplay
+                        uri={artist.avatar}
+                        size={112}
                     />
                     {artist.verified && (
                         <View
@@ -144,7 +144,7 @@ export default function CreatorProfileScreen() {
                 </GlassCard>
                 <GlassCard style={{ flex: 1, margin: 4, alignItems: 'center' }}>
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
-                        {artist.totalEarnings} ETH
+                        {artist.totalEarnings} POL
                     </Text>
                     <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4 }}>
                         Trading Volume

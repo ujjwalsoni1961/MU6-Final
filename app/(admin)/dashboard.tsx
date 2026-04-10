@@ -64,7 +64,7 @@ export default function AdminDashboardScreen() {
                         <StatCard title="Total Users" value={stats.totalUsers} icon={<UsersIcon size={20} color="#38b4ba" />} />
                         <StatCard title="Total Songs" value={stats.totalSongs} icon={<Music size={20} color="#8b5cf6" />} />
                         <StatCard title="Listings" value={stats.totalListings} icon={<ArrowLeftRight size={20} color="#f59e0b" />} />
-                        <StatCard title="Fees (ETH)" value={totalFees.toFixed(4)} icon={<DollarSign size={20} color="#ef4444" />} accent="#38b4ba" />
+                        <StatCard title="Fees (POL)" value={totalFees.toFixed(4)} icon={<DollarSign size={20} color="#ef4444" />} accent="#38b4ba" />
                     </View>
                 )}
 

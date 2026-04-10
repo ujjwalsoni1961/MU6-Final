@@ -64,7 +64,7 @@ export default function TransactionRow({ type, songTitle, amount, date, status }
                 <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>{date}</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 13 }}>{amount} ETH</Text>
+                <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 13 }}>{amount} POL</Text>
                 <View style={{ backgroundColor: sts.bg, borderRadius: 9999, paddingHorizontal: 8, paddingVertical: 2, marginTop: 4 }}>
                     <Text style={{ color: sts.text, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' }}>{status}</Text>
                 </View>

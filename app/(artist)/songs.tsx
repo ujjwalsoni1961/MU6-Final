@@ -4,7 +4,7 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Plus, MoreHorizontal } from 'lucide-react-native';
+import { Plus, MoreHorizontal, Pencil } from 'lucide-react-native';
 import { useCreatorSongs } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import { Song } from '../../src/types';
@@ -12,12 +12,13 @@ import { Song } from '../../src/types';
 const isWeb = Platform.OS === 'web';
 
 /* ─── Song Table Row ─── */
-function SongTableRow({ index, song }: { index: number; song: Song }) {
+function SongTableRow({ index, song, onPress }: { index: number; song: Song; onPress?: () => void }) {
     const { isDark, colors } = useTheme();
     return (
         <AnimatedPressable
             preset="row"
             hapticType="none"
+            onPress={onPress}
             style={{
                 flexDirection: 'row', alignItems: 'center',
                 paddingVertical: 14, paddingHorizontal: isWeb ? 20 : 12,
@@ -49,8 +50,8 @@ function SongTableRow({ index, song }: { index: number; song: Song }) {
                 </View>
             )}
             {isWeb && (
-                <AnimatedPressable preset="icon" hapticType="none" style={{ marginLeft: 12, padding: 4 }}>
-                    <MoreHorizontal size={16} color={colors.text.muted} />
+                <AnimatedPressable preset="icon" hapticType="none" onPress={onPress} style={{ marginLeft: 12, padding: 4 }}>
+                    <Pencil size={14} color={colors.text.muted} />
                 </AnimatedPressable>
             )}
         </AnimatedPressable>
@@ -117,7 +118,12 @@ export default function CreatorSongsScreen() {
                         overflow: 'hidden',
                     }}>
                         {creatorSongs.map((song, i) => (
-                            <SongTableRow key={song.id} index={i} song={song} />
+                            <SongTableRow
+                                key={song.id}
+                                index={i}
+                                song={song}
+                                onPress={() => router.push({ pathname: '/(artist)/edit-song', params: { id: song.id } } as any)}
+                            />
                         ))}
                     </View>
                 ) : (

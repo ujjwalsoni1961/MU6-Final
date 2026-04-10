@@ -39,8 +39,16 @@ function coverUrl(path: string | null | undefined): string {
     return db.getPublicUrl('covers', path);
 }
 
+/** Known preset avatar IDs (emoji genre avatars, not storage files) */
+export const PRESET_AVATAR_IDS = new Set([
+    'pop', 'hiphop', 'rock', 'electronic', 'jazz', 'classical',
+    'rnb', 'lofi', 'country', 'metal', 'reggae', 'afrobeat',
+]);
+
 function avatarUrl(path: string | null | undefined): string {
     if (!path) return 'https://placehold.co/200x200/1e293b/94a3b8?text=👤';
+    // Preset avatar IDs are short strings like "pop", "rock" — not file paths
+    if (PRESET_AVATAR_IDS.has(path)) return `preset:${path}`;
     if (path.startsWith('http')) return path;
     return db.getPublicUrl('avatars', path);
 }
@@ -150,8 +158,8 @@ export function adaptNFTToken(t: DbNFTToken): NFT {
         songTitle: song?.title || 'Unknown Song',
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
         coverImage: coverUrl(song?.coverPath),
-        price: t.lastSalePriceEth || release?.priceEth || 0,
-        editionNumber: parseInt(t.tokenId) || 0,
+        price: t.pricePaidEth || release?.priceEth || 0,
+        editionNumber: parseInt(t.onChainTokenId || '0') || 0,
         totalEditions: release?.totalSupply || 0,
         owner: t.ownerWalletAddress,
         rarity: (release?.rarity as NFT['rarity']) || 'common',
@@ -159,12 +167,13 @@ export function adaptNFTToken(t: DbNFTToken): NFT {
 }
 
 /** Convert a DB MarketplaceListing to the flat UI NFT shape (for marketplace) */
-export function adaptListing(l: DbListing): NFT & { listingId: string; sellerWallet: string } {
+export function adaptListing(l: DbListing): NFT & { listingId: string; sellerWallet: string; nftTokenId: string } {
     const token = l.nftToken;
     const release = token?.release;
     const song = release?.song;
     return {
         id: token?.id || l.id,
+        nftTokenId: l.nftTokenId,
         listingId: l.id,
         sellerWallet: l.sellerWallet,
         songId: release?.songId || '',
@@ -173,7 +182,7 @@ export function adaptListing(l: DbListing): NFT & { listingId: string; sellerWal
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
         coverImage: coverUrl(song?.coverPath),
         price: l.priceEth,
-        editionNumber: parseInt(token?.tokenId || '0') || 0,
+        editionNumber: parseInt(token?.onChainTokenId || '0') || 0,
         totalEditions: release?.totalSupply || 0,
         owner: l.sellerWallet,
         rarity: (release?.rarity as NFT['rarity']) || 'common',
@@ -372,6 +381,18 @@ export function useNFTReleases(songId?: string) {
     );
 }
 
+export function useNFTReleaseById(id: string) {
+    return useAsync(
+        async () => {
+            if (!id) return null;
+            const release = await db.getNFTReleaseById(id);
+            return release ? adaptNFTRelease(release) : null;
+        },
+        null as NFT | null,
+        [id],
+    );
+}
+
 /** Marketplace listings (active) */
 export function useMarketplaceListings(limit?: number) {
     return useAsync(
@@ -379,7 +400,7 @@ export function useMarketplaceListings(limit?: number) {
             const listings = await db.getMarketplaceListings({ isActive: true, limit });
             return listings.map(adaptListing);
         },
-        [] as (NFT & { listingId: string; sellerWallet: string })[],
+        [] as (NFT & { listingId: string; sellerWallet: string; nftTokenId: string })[],
         [limit],
     );
 }
@@ -615,7 +636,7 @@ export function useUpsertSplitSheet() {
 export function useAdminUsers(limit = 50) {
     return useAsync(
         async () => {
-            const { data, error } = await (await import('../lib/supabase')).supabaseAdmin
+            const { data, error } = await (await import('../lib/supabase')).supabase
                 .from('profiles')
                 .select('*')
                 .order('created_at', { ascending: false })
@@ -675,6 +696,19 @@ export function useAdminTransactions(limit = 50) {
         },
         [] as Transaction[],
         [limit],
+    );
+}
+
+/** User's own activity feed (wallet-scoped) */
+export function useUserActivity(filter?: 'all' | 'purchases' | 'sales' | 'mints') {
+    const { walletAddress } = useAuth();
+    return useAsync(
+        async () => {
+            if (!walletAddress) return [];
+            return db.getUserActivity(walletAddress, filter || 'all');
+        },
+        [] as db.UserActivity[],
+        [walletAddress, filter],
     );
 }
 
@@ -851,7 +885,7 @@ export function useOwnedNFTsWithStatus() {
                 return {
                     ...baseNFT,
                     tokenDbId: token.id,
-                    onChainTokenId: token.tokenId,
+                    onChainTokenId: token.onChainTokenId || '',
                     ownershipStatus: activeListing ? 'listed' : 'unlisted',
                     activeListingId: activeListing?.id,
                     activeListingPrice: activeListing?.priceEth,
@@ -905,8 +939,8 @@ export function useUpdateListingPrice() {
 
             // Also update chain_listing_id in DB if a new one was created (cancel+recreate)
             if (newChainListingId) {
-                const { supabaseAdmin: admin } = await import('../lib/supabase');
-                await admin
+                const { supabase: client } = await import('../lib/supabase');
+                await client
                     .from('marketplace_listings')
                     .update({ chain_listing_id: newChainListingId })
                     .eq('id', listingId);
@@ -931,16 +965,16 @@ export function useUpdateListingPrice() {
 export function useAdminPlatformStats() {
     return useAsync(
         async () => {
-            const { supabaseAdmin: admin } = await import('../lib/supabase');
+            const { supabase: client } = await import('../lib/supabase');
 
             const [
                 { count: usersCount },
                 { count: songsCount },
                 { count: listingsCount },
             ] = await Promise.all([
-                admin.from('profiles').select('*', { count: 'exact', head: true }),
-                admin.from('songs').select('*', { count: 'exact', head: true }),
-                admin.from('marketplace_listings').select('*', { count: 'exact', head: true }),
+                client.from('profiles').select('*', { count: 'exact', head: true }),
+                client.from('songs').select('*', { count: 'exact', head: true }),
+                client.from('marketplace_listings').select('*', { count: 'exact', head: true }),
             ]);
 
             return {

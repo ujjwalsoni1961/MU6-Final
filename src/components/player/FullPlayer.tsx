@@ -6,13 +6,14 @@ import { Play, Pause, SkipBack, SkipForward, ChevronDown, Shuffle, Repeat, MoreH
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../context/ThemeContext';
 import { usePlayer } from '../../context/PlayerContext';
+import Slider from '../shared/Slider';
 
 const { width, height } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 
 export default function FullPlayer() {
     const { isDark, colors } = useTheme();
-    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious } = usePlayer();
+    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious, volume, setVolume } = usePlayer();
 
     // Animation for slide-in
     const slideAnim = useRef(new Animated.Value(height)).current;
@@ -161,22 +162,18 @@ export default function FullPlayer() {
 
                 {/* Progress Bar */}
                 <View style={{ width: '100%', paddingHorizontal: 32, marginBottom: 30 }}>
-                    <View style={{
-                        height: 4, backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
-                        borderRadius: 2, marginBottom: 12, position: 'relative'
-                    }}>
-                        <View style={{
-                            position: 'absolute', left: 0, top: 0, bottom: 0, width: `${progressPercent}%`,
-                            backgroundColor: (currentSong as any).dominantColor || colors.accent.cyan, borderRadius: 2
-                        }} />
-                        <View style={{
-                            position: 'absolute', left: `${progressPercent}%`, top: -5, width: 14, height: 14, borderRadius: 7,
-                            backgroundColor: isDark ? ((currentSong as any).dominantColor || colors.accent.cyan) : '#fff',
-                            shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4,
-                            transform: [{ translateX: -7 }]
-                        }} />
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Slider 
+                        value={duration > 0 ? currentTime / duration : 0}
+                        onSlidingComplete={(val) => {
+                            if (duration > 0) {
+                                seekTo(val * duration);
+                            }
+                        }}
+                        trackColor={(currentSong as any).dominantColor || colors.accent.cyan}
+                        thumbColor={isDark ? ((currentSong as any).dominantColor || colors.accent.cyan) : '#fff'}
+                        backgroundColor={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'}
+                    />
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: -4 }}>
                         <Text style={{ fontSize: 12, fontVariant: ['tabular-nums'], color: colors.text.secondary }}>{formatTime(currentTime)}</Text>
                         <Text style={{ fontSize: 12, fontVariant: ['tabular-nums'], color: colors.text.secondary }}>{formatTime(duration)}</Text>
                     </View>
@@ -224,8 +221,15 @@ export default function FullPlayer() {
                 {/* Secondary Controls */}
                 <View style={{ width: '100%', paddingHorizontal: 32, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                     <Volume2 size={20} color={colors.text.secondary} />
-                    <View style={{ flex: 1, height: 4, backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', borderRadius: 2 }}>
-                        <View style={{ width: '60%', height: '100%', backgroundColor: colors.text.secondary, borderRadius: 2 }} />
+                    <View style={{ flex: 1, zIndex: 10 }}>
+                        <Slider 
+                            value={volume}
+                            onValueChange={setVolume}
+                            onSlidingComplete={setVolume}
+                            trackColor={colors.text.secondary}
+                            thumbColor={colors.text.primary}
+                            backgroundColor={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'}
+                        />
                     </View>
                     <Volume2 size={20} color={colors.text.primary} />
                 </View>

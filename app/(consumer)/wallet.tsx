@@ -1,17 +1,139 @@
-import React, { useRef } from 'react';
-import { View, Text, ScrollView, Animated, Platform } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, ScrollView, Animated, Platform, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowUpRight, ArrowDownLeft, Clock, ShieldCheck, Wallet as WalletIcon, ExternalLink } from 'lucide-react-native';
+import { Image } from 'expo-image';
+import {
+    ArrowUpRight, ArrowDownLeft, ShoppingCart, Tag, Sparkles, ListPlus,
+    ShieldCheck, Wallet as WalletIcon, ExternalLink,
+} from 'lucide-react-native';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { useTheme } from '../../src/context/ThemeContext';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
+import TabPill from '../../src/components/shared/TabPill';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
-import { useAdminTransactions } from '../../src/hooks/useData';
+import { useUserActivity } from '../../src/hooks/useData';
+import { getPublicUrl, UserActivity } from '../../src/services/database';
 import { useWalletBalance } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 
 const isWeb = Platform.OS === 'web';
+
+const FILTER_TABS = [
+    { key: 'all', label: 'All' },
+    { key: 'purchases', label: 'Purchases' },
+    { key: 'sales', label: 'Sales' },
+    { key: 'mints', label: 'Mints' },
+] as const;
+
+type FilterKey = typeof FILTER_TABS[number]['key'];
+
+/* ─── Format relative time ─── */
+function timeAgo(dateStr: string): string {
+    const now = new Date();
+    const then = new Date(dateStr);
+    const diffMs = now.getTime() - then.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/* ─── Activity type config ─── */
+function getActivityConfig(type: UserActivity['type'], colors: any) {
+    switch (type) {
+        case 'purchase':
+            return { icon: ShoppingCart, color: '#22c55e', label: 'NFT Purchased', bgColor: 'rgba(34,197,94,0.1)' };
+        case 'sale':
+            return { icon: Tag, color: '#8b5cf6', label: 'NFT Sold', bgColor: 'rgba(139,92,246,0.1)' };
+        case 'mint':
+            return { icon: Sparkles, color: '#38b4ba', label: 'NFT Minted', bgColor: 'rgba(56,180,186,0.1)' };
+        case 'listing':
+            return { icon: ListPlus, color: '#f59e0b', label: 'Listed for Sale', bgColor: 'rgba(245,158,11,0.1)' };
+        default:
+            return { icon: ArrowUpRight, color: colors.text.muted, label: 'Activity', bgColor: 'rgba(128,128,128,0.1)' };
+    }
+}
+
+/* ─── Activity Row ─── */
+function ActivityRow({ activity, isDark, colors }: { activity: UserActivity; isDark: boolean; colors: any }) {
+    const config = getActivityConfig(activity.type, colors);
+    const IconComp = config.icon;
+    const coverUri = activity.coverPath
+        ? (activity.coverPath.startsWith('http') ? activity.coverPath : getPublicUrl('covers', activity.coverPath))
+        : null;
+
+    return (
+        <View style={{
+            flexDirection: 'row', alignItems: 'center',
+            paddingVertical: 14, paddingHorizontal: 16,
+            backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+            borderRadius: 16, marginBottom: 8,
+            borderWidth: 1,
+            borderColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+        }}>
+            {/* Cover + icon badge */}
+            <View style={{ position: 'relative', marginRight: 14 }}>
+                {coverUri ? (
+                    <Image
+                        source={{ uri: coverUri }}
+                        style={{ width: 48, height: 48, borderRadius: 12 }}
+                        contentFit="cover"
+                    />
+                ) : (
+                    <View style={{
+                        width: 48, height: 48, borderRadius: 12,
+                        backgroundColor: config.bgColor,
+                        alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        <IconComp size={22} color={config.color} />
+                    </View>
+                )}
+                {/* Type badge */}
+                <View style={{
+                    position: 'absolute', bottom: -4, right: -4,
+                    width: 22, height: 22, borderRadius: 11,
+                    backgroundColor: config.bgColor,
+                    borderWidth: 2, borderColor: isDark ? '#0f172a' : '#fff',
+                    alignItems: 'center', justifyContent: 'center',
+                }}>
+                    <IconComp size={10} color={config.color} />
+                </View>
+            </View>
+
+            {/* Details */}
+            <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text.primary }} numberOfLines={1}>
+                    {config.label}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }} numberOfLines={1}>
+                    {activity.songTitle}
+                </Text>
+            </View>
+
+            {/* Price + time */}
+            <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+                {activity.price != null && (
+                    <Text style={{
+                        fontSize: 14, fontWeight: '700',
+                        color: activity.type === 'purchase' ? '#22c55e'
+                            : activity.type === 'sale' ? '#8b5cf6'
+                            : colors.text.primary,
+                    }}>
+                        {activity.type === 'purchase' ? '-' : activity.type === 'sale' ? '+' : ''}{activity.price} POL
+                    </Text>
+                )}
+                <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>
+                    {timeAgo(activity.date)}
+                </Text>
+            </View>
+        </View>
+    );
+}
 
 export default function WalletScreen() {
     const { isDark, colors } = useTheme();
@@ -19,6 +141,7 @@ export default function WalletScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
     const router = useRouter();
     const { walletAddress } = useAuth();
+    const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
 
     // Fetch real on-chain balance
     const { data: balanceData, isLoading: balanceLoading } = useWalletBalance({
@@ -32,8 +155,8 @@ export default function WalletScreen() {
         : '0.00';
     const balanceSymbol = balanceData?.symbol || 'POL';
 
-    // Real recent transactions
-    const { data: recentTxns } = useAdminTransactions(5);
+    // User-scoped activity
+    const { data: activities, loading: activityLoading } = useUserActivity(activeFilter);
 
     const truncatedAddress = walletAddress
         ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
@@ -143,48 +266,57 @@ export default function WalletScreen() {
                         ))}
                     </View>
 
-                    {/* Recent Activity */}
-                    <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text.primary, marginBottom: 16 }}>
-                        Recent Activity
+                    {/* Activity Header + Filter Tabs */}
+                    <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text.primary, marginBottom: 14 }}>
+                        Activity
                     </Text>
-                    <View style={{ gap: 12 }}>
-                        {recentTxns.length > 0 ? recentTxns.map((tx) => (
-                            <View key={tx.id} style={{
-                                flexDirection: 'row', alignItems: 'center',
-                                paddingVertical: 12, paddingHorizontal: 16,
-                                backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
-                                borderRadius: 16,
-                            }}>
-                                <View style={{
-                                    width: 40, height: 40, borderRadius: 20,
-                                    backgroundColor: tx.type === 'purchase' ? `${colors.status.success}15` : `${colors.text.primary}10`,
-                                    alignItems: 'center', justifyContent: 'center', marginRight: 16
-                                }}>
-                                    {tx.type === 'purchase' ? (
-                                        <ArrowDownLeft size={18} color={colors.status.success} />
-                                    ) : (
-                                        <Clock size={18} color={colors.text.primary} />
-                                    )}
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={{ fontSize: 15, fontWeight: '600', color: colors.text.primary }}>{tx.type === 'purchase' ? 'NFT Purchase' : 'Listing'}</Text>
-                                    <Text style={{ fontSize: 13, color: colors.text.secondary, marginTop: 2 }}>{tx.songTitle || 'Unknown'}</Text>
-                                </View>
-                                <View style={{ alignItems: 'flex-end' }}>
-                                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text.primary }}>
-                                        {tx.price} ETH
-                                    </Text>
-                                    <Text style={{ fontSize: 12, color: colors.text.tertiary, marginTop: 2 }}>
-                                        {tx.status}
-                                    </Text>
-                                </View>
-                            </View>
-                        )) : (
-                            <View style={{ padding: 20, alignItems: 'center' }}>
-                                <Text style={{ color: colors.text.secondary }}>No transactions yet</Text>
-                            </View>
-                        )}
-                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16, maxHeight: 44 }}>
+                        {FILTER_TABS.map((tab) => (
+                            <TabPill
+                                key={tab.key}
+                                label={tab.label}
+                                active={activeFilter === tab.key}
+                                onPress={() => setActiveFilter(tab.key)}
+                            />
+                        ))}
+                    </ScrollView>
+
+                    {/* Activity List */}
+                    {activityLoading ? (
+                        <View style={{ padding: 40, alignItems: 'center' }}>
+                            <ActivityIndicator size="small" color="#38b4ba" />
+                        </View>
+                    ) : activities.length > 0 ? (
+                        <View>
+                            {activities.map((activity) => (
+                                <ActivityRow
+                                    key={activity.id}
+                                    activity={activity}
+                                    isDark={isDark}
+                                    colors={colors}
+                                />
+                            ))}
+                        </View>
+                    ) : (
+                        <View style={{
+                            padding: 40, alignItems: 'center',
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+                            borderRadius: 20,
+                        }}>
+                            <Text style={{ fontSize: 36, marginBottom: 12 }}>
+                                {activeFilter === 'purchases' ? '🛒' : activeFilter === 'sales' ? '💰' : activeFilter === 'mints' ? '✨' : '📋'}
+                            </Text>
+                            <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text.primary, marginBottom: 4 }}>
+                                No {activeFilter === 'all' ? 'activity' : activeFilter} yet
+                            </Text>
+                            <Text style={{ fontSize: 13, color: colors.text.secondary, textAlign: 'center' }}>
+                                {activeFilter === 'purchases' ? 'NFTs you buy will appear here'
+                                    : activeFilter === 'sales' ? 'NFTs you sell will appear here'
+                                    : activeFilter === 'mints' ? 'NFTs you mint will appear here'
+                                    : 'Your wallet activity will appear here'}
+                            </Text>
+                        </View>
+                    )}
                 </ScrollView>
             </View>
         </ScreenScaffold>

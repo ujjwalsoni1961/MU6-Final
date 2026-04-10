@@ -82,7 +82,7 @@ export default function NFTCard({
                     textTransform: 'uppercase',
                     letterSpacing: 1.5,
                 }}>
-                    EDITION #{editionNumber} / {totalEditions}
+                    EDITION #{editionNumber}{totalEditions > 0 && editionNumber <= totalEditions ? ` / ${totalEditions}` : ''}
                 </Text>
                 {variant !== 'collection' && (
                     <AnimatedPressable

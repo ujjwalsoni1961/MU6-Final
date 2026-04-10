@@ -14,11 +14,15 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
 import {
     useNFTReleases,
+    useNFTReleaseById,
     useMarketplaceListings,
     useMintToken,
     useBuyListing,
 } from '../../src/hooks/useData';
-import type { NFT } from '../../src/types';
+import { getNFTTradeHistory } from '../../src/services/database';
+import PriceChart from '../../src/components/shared/PriceChart';
+import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
+import type { NFT, TradeEvent } from '../../src/types';
 
 type ViewMode = 'release' | 'listing';
 
@@ -39,17 +43,22 @@ export default function NFTDetailScreen() {
 
     // Data hooks
     const { data: allNFTs, loading: releasesLoading } = useNFTReleases();
+    const { data: singleRelease, loading: singleLoading } = useNFTReleaseById(viewMode === 'release' ? id : '');
     const { data: allListings, loading: listingsLoading } = useMarketplaceListings();
-    const loading = releasesLoading || listingsLoading;
+    const loading = releasesLoading || listingsLoading || singleLoading;
 
     // Mutation hooks
     const mintHook = useMintToken();
     const buyHook = useBuyListing();
 
+    // Trade History State
+    const [tradeHistory, setTradeHistory] = useState<TradeEvent[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+
     // Find the relevant NFT
     const nft = viewMode === 'listing'
         ? allListings.find((l) => l.listingId === listingParam || l.id === id)
-        : allNFTs.find((n) => n.id === id) || allNFTs[0];
+        : (singleRelease || allNFTs.find((n) => n.id === id));
 
     const listing = viewMode === 'listing'
         ? allListings.find((l) => l.listingId === listingParam || l.id === id)
@@ -68,7 +77,7 @@ export default function NFTDetailScreen() {
         // nft.id is the release ID for primary sales
         const tokenId = await mintHook.execute(nft.id, walletAddress, account || undefined);
         if (tokenId) {
-            Alert.alert('Success', 'NFT minted successfully! Check your Collection.', [
+            Alert.alert('Success', 'NFT purchased successfully! Check your Collection.', [
                 { text: 'View Collection', onPress: () => router.push('/(consumer)/collection') },
                 { text: 'OK' },
             ]);
@@ -89,13 +98,49 @@ export default function NFTDetailScreen() {
         }
     }, [listing, walletAddress, account, buyHook.execute]);
 
-    // Reset mutation states when navigating away
+    // Reset mutation states when navigating to this page or away
     useEffect(() => {
+        mintHook.reset();
+        buyHook.reset();
         return () => {
             mintHook.reset();
             buyHook.reset();
         };
     }, [id]);
+
+    useEffect(() => {
+        let isMounted = true;
+        const fetchHistory = async () => {
+            const tokenId = listing?.nftTokenId;
+            const releaseId = nft?.id;
+            
+            if (!tokenId && !releaseId) {
+                if (isMounted) setTradeHistory([]);
+                return;
+            }
+
+            setHistoryLoading(true);
+            try {
+                // If viewing a specific listing, show its specific history.
+                // Otherwise, show aggregate release history.
+                const data = await getNFTTradeHistory({ 
+                    tokenId, 
+                    releaseId: tokenId ? undefined : releaseId 
+                });
+                if (isMounted) {
+                    setTradeHistory(data);
+                }
+            } catch (err) {
+                console.error('[nft-detail] load history error:', err);
+                if (isMounted) setTradeHistory([]);
+            } finally {
+                if (isMounted) setHistoryLoading(false);
+            }
+        };
+
+        fetchHistory();
+        return () => { isMounted = false; };
+    }, [nft, listing]);
 
     if (loading || !nft) {
         return (
@@ -127,12 +172,12 @@ export default function NFTDetailScreen() {
     const canMint = isPrimary && !isOwnRelease;
     const canBuy = !isPrimary && !isOwnListing;
 
-    let buttonLabel = canMint ? 'Collect Now' : 'Buy Now';
+    let buttonLabel = canMint ? 'Buy Now' : 'Buy Now';
     let buttonDisabled = false;
     let buttonColor = '#8b5cf6';
 
     if (actionLoading) {
-        buttonLabel = canMint ? 'Minting...' : 'Purchasing...';
+        buttonLabel = canMint ? 'Purchasing...' : 'Purchasing...';
         buttonDisabled = true;
     } else if (actionSuccess) {
         buttonLabel = 'Success!';
@@ -258,7 +303,7 @@ export default function NFTDetailScreen() {
                                 {isPrimary ? 'Mint Price' : 'Listing Price'}
                             </Text>
                             <Text style={{ fontSize: 40, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, marginTop: 4 }}>
-                                {nft.price} ETH
+                                {nft.price} POL
                             </Text>
                             <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4 }}>
                                 {isPrimary
@@ -341,6 +386,39 @@ export default function NFTDetailScreen() {
                             </AnimatedPressable>
                         </GlassCard>
                     </View>
+                </View>
+
+                {/* Trade History & Analytics */}
+                <View style={{ paddingHorizontal: 16, marginBottom: 40, marginTop: 10, maxWidth: isWeb ? 1200 : undefined, alignSelf: isWeb ? 'center' : 'auto', width: '100%' }}>
+                    <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>
+                        Trade History
+                    </Text>
+                    
+                    <GlassCard intensity="heavy" style={{ padding: 20 }}>
+                        {historyLoading ? (
+                            <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
+                                <ActivityIndicator size="small" color="#8b5cf6" />
+                            </View>
+                        ) : tradeHistory.length === 0 ? (
+                            <View style={{ height: 100, justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={{ color: colors.text.secondary }}>No trade history yet.</Text>
+                            </View>
+                        ) : (
+                            <>
+                                <View style={{ marginBottom: 30 }}>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 16 }}>Price Trend</Text>
+                                    <View style={{ height: 220 }}>
+                                        <PriceChart data={tradeHistory} />
+                                    </View>
+                                </View>
+                                
+                                <View>
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 16 }}>Recent Activity</Text>
+                                    <TradeHistoryList data={tradeHistory} />
+                                </View>
+                            </>
+                        )}
+                    </GlassCard>
                 </View>
 
                 {/* More NFTs */}

@@ -1,0 +1,2 @@
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS cover_path TEXT;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS country_changed_at TIMESTAMPTZ;

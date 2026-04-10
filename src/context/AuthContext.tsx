@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useActiveAccount, useActiveWallet, useDisconnect } from 'thirdweb/react';
-import { supabaseAdmin, createAuthUserForWallet } from '../lib/supabase';
+import { supabase, syncWalletProfile } from '../lib/supabase';
 
 // ── Types ──
 export interface UserProfile {
@@ -12,6 +12,7 @@ export interface UserProfile {
     creatorType: string | null;
     role: 'listener' | 'creator' | 'admin';
     avatarPath: string | null;
+    coverPath: string | null;
     isVerified: boolean;
     country: string | null;
 }
@@ -62,60 +63,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setIsLoading(true);
         try {
-            // Check if profile already exists for this wallet
-            const { data: existing } = await supabaseAdmin
+            // Check if profile already exists for this wallet (public client, RLS allows SELECT)
+            const { data: existing } = await supabase
                 .from('profiles')
                 .select('*')
-                .eq('wallet_address', address)
-                .single();
+                .eq('wallet_address', address.toLowerCase())
+                .maybeSingle();
 
             if (existing) {
                 setProfile(mapDbToProfile(existing));
                 return;
             }
 
-            // ── BUG FIX #1: Profile creation ──
-            // The profiles table has a FK constraint: profiles.id → auth.users(id).
-            // Since we use Thirdweb (not Supabase Auth), we must first create
-            // an auth.users entry via the GoTrue Admin API, then use that ID
-            // for the profile row. Previously, we generated a random UUID which
-            // violated this FK constraint, causing a silent failure. The fallback
-            // created an in-memory-only profile that was never persisted to the DB,
-            // breaking likes, follows, and any other FK-dependent operations.
+            // No profile found — call the edge function to create auth user + profile
+            // The edge function runs server-side with the service role key
+            const result = await syncWalletProfile(address);
 
-            // Step 1: Create auth.users entry for this wallet
-            const authUserId = await createAuthUserForWallet(address);
-            if (!authUserId) {
-                console.error('[auth] Failed to create auth user for wallet:', address);
-                // Set profile to null so the app can show an error state
+            if (!result.profile) {
+                console.error('[auth] Edge function failed to create profile for wallet:', address);
                 setProfile(null);
                 return;
             }
 
-            // Step 2: Create profile using the auth user's ID
-            const { data: created, error } = await supabaseAdmin
-                .from('profiles')
-                .upsert({
-                    id: authUserId,
-                    wallet_address: address,
-                    role: 'listener',
-                    display_name: truncateAddress(address),
-                }, {
-                    onConflict: 'wallet_address',
-                })
-                .select()
-                .single();
-
-            if (error) {
-                console.error('[auth] Error creating profile:', error);
-                // DO NOT set a phantom in-memory profile.
-                // This was the previous bug: setting a fake profile with an
-                // ID that doesn't exist in the DB causes FK violations everywhere.
-                setProfile(null);
-                return;
-            }
-
-            setProfile(mapDbToProfile(created));
+            setProfile(mapDbToProfile(result.profile));
         } catch (err) {
             console.error('[auth] Profile sync error:', err);
             setProfile(null);
@@ -211,6 +181,7 @@ function mapDbToProfile(row: any): UserProfile {
         creatorType: row.creator_type,
         role: row.role,
         avatarPath: row.avatar_path,
+        coverPath: row.cover_path,
         isVerified: row.is_verified,
         country: row.country,
     };

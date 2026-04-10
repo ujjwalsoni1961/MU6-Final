@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { ChevronLeft } from 'lucide-react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
-import { FormField, TextFormInput, RadioGroup, SelectField } from '../../src/components/form';
+import { FormField, TextFormInput, SelectField } from '../../src/components/form';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { upgradeToCreator } from '../../src/services/database';
@@ -13,6 +13,7 @@ import {
     CREATOR_TYPES,
     ENABLED_CREATOR_TYPES,
     CREATOR_TYPE_LABELS,
+    COUNTRIES,
     type CreatorProfile,
     type CreatorType,
 } from '../../src/types/creator';
@@ -20,6 +21,8 @@ import {
 const isWeb = Platform.OS === 'web';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const COUNTRY_OPTIONS = COUNTRIES.map((c) => ({ value: c, label: c }));
 
 export default function CreatorRegisterScreen() {
     const router = useRouter();
@@ -30,7 +33,7 @@ export default function CreatorRegisterScreen() {
         legalFullName: '',
         stageName: '',
         email: '',
-        country: 'finland',
+        country: '',
         creatorType: 'artist',
     });
     const [errors, setErrors] = useState<Partial<Record<keyof CreatorProfile, string>>>({});
@@ -48,7 +51,7 @@ export default function CreatorRegisterScreen() {
         if (!form.stageName.trim()) e.stageName = 'Stage / Creator name is required';
         if (!form.email.trim()) e.email = 'Email is required';
         else if (!EMAIL_REGEX.test(form.email)) e.email = 'Please enter a valid email';
-        if (form.country === 'other' && !form.countryOther?.trim()) e.countryOther = 'Please specify your country';
+        if (!form.country) e.country = 'Please select your country';
         setErrors(e);
         return Object.keys(e).length === 0;
     };
@@ -77,12 +80,11 @@ export default function CreatorRegisterScreen() {
 
         setSaving(true);
         try {
-            const country = form.country === 'other' ? (form.countryOther || 'Other') : 'Finland';
             const result = await upgradeToCreator(profile.id, {
                 displayName: form.stageName.trim(),
                 email: form.email.trim(),
                 creatorType: form.creatorType,
-                country,
+                country: form.country,
             });
 
             if (!result) {
@@ -275,28 +277,18 @@ function RegistrationForm({ form, errors, update }: {
                 />
             </FormField>
 
-            <FormField label="Country" required error={errors.countryOther}>
-                <RadioGroup
-                    options={[
-                        { value: 'finland', label: 'Finland' },
-                        { value: 'other', label: 'Other' },
-                    ]}
+            {/* Bug #002: Country dropdown instead of free-text */}
+            <FormField label="Country" required error={errors.country} style={{ zIndex: 20 }}>
+                <SelectField
+                    options={COUNTRY_OPTIONS}
                     value={form.country}
-                    onChange={(v) => update('country', v as 'finland' | 'other')}
-                    horizontal
+                    onChange={(v) => update('country', v)}
+                    placeholder="Select your country"
                 />
-                {form.country === 'other' && (
-                    <View style={{ marginTop: 10 }}>
-                        <TextFormInput
-                            value={form.countryOther || ''}
-                            onChangeText={(v) => update('countryOther', v)}
-                            placeholder="Specify your country"
-                        />
-                    </View>
-                )}
             </FormField>
 
-            <FormField label="Creator Type">
+            {/* Bug #001: Added zIndex so dropdown renders above Continue button */}
+            <FormField label="Creator Type" style={{ zIndex: 10, marginBottom: 20 }}>
                 <SelectField
                     options={creatorTypeOptions}
                     value={form.creatorType}

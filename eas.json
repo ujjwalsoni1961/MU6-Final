@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 10.0.0"
+  },
+  "build": {
+    "preview": {
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ukavmvxelsfdfktiiyvg.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_wL9HMvfWm4JZiSMuPI_mEw_P2Etx1D1",
+        "EXPO_PUBLIC_THIRDWEB_CLIENT_ID": "64c9d6a04c2edcf1c8b117db980edd41",
+        "EXPO_PUBLIC_SONG_NFT_ADDRESS": "0xACF1145AdE250D356e1B2869E392e6c748c14C0E",
+        "EXPO_PUBLIC_SPLIT_ADDRESS": "0xb757e188B8A126A6D975514F3a05049a87209c2D",
+        "EXPO_PUBLIC_MARKETPLACE_ADDRESS": "0x141Fc79b7F1EB7b393A5DC5f257678c3cD30506a"
+      }
+    },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "production": {}
+  },
+  "submit": {
+    "production": {}
+  }
+}

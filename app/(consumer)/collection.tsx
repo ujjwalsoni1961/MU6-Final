@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
     View, Text, ScrollView, FlatList, Platform, useWindowDimensions,
     Animated, ActivityIndicator, Modal, TextInput, Alert,
@@ -11,6 +11,7 @@ import TabPill from '../../src/components/shared/TabPill';
 import NFTCard from '../../src/components/shared/NFTCard';
 import GlassCard from '../../src/components/shared/GlassCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
+import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { OwnedNFT } from '../../src/types';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
@@ -57,11 +58,24 @@ export default function CollectionScreen() {
     const [selectedNFT, setSelectedNFT] = useState<OwnedNFT | null>(null);
     const [listPrice, setListPrice] = useState('');
     const [newPrice, setNewPrice] = useState('');
+    
+    // Group Modal state
+    const [groupModalVisible, setGroupModalVisible] = useState(false);
+    const [selectedGroup, setSelectedGroup] = useState<OwnedNFT[]>([]);
 
     const filteredNFTs = ownedNFTs.filter((nft) => {
         if (activeFilter === 'All') return true;
         return nft.rarity === activeFilter.toLowerCase();
     });
+
+    const groupedNFTs = useMemo(() => {
+        const groups: Record<string, OwnedNFT[]> = {};
+        for (const nft of filteredNFTs) {
+            if (!groups[nft.songId]) groups[nft.songId] = [];
+            groups[nft.songId].push(nft);
+        }
+        return Object.values(groups);
+    }, [filteredNFTs]);
 
     const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
 
@@ -90,7 +104,7 @@ export default function CollectionScreen() {
         if (!selectedNFT || !walletAddress) return;
         const price = parseFloat(listPrice);
         if (isNaN(price) || price <= 0) {
-            Alert.alert('Invalid Price', 'Please enter a valid price in ETH.');
+            Alert.alert('Invalid Price', 'Please enter a valid price in POL.');
             return;
         }
         const listingId = await listForSaleHook.execute(
@@ -98,7 +112,7 @@ export default function CollectionScreen() {
             account || undefined,
         );
         if (listingId) {
-            Alert.alert('Listed!', `Your NFT is now listed for ${price} ETH on the marketplace.`, [
+            Alert.alert('Listed!', `Your NFT is now listed for ${price} POL on the marketplace.`, [
                 {
                     text: 'View Marketplace',
                     onPress: () => {
@@ -116,7 +130,7 @@ export default function CollectionScreen() {
         if (!selectedNFT || !walletAddress || !selectedNFT.activeListingId) return;
         const price = parseFloat(newPrice);
         if (isNaN(price) || price <= 0) {
-            Alert.alert('Invalid Price', 'Please enter a valid price in ETH.');
+            Alert.alert('Invalid Price', 'Please enter a valid price in POL.');
             return;
         }
         const success = await updatePriceHook.execute(
@@ -128,7 +142,7 @@ export default function CollectionScreen() {
             account || undefined,
         );
         if (success) {
-            Alert.alert('Updated', `Listing price updated to ${price} ETH.`);
+            Alert.alert('Updated', `Listing price updated to ${price} POL.`);
             setModalVisible(false);
             refresh();
         }
@@ -189,7 +203,7 @@ export default function CollectionScreen() {
                         Total Value
                     </Text>
                     <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, marginTop: 4 }}>
-                        {ownedNFTs.reduce((sum, n) => sum + (n.activeListingPrice || n.price), 0).toFixed(2)} ETH
+                        {ownedNFTs.reduce((sum, n) => sum + (n.activeListingPrice || n.price), 0).toFixed(2)} POL
                     </Text>
                 </View>
                 <View style={{
@@ -234,69 +248,29 @@ export default function CollectionScreen() {
         <ScreenScaffold dominantColor="#f59e0b" noScroll scrollY={scrollY}>
             <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 <FlatList
-                    data={loading ? [] : filteredNFTs}
+                    data={loading ? [] : groupedNFTs}
                     ListHeaderComponent={renderHeader}
-                    renderItem={({ item }: { item: OwnedNFT }) => (
-                        <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
-                            <View>
-                                <NFTCard
-                                    cover={item.coverImage}
-                                    title={item.songTitle}
-                                    artist={item.artistName}
-                                    price={item.activeListingPrice || item.price}
-                                    editionNumber={item.editionNumber}
-                                    totalEditions={item.totalEditions}
-                                    rarity={item.rarity}
-                                    variant="collection"
-                                    onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } })}
-                                />
-                                {/* Listing status badge */}
-                                {item.ownershipStatus === 'listed' && (
-                                    <View style={{
-                                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                                        marginHorizontal: 6, marginBottom: 4, paddingVertical: 4,
-                                        backgroundColor: isDark ? 'rgba(16,185,129,0.1)' : 'rgba(16,185,129,0.08)',
-                                        borderRadius: 8,
-                                    }}>
-                                        <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>
-                                            Listed · {item.activeListingPrice} ETH
-                                        </Text>
-                                    </View>
-                                )}
-                                {/* Action button */}
-                                <AnimatedPressable
-                                    preset="button"
-                                    onPress={() => item.ownershipStatus === 'listed' ? openManageModal(item) : openListModal(item)}
-                                    style={{
-                                        flexDirection: 'row',
-                                        alignItems: 'center' as const,
-                                        justifyContent: 'center' as const,
-                                        gap: 6,
-                                        marginHorizontal: 6,
-                                        marginBottom: 6,
-                                        paddingVertical: 10,
-                                        borderRadius: isWeb ? 10 : 14,
-                                        backgroundColor: item.ownershipStatus === 'listed'
-                                            ? (isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.1)')
-                                            : (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.1)'),
-                                        borderWidth: 1,
-                                        borderColor: item.ownershipStatus === 'listed'
-                                            ? (isDark ? 'rgba(139,92,246,0.3)' : 'rgba(139,92,246,0.2)')
-                                            : (isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.2)'),
+                    renderItem={({ item }: { item: OwnedNFT[] }) => {
+                        const firstItem = item[0];
+                        const listedCount = item.filter((n) => n.ownershipStatus === 'listed').length;
+                        const badgeText = listedCount > 0 ? `${item.length} Owned · ${listedCount} Listed` : `${item.length} Owned`;
+                        
+                        return (
+                            <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
+                                <NFTGroupCard
+                                    cover={firstItem.coverImage}
+                                    title={firstItem.songTitle}
+                                    artist={firstItem.artistName}
+                                    badgeText={badgeText}
+                                    onPress={() => {
+                                        setSelectedGroup(item);
+                                        setGroupModalVisible(true);
                                     }}
-                                >
-                                    <Tag size={14} color={item.ownershipStatus === 'listed' ? '#8b5cf6' : '#f59e0b'} />
-                                    <Text style={{
-                                        color: item.ownershipStatus === 'listed' ? '#8b5cf6' : '#f59e0b',
-                                        fontSize: 12, fontWeight: '700',
-                                    }}>
-                                        {item.ownershipStatus === 'listed' ? 'Manage Listing' : 'List for Sale'}
-                                    </Text>
-                                </AnimatedPressable>
+                                />
                             </View>
-                        </View>
-                    )}
-                    keyExtractor={(item) => item.id}
+                        );
+                    }}
+                    keyExtractor={(item) => item[0].songId}
                     numColumns={numCols}
                     key={`grid-${numCols}`}
                     contentContainerStyle={{
@@ -372,7 +346,7 @@ export default function CollectionScreen() {
                                         </Text>
                                         <Text style={{ color: modalMode === 'manage' ? '#10b981' : colors.text.secondary, fontSize: 13, marginTop: 2, fontWeight: modalMode === 'manage' ? '600' : '400' }}>
                                             {modalMode === 'manage'
-                                                ? `Listed at ${selectedNFT.activeListingPrice} ETH`
+                                                ? `Listed at ${selectedNFT.activeListingPrice} POL`
                                                 : `Edition #${selectedNFT.editionNumber} · ${selectedNFT.rarity}`}
                                         </Text>
                                     </View>
@@ -380,7 +354,7 @@ export default function CollectionScreen() {
 
                                 {/* Price input */}
                                 <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.secondary, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                                    {modalMode === 'list' ? 'Sale Price (ETH)' : 'Update Price (ETH)'}
+                                    {modalMode === 'list' ? 'Sale Price (POL)' : 'Update Price (POL)'}
                                 </Text>
                                 <View style={{
                                     flexDirection: 'row',
@@ -408,7 +382,7 @@ export default function CollectionScreen() {
                                             color: colors.text.primary,
                                         }}
                                     />
-                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>ETH</Text>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>POL</Text>
                                 </View>
 
                                 <Text style={{ color: colors.text.muted, fontSize: 12, marginBottom: 20 }}>
@@ -490,6 +464,109 @@ export default function CollectionScreen() {
                                 )}
                             </>
                         )}
+                    </View>
+                </View>
+            </Modal>
+            {/* ── Group Details Modal ── */}
+            <Modal
+                visible={groupModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setGroupModalVisible(false)}
+            >
+                <View style={{
+                    flex: 1,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    justifyContent: 'flex-end',
+                }}>
+                    <View style={{
+                        backgroundColor: isDark ? '#1a1a2e' : '#ffffff',
+                        borderTopLeftRadius: 28,
+                        borderTopRightRadius: 28,
+                        paddingTop: 8,
+                        paddingBottom: Math.max(insets.bottom, 20),
+                        maxHeight: '85%',
+                    }}>
+                        <View style={{
+                            width: 40, height: 4, borderRadius: 2,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
+                            alignSelf: 'center', marginBottom: 16,
+                        }} />
+                        
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 12 }}>
+                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
+                                {selectedGroup[0]?.songTitle || 'Collection'}
+                            </Text>
+                            <AnimatedPressable preset="icon" onPress={() => setGroupModalVisible(false)}>
+                                <X size={22} color={colors.text.secondary} />
+                            </AnimatedPressable>
+                        </View>
+
+                        <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 40 }}>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                                {selectedGroup.map((item) => (
+                                    <View key={item.id} style={{ width: '50%', padding: 6 }}>
+                                        <View>
+                                            <NFTCard
+                                                cover={item.coverImage}
+                                                title={item.songTitle}
+                                                artist={item.artistName}
+                                                price={item.activeListingPrice || item.price}
+                                                editionNumber={item.editionNumber}
+                                                totalEditions={item.totalEditions}
+                                                rarity={item.rarity}
+                                                variant="collection"
+                                                onPress={() => {
+                                                    setGroupModalVisible(false);
+                                                    router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } });
+                                                }}
+                                            />
+                                            {item.ownershipStatus === 'listed' && (
+                                                <View style={{
+                                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                                                    marginHorizontal: 6, marginBottom: 4, paddingVertical: 4,
+                                                    backgroundColor: isDark ? 'rgba(16,185,129,0.1)' : 'rgba(16,185,129,0.08)',
+                                                    borderRadius: 8,
+                                                }}>
+                                                    <Text style={{ color: '#10b981', fontSize: 11, fontWeight: '700' }}>
+                                                        Listed · {item.activeListingPrice} POL
+                                                    </Text>
+                                                </View>
+                                            )}
+                                            <AnimatedPressable
+                                                preset="button"
+                                                onPress={() => {
+                                                    setGroupModalVisible(false);
+                                                    setTimeout(() => {
+                                                        item.ownershipStatus === 'listed' ? openManageModal(item) : openListModal(item);
+                                                    }, 300);
+                                                }}
+                                                style={{
+                                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                                                    gap: 6, marginHorizontal: 6, marginBottom: 6, paddingVertical: 10,
+                                                    borderRadius: 10,
+                                                    backgroundColor: item.ownershipStatus === 'listed'
+                                                        ? (isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.1)')
+                                                        : (isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.1)'),
+                                                    borderWidth: 1,
+                                                    borderColor: item.ownershipStatus === 'listed'
+                                                        ? (isDark ? 'rgba(139,92,246,0.3)' : 'rgba(139,92,246,0.2)')
+                                                        : (isDark ? 'rgba(245,158,11,0.3)' : 'rgba(245,158,11,0.2)'),
+                                                }}
+                                            >
+                                                <Tag size={12} color={item.ownershipStatus === 'listed' ? '#8b5cf6' : '#f59e0b'} />
+                                                <Text style={{
+                                                    color: item.ownershipStatus === 'listed' ? '#8b5cf6' : '#f59e0b',
+                                                    fontSize: 11, fontWeight: '700',
+                                                }}>
+                                                    {item.ownershipStatus === 'listed' ? 'Manage' : 'List for Sale'}
+                                                </Text>
+                                            </AnimatedPressable>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        </ScrollView>
                     </View>
                 </View>
             </Modal>

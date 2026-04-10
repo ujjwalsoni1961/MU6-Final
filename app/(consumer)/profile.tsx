@@ -13,6 +13,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useOwnedNFTs, useLikedSongs, useAdminTransactions } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import * as Clipboard from 'expo-clipboard';
+import { getAvatarForPreset } from './edit-profile';
 
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
@@ -66,9 +67,7 @@ export default function ProfileScreen() {
     );
 
     const displayName = profile?.displayName || 'Anonymous';
-    const avatarUri = profile?.avatarPath
-        ? (profile.avatarPath.startsWith('http') ? profile.avatarPath : `${process.env.EXPO_PUBLIC_SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`)
-        : 'https://placehold.co/200x200/1e293b/94a3b8?text=👤';
+    const avatarPreset = getAvatarForPreset(profile?.avatarPath);
     const truncatedWallet = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '0x0000...0000';
 
     const handleCopyAddress = async () => {
@@ -138,8 +137,13 @@ export default function ProfileScreen() {
                         shadowOpacity: isAndroid ? 0 : 0.04, shadowRadius: 8, elevation: isAndroid ? 1 : 4,
                     }}
                 >
-                    <View style={{ width: isWeb ? 100 : 96, height: isWeb ? 100 : 96, borderRadius: 50, padding: 3, borderWidth: 3, borderColor: '#38b4ba' }}>
-                        <Image source={{ uri: avatarUri }} style={{ width: isWeb ? 92 : 88, height: isWeb ? 92 : 88, borderRadius: 46 }} contentFit="cover" />
+                    <View style={{
+                        width: isWeb ? 100 : 96, height: isWeb ? 100 : 96, borderRadius: 50,
+                        padding: 3, borderWidth: 3, borderColor: '#38b4ba',
+                        backgroundColor: avatarPreset.gradient[0],
+                        alignItems: 'center', justifyContent: 'center',
+                    }}>
+                        <Text style={{ fontSize: isWeb ? 44 : 40 }}>{avatarPreset.emoji}</Text>
                     </View>
                     <Text style={{ fontSize: 24, fontWeight: '800', color: colors.text.primary, marginTop: 16, letterSpacing: -0.5 }}>
                         {displayName}
@@ -154,7 +158,7 @@ export default function ProfileScreen() {
                     {isWeb && (
                         <AnimatedPressable
                             preset="button"
-                            onPress={() => router.push('/(consumer)/settings')}
+                            onPress={() => router.push('/(consumer)/edit-profile')}
                             style={{
                                 flexDirection: 'row', alignItems: 'center', marginTop: 16,
                                 paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12,

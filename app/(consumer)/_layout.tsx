@@ -50,7 +50,6 @@ export default function ConsumerLayout() {
                             isWeb ? null :
                                 <View style={{ flex: 1, backgroundColor: isDark ? 'rgba(3,7,17,0.9)' : 'rgba(255,255,255,0.9)' }} />
                         ),
-                        animation: 'fade', // Add smooth fade transition between tabs
                         tabBarButton: (props) => (
                             <AnimatedPressable
                                 {...props}
@@ -72,6 +71,7 @@ export default function ConsumerLayout() {
                     <Tabs.Screen name="artist-profile" options={{ href: null }} />
                     <Tabs.Screen name="nft-detail" options={{ href: null }} />
                     <Tabs.Screen name="settings" options={{ href: null }} />
+                    <Tabs.Screen name="edit-profile" options={{ href: null }} />
                 </Tabs>
 
                 {/* Global Music Player Overlay */}

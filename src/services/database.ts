@@ -6,7 +6,7 @@
  * admin client only where explicitly needed.
  */
 
-import { supabase, supabaseAdmin } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 // ────────────────────────────────────────────
 // Types (mirrors DB schema)
@@ -62,13 +62,22 @@ export interface NFTRelease {
 
 export interface NFTToken {
     id: string;
-    nftReleaseId: string;
-    tokenId: string;
+    releaseId: string;
+    onChainTokenId: string | null;
     ownerWalletAddress: string;
     mintedAt: string;
-    lastSalePriceEth: number | null;
-    // Joined
+    pricePaidEth: number | null;
+    // Joined fields
     release?: NFTRelease;
+}
+
+export interface TradeEvent {
+    id: string;
+    type: 'mint' | 'sale';
+    date: string;
+    price: number;
+    fromWallet: string;
+    toWallet: string;
 }
 
 export interface MarketplaceListing {
@@ -169,7 +178,7 @@ export async function getSongs(filters?: {
     // For published songs this doesn't matter (RLS passes on is_published=TRUE),
     // but for drafts and to guarantee creator queries always work, use admin.
     const isCreatorQuery = !!filters?.creatorId;
-    const client = isCreatorQuery ? supabaseAdmin : supabase;
+    const client = isCreatorQuery ? supabase : supabase;
 
     let query = client
         .from('songs')
@@ -290,7 +299,7 @@ export async function createSong(
         compositionOwnershipPct?: number;
     },
 ): Promise<Song | null> {
-    const { data: created, error } = await supabaseAdmin
+    const { data: created, error } = await supabase
         .from('songs')
         .insert({
             creator_id: data.creatorId,
@@ -330,7 +339,7 @@ export async function updateSong(
         dbUpdates[camelToSnake(key)] = value;
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
         .from('songs')
         .update(dbUpdates)
         .eq('id', id)
@@ -356,7 +365,7 @@ export async function upgradeToCreator(profileId: string, data: {
     country?: string;
     bio?: string;
 }): Promise<ArtistProfile | null> {
-    const { data: updated, error } = await supabaseAdmin
+    const { data: updated, error } = await supabase
         .from('profiles')
         .update({
             role: 'creator',
@@ -438,6 +447,28 @@ export async function getNFTReleases(songId?: string): Promise<NFTRelease[]> {
     return (data || []).map(mapNFTReleaseRow);
 }
 
+export async function getNFTReleaseById(releaseId: string): Promise<NFTRelease | null> {
+    const { data, error } = await supabase
+        .from('nft_releases')
+        .select(`
+            *,
+            song:songs!song_id (
+                id, title, cover_path, creator_id,
+                creator:profiles!creator_id (
+                    id, display_name, avatar_path
+                )
+            )
+        `)
+        .eq('id', releaseId)
+        .single();
+
+    if (error || !data) {
+        console.error('[db] getNFTReleaseById error:', error);
+        return null;
+    }
+    return mapNFTReleaseRow(data);
+}
+
 export async function getNFTTokensByOwner(walletAddress: string): Promise<NFTToken[]> {
     const { data, error } = await supabase
         .from('nft_tokens')
@@ -458,6 +489,126 @@ export async function getNFTTokensByOwner(walletAddress: string): Promise<NFTTok
         return [];
     }
     return (data || []).map(mapNFTTokenRow);
+}
+
+export async function getNFTTokensForRelease(releaseId: string): Promise<NFTToken[]> {
+    const { data, error } = await supabase
+        .from('nft_tokens')
+        .select(`
+            *,
+            release:nft_releases!nft_release_id (
+                *,
+                song:songs!song_id (
+                    id, title, cover_path, creator_id
+                )
+            )
+        `)
+        .eq('nft_release_id', releaseId)
+        .order('minted_at', { ascending: true });
+
+    if (error) {
+        console.error('[db] getNFTTokensForRelease error:', error);
+        return [];
+    }
+    return (data || []).map(mapNFTTokenRow);
+}
+
+export async function getNFTTradeHistory(params: { tokenId?: string; releaseId?: string }): Promise<TradeEvent[]> {
+    const history: TradeEvent[] = [];
+
+    // Base query for primary mints
+    let tokensQuery = supabase
+        .from('nft_tokens')
+        .select(`
+            id,
+            minted_at,
+            owner_wallet_address,
+            price_paid_eth,
+            release:nft_releases!nft_release_id (
+                price_eth,
+                song:songs!song_id (
+                    creator:profiles!creator_id (
+                        wallet_address
+                    )
+                )
+            )
+        `);
+
+    if (params.tokenId) {
+        tokensQuery = tokensQuery.eq('id', params.tokenId);
+    } else if (params.releaseId) {
+        tokensQuery = tokensQuery.eq('nft_release_id', params.releaseId);
+    } else {
+        return [];
+    }
+
+    const { data: tokenDataRaw, error: tokensError } = await tokensQuery;
+    const tokensData = tokenDataRaw as any[] || [];
+
+    // Map mint events
+    if (!tokensError) {
+        tokensData.forEach(t => {
+            const releaseData = Array.isArray(t.release) ? t.release[0] : t.release;
+            const songData = Array.isArray(releaseData?.song) ? releaseData.song[0] : releaseData?.song;
+            const creatorData = Array.isArray(songData?.creator) ? songData.creator[0] : songData?.creator;
+            
+            const creatorWallet = creatorData?.wallet_address || 'Creator';
+            const mintPrice = t.price_paid_eth !== null && t.price_paid_eth !== undefined
+                ? t.price_paid_eth
+                : (releaseData?.price_eth || 0);
+
+            history.push({
+                id: `mint-${t.id}`,
+                type: 'mint',
+                date: t.minted_at,
+                price: mintPrice,
+                fromWallet: creatorWallet,
+                toWallet: t.owner_wallet_address || 'Unknown' // Will overlap with secondary sales below but accurate for initial
+            });
+        });
+    }
+
+    // Base query for secondary sales
+    let listingsQuery = supabase
+        .from('marketplace_listings')
+        .select(`
+            id,
+            seller_wallet,
+            buyer_wallet,
+            price_eth,
+            sold_at,
+            nft_token_id,
+            nft_token:nft_tokens!inner(nft_release_id)
+        `)
+        .not('sold_at', 'is', null)
+        .order('sold_at', { ascending: true });
+
+    if (params.tokenId) {
+        listingsQuery = listingsQuery.eq('nft_token_id', params.tokenId);
+    } else if (params.releaseId) {
+        listingsQuery = listingsQuery.eq('nft_token.nft_release_id', params.releaseId);
+    }
+
+    const { data: listingsDataRaw, error: listingsError } = await listingsQuery;
+    const listingsData = listingsDataRaw as any[] || [];
+
+    if (!listingsError) {
+        listingsData.forEach(l => {
+            history.push({
+                id: `sale-${l.id}`,
+                type: 'sale',
+                date: l.sold_at,
+                price: l.price_eth || 0,
+                fromWallet: l.seller_wallet,
+                toWallet: l.buyer_wallet || 'Unknown'
+            });
+        });
+    }
+
+    // Sort by date descending (newest first)
+    history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return history;
 }
 
 // ────────────────────────────────────────────
@@ -537,7 +688,7 @@ export async function upsertSplitSheet(
     }>,
 ): Promise<SplitEntry[]> {
     // Delete existing
-    await supabaseAdmin
+    await supabase
         .from('song_rights_splits')
         .delete()
         .eq('song_id', songId);
@@ -553,7 +704,7 @@ export async function upsertSplitSheet(
         linked_wallet_address: s.linkedWalletAddress || null,
     }));
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
         .from('song_rights_splits')
         .insert(rows)
         .select();
@@ -580,7 +731,7 @@ export async function logStream(
 ): Promise<StreamEntry | null> {
     const isQualified = durationSeconds >= 15;
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
         .from('streams')
         .insert({
             song_id: songId,
@@ -603,7 +754,7 @@ export async function logStream(
 // ────────────────────────────────────────────
 
 export async function likeSong(songId: string, profileId: string): Promise<boolean> {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('likes')
         .upsert(
             { song_id: songId, profile_id: profileId },
@@ -617,7 +768,7 @@ export async function likeSong(songId: string, profileId: string): Promise<boole
 }
 
 export async function unlikeSong(songId: string, profileId: string): Promise<boolean> {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('likes')
         .delete()
         .eq('song_id', songId)
@@ -662,7 +813,7 @@ export async function getLikedSongs(profileId: string): Promise<Song[]> {
 // ────────────────────────────────────────────
 
 export async function followArtist(followerId: string, followingId: string): Promise<boolean> {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('follows')
         .upsert(
             { follower_id: followerId, following_id: followingId },
@@ -672,7 +823,7 @@ export async function followArtist(followerId: string, followingId: string): Pro
 }
 
 export async function unfollowArtist(followerId: string, followingId: string): Promise<boolean> {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('follows')
         .delete()
         .eq('follower_id', followerId)
@@ -706,7 +857,7 @@ export interface CreatorDashboardStats {
 export async function getCreatorDashboard(profileId: string): Promise<CreatorDashboardStats> {
     // Use admin client — Thirdweb auth means auth.uid() is NULL on anon client,
     // so RLS may silently filter out creator's own songs/data.
-    const client = supabaseAdmin;
+    const client = supabase;
 
     // Songs aggregate
     const { data: songs } = await client
@@ -766,7 +917,7 @@ export async function getStreamsByCreator(
     options?: { limit?: number; offset?: number },
 ): Promise<StreamEntry[]> {
     // Get creator's song IDs first (admin client bypasses RLS — Thirdweb auth means auth.uid() is NULL)
-    const { data: songs } = await supabaseAdmin
+    const { data: songs } = await supabase
         .from('songs')
         .select('id')
         .eq('creator_id', profileId);
@@ -774,7 +925,7 @@ export async function getStreamsByCreator(
     const songIds = songs?.map((s) => s.id) || [];
     if (songIds.length === 0) return [];
 
-    let query = supabaseAdmin
+    let query = supabase
         .from('streams')
         .select('*')
         .in('song_id', songIds)
@@ -795,7 +946,7 @@ export async function getStreamsByCreator(
 /** Get full royalty summary for a creator across all their songs */
 export async function getCreatorRoyaltySummary(profileId: string): Promise<CreatorRoyaltySummary> {
     // Get creator's songs (admin client bypasses RLS — Thirdweb auth means auth.uid() is NULL)
-    const { data: songs } = await supabaseAdmin
+    const { data: songs } = await supabase
         .from('songs')
         .select('id, title, cover_path, plays_count')
         .eq('creator_id', profileId);
@@ -811,7 +962,7 @@ export async function getCreatorRoyaltySummary(profileId: string): Promise<Creat
     }
 
     // Get all royalty shares for this profile
-    const { data: shares } = await supabaseAdmin
+    const { data: shares } = await supabase
         .from('royalty_shares')
         .select(`
             amount_eur,
@@ -860,7 +1011,7 @@ export async function getCreatorRoyaltySummary(profileId: string): Promise<Creat
     // Get NFTs minted count
     let totalNFTsSold = 0;
     if (songIds.length > 0) {
-        const { data: releases } = await supabaseAdmin
+        const { data: releases } = await supabase
             .from('nft_releases')
             .select('minted_count')
             .in('song_id', songIds);
@@ -897,7 +1048,7 @@ export async function getRoyaltyEventsBySong(
     songId: string,
     options?: { sourceType?: string; limit?: number },
 ): Promise<RoyaltyEvent[]> {
-    let query = supabaseAdmin
+    let query = supabase
         .from('royalty_events')
         .select('*')
         .eq('song_id', songId)
@@ -923,7 +1074,7 @@ export async function getRoyaltySharesByProfile(
     profileId: string,
     options?: { limit?: number },
 ): Promise<RoyaltyShare[]> {
-    let query = supabaseAdmin
+    let query = supabase
         .from('royalty_shares')
         .select(`
             *,
@@ -973,19 +1124,17 @@ export function getPublicUrl(bucket: 'covers' | 'avatars', path: string): string
     return data.publicUrl;
 }
 
-/** Get a signed URL for private audio files.
- *  Uses the admin client because the audio bucket is private
- *  and the anon key doesn't have RLS read access to storage.objects.
+/** Get a public URL for audio files.
+ *  The audio bucket was made public so the anon client can read audio without signing.
  */
-export async function getAudioUrl(path: string, expiresIn = 3600): Promise<string | null> {
-    const { data, error } = await supabaseAdmin.storage
-        .from('audio')
-        .createSignedUrl(path, expiresIn);
-    if (error || !data) {
+export async function getAudioUrl(path: string, _expiresIn = 3600): Promise<string | null> {
+    try {
+        const { data } = supabase.storage.from('audio').getPublicUrl(path);
+        return data.publicUrl || null;
+    } catch (error) {
         console.error('[db] getAudioUrl error:', error);
         return null;
     }
-    return data.signedUrl;
 }
 
 // ────────────────────────────────────────────
@@ -994,7 +1143,7 @@ export async function getAudioUrl(path: string, expiresIn = 3600): Promise<strin
 
 /** Get the active listing for a specific NFT token (if any) */
 export async function getActiveListingForToken(nftTokenId: string): Promise<MarketplaceListing | null> {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
         .from('marketplace_listings')
         .select('*')
         .eq('nft_token_id', nftTokenId)
@@ -1011,7 +1160,7 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
     activeListing: MarketplaceListing | null;
 }>> {
     // Step 1: Get all tokens owned by this wallet
-    const { data: tokens, error: tokensError } = await supabaseAdmin
+    const { data: tokens, error: tokensError } = await supabase
         .from('nft_tokens')
         .select(`
             *,
@@ -1032,7 +1181,7 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
 
     // Step 2: Get active listings for these tokens
     const tokenIds = tokens.map((t: any) => t.id);
-    const { data: listings } = await supabaseAdmin
+    const { data: listings } = await supabase
         .from('marketplace_listings')
         .select('*')
         .in('nft_token_id', tokenIds)
@@ -1056,7 +1205,7 @@ export async function updateListingPrice(
     newPriceEth: number,
     sellerWallet: string,
 ): Promise<{ success: boolean; error?: string }> {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('marketplace_listings')
         .update({ price_eth: newPriceEth })
         .eq('id', listingId)
@@ -1072,7 +1221,7 @@ export async function cancelListingDb(
     listingId: string,
     sellerWallet: string,
 ): Promise<{ success: boolean; error?: string }> {
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
         .from('marketplace_listings')
         .update({ is_active: false })
         .eq('id', listingId)
@@ -1081,6 +1230,126 @@ export async function cancelListingDb(
 
     if (error) return { success: false, error: error.message };
     return { success: true };
+}
+
+// ────────────────────────────────────────────
+// USER ACTIVITY FEED (wallet-scoped)
+// ────────────────────────────────────────────
+
+export interface UserActivity {
+    id: string;
+    type: 'purchase' | 'sale' | 'mint' | 'listing';
+    songTitle: string;
+    coverPath: string | null;
+    price: number | null;
+    date: string;
+    status: 'completed' | 'pending' | 'active';
+}
+
+/**
+ * Get activity feed for a specific wallet address.
+ * Combines purchases, sales, listings, and mints into one sorted list.
+ */
+export async function getUserActivity(
+    walletAddress: string,
+    filter?: 'all' | 'purchases' | 'sales' | 'mints',
+    limit = 20,
+): Promise<UserActivity[]> {
+    const wallet = walletAddress.toLowerCase();
+    const activities: UserActivity[] = [];
+
+    // ── Purchases (listings where this wallet is the buyer) ──
+    if (!filter || filter === 'all' || filter === 'purchases') {
+        const { data: purchases } = await supabase
+            .from('marketplace_listings')
+            .select(`
+                id, price_eth, listed_at, sold_at, buyer_wallet, is_active,
+                nft_token:nft_tokens!nft_token_id (
+                    release:nft_releases!nft_release_id (
+                        song:songs!song_id ( title, cover_path )
+                    )
+                )
+            `)
+            .eq('buyer_wallet', wallet)
+            .order('sold_at', { ascending: false })
+            .limit(limit);
+
+        (purchases || []).forEach((row: any) => {
+            const song = row.nft_token?.release?.song;
+            activities.push({
+                id: `purchase-${row.id}`,
+                type: 'purchase',
+                songTitle: song?.title || 'Unknown Song',
+                coverPath: song?.cover_path || null,
+                price: row.price_eth ? parseFloat(row.price_eth) : null,
+                date: row.sold_at || row.listed_at,
+                status: 'completed',
+            });
+        });
+    }
+
+    // ── Sales & Active Listings (listings where this wallet is the seller) ──
+    if (!filter || filter === 'all' || filter === 'sales') {
+        const { data: sales } = await supabase
+            .from('marketplace_listings')
+            .select(`
+                id, price_eth, listed_at, sold_at, seller_wallet, is_active,
+                nft_token:nft_tokens!nft_token_id (
+                    release:nft_releases!nft_release_id (
+                        song:songs!song_id ( title, cover_path )
+                    )
+                )
+            `)
+            .eq('seller_wallet', wallet)
+            .order('listed_at', { ascending: false })
+            .limit(limit);
+
+        (sales || []).forEach((row: any) => {
+            const song = row.nft_token?.release?.song;
+            activities.push({
+                id: `${row.sold_at ? 'sale' : 'listing'}-${row.id}`,
+                type: row.sold_at ? 'sale' : 'listing',
+                songTitle: song?.title || 'Unknown Song',
+                coverPath: song?.cover_path || null,
+                price: row.price_eth ? parseFloat(row.price_eth) : null,
+                date: row.sold_at || row.listed_at,
+                status: row.sold_at ? 'completed' : (row.is_active ? 'active' : 'completed'),
+            });
+        });
+    }
+
+    // ── Mints (NFT tokens owned by this wallet) ──
+    if (!filter || filter === 'all' || filter === 'mints') {
+        const { data: mints } = await supabase
+            .from('nft_tokens')
+            .select(`
+                id, minted_at, last_sale_price_eth,
+                release:nft_releases!nft_release_id (
+                    price_eth,
+                    song:songs!song_id ( title, cover_path )
+                )
+            `)
+            .eq('owner_wallet_address', wallet)
+            .order('minted_at', { ascending: false })
+            .limit(limit);
+
+        (mints || []).forEach((row: any) => {
+            const song = row.release?.song;
+            activities.push({
+                id: `mint-${row.id}`,
+                type: 'mint',
+                songTitle: song?.title || 'Unknown Song',
+                coverPath: song?.cover_path || null,
+                price: row.release?.price_eth ? parseFloat(row.release.price_eth) : null,
+                date: row.minted_at,
+                status: 'completed',
+            });
+        });
+    }
+
+    // Sort by date descending and limit
+    activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return activities.slice(0, limit);
 }
 
 // ────────────────────────────────────────────
@@ -1142,11 +1411,11 @@ function mapNFTReleaseRow(row: any): NFTRelease {
 function mapNFTTokenRow(row: any): NFTToken {
     return {
         id: row.id,
-        nftReleaseId: row.nft_release_id,
-        tokenId: row.token_id,
+        releaseId: row.nft_release_id,
+        onChainTokenId: row.token_id || row.on_chain_token_id,
         ownerWalletAddress: row.owner_wallet_address,
         mintedAt: row.minted_at,
-        lastSalePriceEth: row.last_sale_price_eth ? parseFloat(row.last_sale_price_eth) : null,
+        pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : null,
         release: row.release ? mapNFTReleaseRow(row.release) : undefined,
     };
 }
