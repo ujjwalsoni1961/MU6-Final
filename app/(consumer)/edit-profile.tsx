@@ -14,43 +14,35 @@ import { useProfiles } from 'thirdweb/react';
 import { thirdwebClient } from '../../src/lib/thirdweb';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import { supabase } from '../../src/lib/supabase';
 
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
 const screenWidth = Dimensions.get('window').width;
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 async function uploadToStorage(
-    bucket: string, filePath: string, fileUri: string, contentType: string, walletAddress?: string
+    bucket: string, filePath: string, fileUri: string, contentType: string
 ): Promise<string | null> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30s upload timeout
     try {
+        // Convert file URI to ArrayBuffer for reliable cross-platform upload
         const response = await fetch(fileUri);
-        const blob = await response.blob();
-        const formData = new FormData();
-        formData.append('file', blob, filePath.split('/').pop() || 'file');
-        formData.append('bucket', bucket);
-        formData.append('path', filePath);
-        if (walletAddress) {
-            formData.append('walletAddress', walletAddress);
-        }
-        formData.append('contentType', contentType);
+        const arrayBuffer = await response.arrayBuffer();
 
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/upload-file`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-            body: formData,
-            signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        const result = await res.json();
-        if (!res.ok || !result.success) return null;
-        return result.path || filePath;
+        const { data, error } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, arrayBuffer, {
+                contentType,
+                upsert: true,
+            });
+
+        if (error) {
+            console.error('[upload] uploadToStorage error:', error.message);
+            return null;
+        }
+        return data?.path || filePath;
     } catch (err: any) {
-        clearTimeout(timeoutId);
         console.error('[upload] uploadToStorage error:', err?.message);
         return null;
     }
@@ -167,7 +159,7 @@ export default function EditProfileScreen() {
                 const ext = avatarFile.name.split('.').pop() || 'jpg';
                 const fName = `${profile.id}_avatar_${Date.now()}.${ext}`;
                 const path = await uploadToStorage(
-                    'avatars', fName, avatarFile.uri, avatarFile.mimeType, profile.walletAddress
+                    'avatars', fName, avatarFile.uri, avatarFile.mimeType
                 );
                 if (path) newAvatarPath = path;
             }

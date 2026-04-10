@@ -16,37 +16,35 @@ import { SelectField } from '../../src/components/form';
 import { COUNTRIES } from '../../src/types/creator';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
+import { supabase } from '../../src/lib/supabase';
 
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 async function uploadToStorage(
-    bucket: string, filePath: string, fileUri: string, contentType: string, walletAddress?: string
+    bucket: string, filePath: string, fileUri: string, contentType: string
 ): Promise<string | null> {
     try {
+        // Convert file URI to ArrayBuffer for reliable cross-platform upload
         const response = await fetch(fileUri);
-        const blob = await response.blob();
-        const formData = new FormData();
-        formData.append('file', blob, filePath.split('/').pop() || 'file');
-        formData.append('bucket', bucket);
-        formData.append('path', filePath);
-        if (walletAddress) {
-            formData.append('walletAddress', walletAddress);
-        }
-        formData.append('contentType', contentType);
+        const arrayBuffer = await response.arrayBuffer();
 
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/upload-file`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-            body: formData,
-        });
-        const result = await res.json();
-        if (!res.ok || !result.success) return null;
-        return result.path || filePath;
-    } catch (err) {
+        const { data, error } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, arrayBuffer, {
+                contentType,
+                upsert: true,
+            });
+
+        if (error) {
+            console.error('[upload] uploadToStorage error:', error.message);
+            return null;
+        }
+        return data?.path || filePath;
+    } catch (err: any) {
+        console.error('[upload] uploadToStorage error:', err?.message);
         return null;
     }
 }
@@ -156,14 +154,14 @@ export default function EditArtistProfileScreen() {
             if (avatarFile) {
                 const ext = avatarFile.name.split('.').pop() || 'jpg';
                 const fName = `${profile.id}_avatar_${Date.now()}.${ext}`;
-                const path = await uploadToStorage('avatars', fName, avatarFile.uri, avatarFile.mimeType, profile.walletAddress);
+                const path = await uploadToStorage('avatars', fName, avatarFile.uri, avatarFile.mimeType);
                 if (path) newAvatarPath = path;
             }
 
             if (coverFile) {
                 const ext = coverFile.name.split('.').pop() || 'jpg';
                 const fName = `${profile.id}_cover_${Date.now()}.${ext}`;
-                const path = await uploadToStorage('covers', fName, coverFile.uri, coverFile.mimeType, profile.walletAddress);
+                const path = await uploadToStorage('covers', fName, coverFile.uri, coverFile.mimeType);
                 if (path) newCoverPath = path;
             }
 

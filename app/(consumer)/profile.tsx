@@ -1,16 +1,14 @@
 import React, { useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet, Brush, ChevronRight } from 'lucide-react-native';
+import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet, Brush, ChevronRight, ShoppingCart, Coins, ArrowUpRight, Tag } from 'lucide-react-native';
 import GlassCard from '../../src/components/shared/GlassCard';
 import NFTCard from '../../src/components/shared/NFTCard';
-import TransactionRow from '../../src/components/shared/TransactionRow';
-import { Transaction } from '../../src/types';
 import { useAuth } from '../../src/context/AuthContext';
-import { useOwnedNFTs, useLikedSongs, useAdminTransactions } from '../../src/hooks/useData';
+import { useOwnedNFTs, useLikedSongs, useUserActivity } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import * as Clipboard from 'expo-clipboard';
 import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
@@ -57,14 +55,14 @@ export default function ProfileScreen() {
     // Real data hooks
     const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
     const { data: likedSongs, refresh: refreshLiked } = useLikedSongs();
-    const { data: recentTxns, loading: loadingTxns, refresh: refreshTxns } = useAdminTransactions(5);
+    const { data: recentActivity, loading: loadingActivity, refresh: refreshActivity } = useUserActivity();
 
     useFocusEffect(
         useCallback(() => {
             refreshNFTs();
             refreshLiked();
-            refreshTxns();
-        }, [refreshNFTs, refreshLiked, refreshTxns])
+            refreshActivity();
+        }, [refreshNFTs, refreshLiked, refreshActivity])
     );
 
     const displayName = profile?.displayName || 'Anonymous';
@@ -87,15 +85,19 @@ export default function ProfileScreen() {
         }
     };
 
-    const renderTransaction = ({ item }: { item: Transaction }) => (
-        <TransactionRow
-            type={item.type}
-            songTitle={item.songTitle}
-            amount={item.price}
-            date={item.date ? new Date(item.date).toLocaleDateString() : ''}
-            status={item.status}
-        />
-    );
+    const activityIcons: Record<string, React.ComponentType<{ size: number; color: string }>> = {
+        purchase: ShoppingCart,
+        sale: Coins,
+        mint: ArrowUpRight,
+        listing: Tag,
+    };
+
+    const activityLabels: Record<string, string> = {
+        purchase: 'Purchased',
+        sale: 'Sold',
+        mint: 'Minted',
+        listing: 'Listed',
+    };
 
     const Container = isWeb ? View : SafeAreaView;
 
@@ -279,9 +281,9 @@ export default function ProfileScreen() {
 
                 {/* Recent Activity */}
                 <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>Recent Activity</Text>
-                {loadingTxns ? (
+                {loadingActivity ? (
                     <View style={{ padding: 20, alignItems: 'center' }}><ActivityIndicator size="small" color="#38b4ba" /></View>
-                ) : recentTxns.length > 0 ? (
+                ) : recentActivity.length > 0 ? (
                     <View
                         style={{
                             borderRadius: isWeb ? 16 : 24,
@@ -296,12 +298,30 @@ export default function ProfileScreen() {
                             elevation: isAndroid ? 1 : 0,
                         }}
                     >
-                        <FlatList
-                            data={recentTxns}
-                            renderItem={renderTransaction}
-                            keyExtractor={(item) => item.id}
-                            scrollEnabled={false}
-                        />
+                        {recentActivity.slice(0, 10).map((activity) => {
+                            const IconComponent = activityIcons[activity.type] || Tag;
+                            const label = activityLabels[activity.type] || activity.type;
+                            return (
+                                <View key={activity.id} style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+                                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(56,180,186,0.12)', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                        <IconComponent size={18} color="#38b4ba" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                                            {activity.songTitle}
+                                        </Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 2 }}>
+                                            {label} {activity.date ? new Date(activity.date).toLocaleDateString() : ''}
+                                        </Text>
+                                    </View>
+                                    {activity.price != null && (
+                                        <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 13 }}>
+                                            {activity.price} POL
+                                        </Text>
+                                    )}
+                                </View>
+                            );
+                        })}
                     </View>
                 ) : (
                     <View style={{ padding: 20 }}>
