@@ -159,7 +159,7 @@ export default function HomeScreen() {
 
                     {/* ─── Jump Back In (New Releases) ─── */}
                     <View style={{ paddingHorizontal: hPad, marginBottom: 40 }}>
-                        <SectionHeader title="Jump Back In" onViewAll={() => { }} />
+                        <SectionHeader title="Jump Back In" onViewAll={() => router.push({ pathname: '/(consumer)/all-songs', params: { section: 'new' } })} />
                         {loadingNew ? <SectionLoader /> : (
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -hPad, paddingHorizontal: hPad }}>
                                 {newReleases.map((song) => (
@@ -180,7 +180,7 @@ export default function HomeScreen() {
 
                     {/* ─── Made For You (more trending) ─── */}
                     <View style={{ paddingHorizontal: hPad }}>
-                        <SectionHeader title="Made For You" onViewAll={() => { }} />
+                        <SectionHeader title="Made For You" onViewAll={() => router.push({ pathname: '/(consumer)/all-songs', params: { section: 'trending' } })} />
                     </View>
                     {loadingTrending ? <SectionLoader /> : (
                         <Animated.ScrollView
@@ -205,7 +205,7 @@ export default function HomeScreen() {
 
                     {/* ─── Top Creators ─── */}
                     <View style={{ paddingHorizontal: hPad }}>
-                        <SectionHeader title="Top Creators" onViewAll={() => { }} />
+                        <SectionHeader title="Top Creators" onViewAll={() => router.push('/(consumer)/all-creators')} />
                     </View>
                     {loadingArtists ? <SectionLoader /> : (
                         <Animated.ScrollView
@@ -229,7 +229,7 @@ export default function HomeScreen() {
 
                     {/* ─── NFT Drops ─── */}
                     <View style={{ paddingHorizontal: hPad }}>
-                        <SectionHeader title="New NFT Drops" onViewAll={() => { }} />
+                        <SectionHeader title="New NFT Drops" onViewAll={() => router.push('/(consumer)/all-nfts')} />
                     </View>
                     {loadingNFTs ? <SectionLoader /> : (
                         <Animated.ScrollView

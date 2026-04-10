@@ -401,6 +401,22 @@ export async function getArtists(limit = 20): Promise<ArtistProfile[]> {
     return (data || []).map(mapArtistRow);
 }
 
+export async function searchArtists(query: string, limit = 20): Promise<ArtistProfile[]> {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'creator')
+        .or(`display_name.ilike.%${query}%`)
+        .order('display_name')
+        .limit(limit);
+
+    if (error) {
+        console.error('[db] searchArtists error:', error);
+        return [];
+    }
+    return (data || []).map(mapArtistRow);
+}
+
 export async function getArtistById(id: string): Promise<ArtistProfile | null> {
     const { data, error } = await supabase
         .from('profiles')
