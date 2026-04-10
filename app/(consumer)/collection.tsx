@@ -66,7 +66,7 @@ export default function CollectionScreen() {
 
     // Swipe-to-dismiss for list/manage modal
     const modalSwipeY = useRef(new Animated.Value(0)).current;
-    const modalPanResponder = useRef(
+    const modalPanResponder = useMemo(() =>
         PanResponder.create({
             onStartShouldSetPanResponder: () => false,
             onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10 && Math.abs(gs.dy) > Math.abs(gs.dx),
@@ -75,7 +75,13 @@ export default function CollectionScreen() {
             },
             onPanResponderRelease: (_, gs) => {
                 if (gs.dy > 80 || gs.vy > 0.5) {
-                    Animated.timing(modalSwipeY, { toValue: 600, duration: 200, useNativeDriver: true }).start(() => {
+                    Animated.spring(modalSwipeY, {
+                        toValue: 600,
+                        velocity: gs.vy,
+                        tension: 65,
+                        friction: 11,
+                        useNativeDriver: true,
+                    }).start(() => {
                         setModalVisible(false);
                         modalSwipeY.setValue(0);
                     });
@@ -83,12 +89,11 @@ export default function CollectionScreen() {
                     Animated.spring(modalSwipeY, { toValue: 0, useNativeDriver: true, tension: 100, friction: 12 }).start();
                 }
             },
-        })
-    ).current;
+        }), []);
 
     // Swipe-to-dismiss for group modal
     const groupSwipeY = useRef(new Animated.Value(0)).current;
-    const groupPanResponder = useRef(
+    const groupPanResponder = useMemo(() =>
         PanResponder.create({
             onStartShouldSetPanResponder: () => false,
             onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10 && Math.abs(gs.dy) > Math.abs(gs.dx),
@@ -97,7 +102,13 @@ export default function CollectionScreen() {
             },
             onPanResponderRelease: (_, gs) => {
                 if (gs.dy > 80 || gs.vy > 0.5) {
-                    Animated.timing(groupSwipeY, { toValue: 600, duration: 200, useNativeDriver: true }).start(() => {
+                    Animated.spring(groupSwipeY, {
+                        toValue: 600,
+                        velocity: gs.vy,
+                        tension: 65,
+                        friction: 11,
+                        useNativeDriver: true,
+                    }).start(() => {
                         setGroupModalVisible(false);
                         groupSwipeY.setValue(0);
                     });
@@ -105,8 +116,7 @@ export default function CollectionScreen() {
                     Animated.spring(groupSwipeY, { toValue: 0, useNativeDriver: true, tension: 100, friction: 12 }).start();
                 }
             },
-        })
-    ).current;
+        }), []);
 
     const filteredNFTs = ownedNFTs.filter((nft) => {
         if (activeFilter === 'All') return true;

@@ -22,7 +22,7 @@ export async function ensureSupabaseProfile(
             .from('profiles')
             .select('*')
             .eq('wallet_address', walletAddress.toLowerCase())
-            .single();
+            .maybeSingle();
 
         if (existing && !fetchError) {
             // Update email if provided and different
@@ -72,7 +72,7 @@ export async function getProfileByWallet(walletAddress: string): Promise<UserPro
         .from('profiles')
         .select('*')
         .eq('wallet_address', walletAddress.toLowerCase())
-        .single();
+        .maybeSingle();
 
     if (error || !data) return null;
     return mapDbToProfile(data);

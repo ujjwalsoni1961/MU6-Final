@@ -58,10 +58,10 @@ export default function FullPlayer() {
             },
             onPanResponderRelease: (_, gestureState) => {
                 if (gestureState.dy > DISMISS_THRESHOLD || gestureState.vy > VELOCITY_THRESHOLD) {
-                    // Collapse to mini player
+                    // Collapse to mini player — use spring with velocity for smooth transition
                     Animated.parallel([
-                        Animated.timing(panY, { toValue: height, useNativeDriver: true, duration: 300 }),
-                        Animated.timing(panScale, { toValue: 0.9, useNativeDriver: true, duration: 300 }),
+                        Animated.spring(panY, { toValue: height, velocity: gestureState.vy, tension: 65, friction: 11, useNativeDriver: true }),
+                        Animated.spring(panScale, { toValue: 0.9, tension: 65, friction: 11, useNativeDriver: true }),
                     ]).start(() => {
                         closeFullPlayer();
                     });
