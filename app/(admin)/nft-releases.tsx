@@ -2,12 +2,15 @@ import React from 'react';
 import { View, Text, Platform } from 'react-native';
 import { Disc3 } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
+import { ToggleSwitch, RowActions } from '../../src/components/admin/AdminActionComponents';
 import { useAdminNFTReleases } from '../../src/hooks/useAdminData';
+import { useAdminNFTReleaseActions } from '../../src/hooks/useAdminActions';
 
 const isWeb = Platform.OS === 'web';
 
 export default function AdminNFTReleasesScreen() {
     const { data: releases, loading, error, refresh } = useAdminNFTReleases();
+    const actions = useAdminNFTReleaseActions(refresh);
 
     return (
         <AdminScreen
@@ -18,7 +21,7 @@ export default function AdminNFTReleasesScreen() {
             onRetry={refresh}
         >
             <AdminDataTable
-                headers={['Song', 'Artist', 'Tier', 'Rarity', 'Supply', 'Minted', 'Price', 'Status', 'Date']}
+                headers={['Song', 'Artist', 'Tier', 'Rarity', 'Minted', 'Price', 'Status', 'Actions']}
                 data={releases}
                 emptyMessage="No NFT releases found"
                 renderRow={(r) => (
@@ -36,15 +39,25 @@ export default function AdminNFTReleasesScreen() {
                                 <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{r.artistName}</Text>
                                 <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{r.tierName}</Text>
                                 <View style={{ flex: 1 }}><StatusBadge status={r.rarity} /></View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{r.totalSupply}</Text>
-                                <Text style={{ flex: 1, color: '#38b4ba', fontSize: 12, fontWeight: '600' }}>{r.mintedCount}</Text>
+                                <Text style={{ flex: 1, color: '#38b4ba', fontSize: 12, fontWeight: '600' }}>
+                                    {r.mintedCount}/{r.totalSupply}
+                                </Text>
                                 <Text style={{ flex: 1, color: '#facc15', fontSize: 12, fontWeight: '600' }}>
                                     {r.priceEth ? `${r.priceEth} ETH` : 'Free'}
                                 </Text>
-                                <View style={{ flex: 1 }}><StatusBadge status={r.isActive ? 'active' : 'pending'} /></View>
-                                <Text style={{ flex: 1, color: '#475569', fontSize: 12 }}>
-                                    {r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '—'}
-                                </Text>
+                                <View style={{ flex: 1 }}>
+                                    <StatusBadge status={r.isActive ? 'active' : 'delisted'} />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <RowActions>
+                                        <ToggleSwitch
+                                            value={r.isActive}
+                                            onToggle={() => actions.toggleActive(r.id, r.isActive)}
+                                            label="Active"
+                                            activeColor="#4ade80"
+                                        />
+                                    </RowActions>
+                                </View>
                             </>
                         ) : (
                             <>
@@ -56,10 +69,18 @@ export default function AdminNFTReleasesScreen() {
                                     </View>
                                     <StatusBadge status={r.rarity} />
                                 </View>
-                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8 }}>
                                     <Text style={{ color: '#38b4ba', fontSize: 12 }}>{r.mintedCount}/{r.totalSupply} minted</Text>
                                     <Text style={{ color: '#facc15', fontSize: 12 }}>{r.priceEth ? `${r.priceEth} ETH` : 'Free'}</Text>
+                                    <StatusBadge status={r.isActive ? 'active' : 'delisted'} />
                                 </View>
+                                <RowActions>
+                                    <ToggleSwitch
+                                        value={r.isActive}
+                                        onToggle={() => actions.toggleActive(r.id, r.isActive)}
+                                        label="Active"
+                                    />
+                                </RowActions>
                             </>
                         )}
                     </View>

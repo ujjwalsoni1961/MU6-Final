@@ -9,6 +9,7 @@ import {
     Settings, ScrollText, Bell, ListMusic,
 } from 'lucide-react-native';
 import { useAdminAuth } from '../../src/context/AdminAuthContext';
+import { ToastProvider } from '../../src/components/admin/AdminActionComponents';
 
 const isWeb = Platform.OS === 'web';
 
@@ -266,14 +267,16 @@ export default function AdminLayout() {
 
     if (isWeb) {
         return (
-            <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: '#030711' }}>
-                <AdminSidebar />
-                <View style={{ flex: 1, backgroundColor: '#030711' }}>
-                    {tabScreens}
+            <ToastProvider>
+                <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: '#030711' }}>
+                    <AdminSidebar />
+                    <View style={{ flex: 1, backgroundColor: '#030711' }}>
+                        {tabScreens}
+                    </View>
                 </View>
-            </View>
+            </ToastProvider>
         );
     }
 
-    return tabScreens;
+    return <ToastProvider>{tabScreens}</ToastProvider>;
 }

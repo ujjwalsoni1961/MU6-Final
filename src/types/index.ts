@@ -64,6 +64,7 @@ export interface Transaction {
     date: string;
     status: 'completed' | 'pending' | 'failed';
     fee?: number;
+    isFlagged?: boolean;
 }
 
 export interface User {

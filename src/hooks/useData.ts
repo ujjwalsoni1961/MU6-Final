@@ -692,6 +692,7 @@ export function useAdminTransactions(limit = 50) {
                 date: l.soldAt || l.listedAt,
                 status: l.soldAt ? 'completed' : (l.isActive ? 'pending' : 'failed'),
                 fee: l.soldAt ? l.priceEth * 0.05 : undefined, // 5% platform fee
+                isFlagged: (l as any).isFlagged ?? false,
             }));
         },
         [] as Transaction[],
