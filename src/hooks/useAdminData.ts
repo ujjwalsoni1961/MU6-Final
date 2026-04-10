@@ -159,6 +159,8 @@ export function useAdminUsersFiltered(filters?: {
                 country: row.country || '',
                 avatarPath: row.avatar_path,
                 isVerified: row.is_verified,
+                isActive: row.is_active ?? true,
+                isBlocked: row.is_blocked ?? false,
                 createdAt: row.created_at,
                 bio: row.bio || '',
                 creatorType: row.creator_type || '',
@@ -217,6 +219,8 @@ export function useAdminSongsFiltered(filters?: {
                 playsCount: row.plays_count || 0,
                 likesCount: row.likes_count || 0,
                 isPublished: row.is_published,
+                isListed: row.is_listed ?? true,
+                isFeatured: row.is_featured ?? false,
                 coverPath: row.cover_path,
                 createdAt: row.created_at,
                 releaseDate: row.release_date,
@@ -336,6 +340,7 @@ export function useAdminNFTTokens(limit = 50) {
                 ownerWallet: row.owner_wallet_address,
                 onChainTokenId: row.token_id || row.on_chain_token_id || '',
                 pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : 0,
+                isVoided: row.is_voided ?? false,
                 mintedAt: row.minted_at,
             }));
         },
@@ -373,6 +378,7 @@ export function useAdminMarketplaceListings(limit = 50) {
                 buyerWallet: row.buyer_wallet,
                 priceEth: parseFloat(row.price_eth),
                 isActive: row.is_active,
+                isFlagged: row.is_flagged ?? false,
                 listedAt: row.listed_at,
                 soldAt: row.sold_at,
             }));
@@ -536,7 +542,9 @@ export function useAdminPayoutRequests(limit = 50) {
                 profileName: row.profile?.display_name || 'Unknown',
                 walletAddress: row.profile?.wallet_address || '',
                 amountEur: parseFloat(row.amount_eur) || 0,
+                paymentMethod: row.payment_method || '',
                 status: row.status,
+                adminNotes: row.admin_notes || '',
                 createdAt: row.created_at,
                 processedAt: row.processed_at,
             }));
