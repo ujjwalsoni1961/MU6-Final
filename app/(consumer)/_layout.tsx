@@ -75,6 +75,10 @@ export default function ConsumerLayout() {
                     <Tabs.Screen name="deposit" options={{ href: null }} />
                     <Tabs.Screen name="withdraw" options={{ href: null }} />
                     <Tabs.Screen name="bank-details" options={{ href: null }} />
+                    <Tabs.Screen name="all-songs" options={{ href: null }} />
+                    <Tabs.Screen name="all-creators" options={{ href: null }} />
+                    <Tabs.Screen name="all-nfts" options={{ href: null }} />
+                    <Tabs.Screen name="notifications" options={{ href: null }} />
                 </Tabs>
 
                 {/* Global Music Player Overlay */}
