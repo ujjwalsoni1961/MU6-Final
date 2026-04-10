@@ -14,7 +14,7 @@ import { useProfiles } from 'thirdweb/react';
 import { thirdwebClient } from '../../src/lib/thirdweb';
 import { SelectField } from '../../src/components/form';
 import { COUNTRIES } from '../../src/types/creator';
-import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 
 const isWeb = Platform.OS === 'web';
@@ -99,29 +99,45 @@ export default function EditArtistProfileScreen() {
                 setAvatarUri(`${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`);
             }
             if (profile.coverPath) {
-                setCoverUri(`${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.coverPath}`);
+                setCoverUri(`${SUPABASE_URL}/storage/v1/object/public/covers/${profile.coverPath}`);
             }
         }
     }, [profile]);
 
     const pickAvatar = async () => {
         try {
-            const result = await DocumentPicker.getDocumentAsync({ type: ['image/*'], copyToCacheDirectory: true });
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.8,
+            });
             if (result.canceled || !result.assets?.length) return;
             const asset = result.assets[0];
+            const ext = asset.uri.split('.').pop() || 'jpg';
             setAvatarUri(asset.uri);
-            setAvatarFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || 'image/jpeg' });
-        } catch (e) {}
+            setAvatarFile({ uri: asset.uri, name: `avatar.${ext}`, mimeType: asset.mimeType || 'image/jpeg' });
+        } catch (e) {
+            console.error('[edit-artist-profile] pick avatar error:', e);
+        }
     };
 
     const pickCover = async () => {
         try {
-            const result = await DocumentPicker.getDocumentAsync({ type: ['image/*'], copyToCacheDirectory: true });
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [16, 9],
+                quality: 0.8,
+            });
             if (result.canceled || !result.assets?.length) return;
             const asset = result.assets[0];
+            const ext = asset.uri.split('.').pop() || 'jpg';
             setCoverUri(asset.uri);
-            setCoverFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType || 'image/jpeg' });
-        } catch (e) {}
+            setCoverFile({ uri: asset.uri, name: `cover.${ext}`, mimeType: asset.mimeType || 'image/jpeg' });
+        } catch (e) {
+            console.error('[edit-artist-profile] pick cover error:', e);
+        }
     };
 
     const handleSave = async () => {
@@ -147,7 +163,7 @@ export default function EditArtistProfileScreen() {
             if (coverFile) {
                 const ext = coverFile.name.split('.').pop() || 'jpg';
                 const fName = `${profile.id}_cover_${Date.now()}.${ext}`;
-                const path = await uploadToStorage('avatars', fName, coverFile.uri, coverFile.mimeType, profile.walletAddress);
+                const path = await uploadToStorage('covers', fName, coverFile.uri, coverFile.mimeType, profile.walletAddress);
                 if (path) newCoverPath = path;
             }
 
