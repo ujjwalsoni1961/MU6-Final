@@ -746,7 +746,7 @@ export async function mintToken(
             .from('nft_releases')
             .select('*')
             .eq('id', releaseId)
-            .single();
+            .maybeSingle();
 
         if (!release) return { success: false, error: 'Release not found' };
         if (release.minted_count >= release.total_supply) {
@@ -839,7 +839,7 @@ export async function mintToken(
             .select('id')
             .eq('nft_release_id', releaseId)
             .eq('token_id', tokenId)
-            .single()).data;
+            .maybeSingle()).data;
 
         // Increment minted_count on the release so supply tracking is accurate
         const { error: countError } = await supabase.rpc('increment_minted_count', { release_id: releaseId }).single();
@@ -862,7 +862,7 @@ export async function mintToken(
                     .from('songs')
                     .select('id, creator_id')
                     .eq('id', release.song_id)
-                    .single();
+                    .maybeSingle();
 
                 const creatorId = songData?.creator_id;
                 const sourceRef = `primary_sale:${releaseId}:${tokenId}`;
@@ -894,7 +894,7 @@ export async function mintToken(
                             .from('profiles')
                             .select('wallet_address')
                             .eq('id', creatorId)
-                            .single();
+                            .maybeSingle();
 
                         // Record royalty share (95% to artist)
                         await supabase
@@ -952,7 +952,7 @@ export async function listForSale(
             .from('nft_tokens')
             .select('id, owner_wallet_address, token_id')
             .eq('id', config.nftTokenId)
-            .single();
+            .maybeSingle();
 
         if (!token) return { success: false, error: 'Token not found' };
         if (token.owner_wallet_address.toLowerCase() !== config.sellerWallet.toLowerCase()) {
@@ -1020,7 +1020,7 @@ export async function buyListingFlow(
             `)
             .eq('id', config.listingId)
             .eq('is_active', true)
-            .single();
+            .maybeSingle();
 
         if (!listing) return { success: false, error: 'Listing not found or inactive' };
 
@@ -1122,7 +1122,7 @@ export async function buyListingFlow(
                     .from('profiles')
                     .select('wallet_address')
                     .eq('id', creatorId)
-                    .single();
+                    .maybeSingle();
 
                 await supabase
                     .from('royalty_shares')
@@ -1168,7 +1168,7 @@ export async function cancelListingFlow(
         .eq('id', listingId)
         .eq('seller_wallet', sellerWallet.toLowerCase())
         .eq('is_active', true)
-        .single();
+        .maybeSingle();
 
     if (!listing) return { success: false, error: 'Listing not found' };
 

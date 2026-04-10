@@ -232,7 +232,7 @@ export async function getSongById(id: string): Promise<Song | null> {
             )
         `)
         .eq('id', id)
-        .single();
+        .maybeSingle();
 
     if (error || !data) return null;
     return mapSongRow(data);
@@ -422,7 +422,7 @@ export async function getArtistById(id: string): Promise<ArtistProfile | null> {
         .from('profiles')
         .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
 
     if (error || !data) return null;
     return mapArtistRow(data);
@@ -476,10 +476,10 @@ export async function getNFTReleaseById(releaseId: string): Promise<NFTRelease |
             )
         `)
         .eq('id', releaseId)
-        .single();
+        .maybeSingle();
 
     if (error || !data) {
-        console.error('[db] getNFTReleaseById error:', error);
+        if (error) console.error('[db] getNFTReleaseById error:', error);
         return null;
     }
     return mapNFTReleaseRow(data);
@@ -1125,7 +1125,7 @@ export async function getPlatformSetting<T = any>(key: string): Promise<T | null
         .from('platform_settings')
         .select('value')
         .eq('key', key)
-        .single();
+        .maybeSingle();
     if (error || !data) return null;
     return data.value as T;
 }
@@ -1534,7 +1534,7 @@ export async function getBankDetails(profileId: string): Promise<BankDetails | n
         .from('profiles')
         .select('bank_details')
         .eq('id', profileId)
-        .single();
+        .maybeSingle();
 
     if (error || !data?.bank_details) return null;
     return data.bank_details as BankDetails;
