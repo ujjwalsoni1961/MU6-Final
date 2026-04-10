@@ -13,7 +13,8 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useOwnedNFTs, useLikedSongs, useAdminTransactions } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import * as Clipboard from 'expo-clipboard';
-import { getAvatarForPreset } from './edit-profile';
+import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
+import { PRESET_AVATAR_IDS } from '../../src/hooks/useData';
 
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
@@ -67,8 +68,18 @@ export default function ProfileScreen() {
     );
 
     const displayName = profile?.displayName || 'Anonymous';
-    const avatarPreset = getAvatarForPreset(profile?.avatarPath);
     const truncatedWallet = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '0x0000...0000';
+
+    // Resolve avatar: could be a preset ID, an uploaded file path, or null
+    const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+    const avatarPath = profile?.avatarPath;
+    const avatarUri = !avatarPath
+        ? null
+        : PRESET_AVATAR_IDS.has(avatarPath)
+            ? `preset:${avatarPath}`
+            : avatarPath.startsWith('http')
+                ? avatarPath
+                : `${SUPABASE_URL}/storage/v1/object/public/avatars/${avatarPath}`;
 
     const handleCopyAddress = async () => {
         if (walletAddress) {
@@ -140,10 +151,12 @@ export default function ProfileScreen() {
                     <View style={{
                         width: isWeb ? 100 : 96, height: isWeb ? 100 : 96, borderRadius: 50,
                         padding: 3, borderWidth: 3, borderColor: '#38b4ba',
-                        backgroundColor: avatarPreset.gradient[0],
-                        alignItems: 'center', justifyContent: 'center',
+                        overflow: 'hidden',
                     }}>
-                        <Text style={{ fontSize: isWeb ? 44 : 40 }}>{avatarPreset.emoji}</Text>
+                        <AvatarDisplay
+                            uri={avatarUri || 'preset:default'}
+                            size={(isWeb ? 100 : 96) - 6}
+                        />
                     </View>
                     <Text style={{ fontSize: 24, fontWeight: '800', color: colors.text.primary, marginTop: 16, letterSpacing: -0.5 }}>
                         {displayName}

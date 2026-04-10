@@ -100,6 +100,8 @@ function WebArtistLogin() {
 
     const [otp, setOtp] = useState('');
     const [otpError, setOtpError] = useState('');
+    const [otpSent, setOtpSent] = useState(false);
+    const [resending, setResending] = useState(false);
 
     // Store form data in ref so the wallet-connect effect can access it
     const formRef = useRef(form);
@@ -121,23 +123,41 @@ function WebArtistLogin() {
         return Object.keys(e).length === 0;
     };
 
+    const sendOtp = async () => {
+        try {
+            await preAuthenticate({
+                client: thirdwebClient,
+                strategy: 'email',
+                email: formRef.current.email.trim(),
+            });
+            setOtpSent(true);
+            return true;
+        } catch (err) {
+            console.error('[artist-login] preAuthenticate error:', err);
+            return false;
+        }
+    };
+
     const handleNext = async () => {
         setSubmitted(true);
         if (validate()) {
             setSaving(true);
-            try {
-                // Pre-fill email so they don't have to input it again in Step 2.
-                await preAuthenticate({
-                    client: thirdwebClient,
-                    strategy: 'email',
-                    email: formRef.current.email.trim(),
-                });
-            } catch (err) {
-                console.log('[artist-login] preAuthenticate non-fatal error:', err);
-            } finally {
-                setSaving(false);
-                setStep(2);
+            const sent = await sendOtp();
+            setSaving(false);
+            if (!sent) {
+                setOtpError('Failed to send verification code. Please try again.');
             }
+            setStep(2);
+        }
+    };
+
+    const handleResendOtp = async () => {
+        setResending(true);
+        setOtpError('');
+        const sent = await sendOtp();
+        setResending(false);
+        if (!sent) {
+            setOtpError('Failed to resend code. Please try again.');
         }
     };
 
@@ -409,7 +429,7 @@ function WebArtistLogin() {
                                 ))}
                             </View>
 
-                            {/* OTP Entry */}
+                            {/* OTP Entry — email auto-filled from Step 1 */}
                             <View style={{
                                 backgroundColor: 'rgba(255,255,255,0.03)',
                                 borderRadius: 14, padding: 20, marginBottom: 24,
@@ -418,11 +438,14 @@ function WebArtistLogin() {
                                 <Text style={{ fontSize: 14, fontWeight: '600', color: '#f1f5f9', marginBottom: 12 }}>
                                     Enter Verification Code
                                 </Text>
-                                <Text style={{ fontSize: 13, color: '#94a3b8', marginBottom: 16 }}>
-                                    We sent a 6-digit code to {form.email}
+                                <Text style={{ fontSize: 13, color: '#94a3b8', marginBottom: 4 }}>
+                                    We sent a 6-digit code to:
                                 </Text>
-                                
-                                <TextFormInput 
+                                <Text style={{ fontSize: 14, fontWeight: '600', color: '#38b4ba', marginBottom: 16 }}>
+                                    {form.email}
+                                </Text>
+
+                                <TextFormInput
                                     value={otp}
                                     onChangeText={setOtp}
                                     placeholder="000000"
@@ -457,12 +480,17 @@ function WebArtistLogin() {
 
                                 <AnimatedPressable
                                     preset="button"
-                                    onPress={handleNext}
-                                    style={{ alignItems: 'center', marginTop: 16 }}
+                                    onPress={handleResendOtp}
+                                    disabled={resending}
+                                    style={{ alignItems: 'center', marginTop: 16, opacity: resending ? 0.5 : 1 }}
                                 >
-                                    <Text style={{ fontSize: 13, color: '#64748b' }}>
-                                        Didn't receive it? <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Resend Code</Text>
-                                    </Text>
+                                    {resending ? (
+                                        <ActivityIndicator size="small" color="#38b4ba" />
+                                    ) : (
+                                        <Text style={{ fontSize: 13, color: '#64748b' }}>
+                                            Didn't receive it? <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Resend Code</Text>
+                                        </Text>
+                                    )}
                                 </AnimatedPressable>
                             </View>
                         </>

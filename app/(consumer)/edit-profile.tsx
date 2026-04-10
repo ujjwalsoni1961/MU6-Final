@@ -6,63 +6,59 @@ import {
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, Check } from 'lucide-react-native';
+import { ChevronLeft, Check, Camera } from 'lucide-react-native';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { updateProfile } from '../../src/services/auth';
 import { useProfiles } from 'thirdweb/react';
 import { thirdwebClient } from '../../src/lib/thirdweb';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
 
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
 const screenWidth = Dimensions.get('window').width;
 
-/* ─── Preset Avatar Collection ─── */
-const PRESET_AVATARS = [
-    { id: 'pop',        emoji: '🎤', label: 'Pop',         gradient: ['#ec4899', '#a855f7'] },
-    { id: 'hiphop',     emoji: '🎧', label: 'Hip-Hop',     gradient: ['#f59e0b', '#d97706'] },
-    { id: 'rock',       emoji: '🎸', label: 'Rock',        gradient: ['#ef4444', '#991b1b'] },
-    { id: 'electronic', emoji: '🎛️', label: 'Electronic',  gradient: ['#06b6d4', '#3b82f6'] },
-    { id: 'jazz',       emoji: '🎷', label: 'Jazz',        gradient: ['#d97706', '#78350f'] },
-    { id: 'classical',  emoji: '🎻', label: 'Classical',   gradient: ['#1e3a5f', '#c9a84c'] },
-    { id: 'rnb',        emoji: '💜', label: 'R&B / Soul',  gradient: ['#7c3aed', '#db2777'] },
-    { id: 'lofi',       emoji: '🌙', label: 'Lo-Fi',       gradient: ['#8b5cf6', '#38bdf8'] },
-    { id: 'country',    emoji: '🤠', label: 'Country',     gradient: ['#92400e', '#16a34a'] },
-    { id: 'metal',      emoji: '🤘', label: 'Metal',       gradient: ['#27272a', '#71717a'] },
-    { id: 'reggae',     emoji: '🌴', label: 'Reggae',      gradient: ['#16a34a', '#eab308'] },
-    { id: 'afrobeat',   emoji: '🥁', label: 'Afrobeat',    gradient: ['#ea580c', '#facc15'] },
-];
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
-/* ─── Helper to resolve avatar URI from preset id ─── */
-export function getAvatarForPreset(presetId: string | null | undefined): { emoji: string; gradient: string[] } {
-    const preset = PRESET_AVATARS.find(a => a.id === presetId);
-    return preset
-        ? { emoji: preset.emoji, gradient: preset.gradient }
-        : { emoji: '🎵', gradient: ['#38b4ba', '#0f766e'] };
+async function uploadToStorage(
+    bucket: string, filePath: string, fileUri: string, contentType: string, walletAddress?: string
+): Promise<string | null> {
+    try {
+        const response = await fetch(fileUri);
+        const blob = await response.blob();
+        const formData = new FormData();
+        formData.append('file', blob, filePath.split('/').pop() || 'file');
+        formData.append('bucket', bucket);
+        formData.append('path', filePath);
+        if (walletAddress) {
+            formData.append('walletAddress', walletAddress);
+        }
+        formData.append('contentType', contentType);
+
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/upload-file`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+            body: formData,
+        });
+        const result = await res.json();
+        if (!res.ok || !result.success) return null;
+        return result.path || filePath;
+    } catch (err) {
+        return null;
+    }
 }
 
-/* ─── Avatar Circle Component ─── */
-function AvatarCircle({ emoji, gradient, size = 64, selected = false }: {
-    emoji: string; gradient: string[]; size?: number; selected?: boolean;
-}) {
+/* ─── Default avatar placeholder ─── */
+function DefaultAvatar({ size = 80 }: { size?: number }) {
     return (
         <View style={{
             width: size, height: size, borderRadius: size / 2,
-            backgroundColor: gradient[0],
+            backgroundColor: '#38b4ba',
             alignItems: 'center', justifyContent: 'center',
-            borderWidth: selected ? 3 : 1.5,
-            borderColor: selected ? '#38b4ba' : 'rgba(255,255,255,0.15)',
-            ...(selected && !isAndroid ? {
-                shadowColor: '#38b4ba',
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.6,
-                shadowRadius: 10,
-            } : {}),
-            ...(selected && isAndroid ? {
-                elevation: 6,
-            } : {}),
         }}>
-            <Text style={{ fontSize: size * 0.42 }}>{emoji}</Text>
+            <Text style={{ fontSize: size * 0.45 }}>🎵</Text>
         </View>
     );
 }
@@ -97,25 +93,51 @@ export default function EditProfileScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
     const { profile, refreshProfile } = useAuth();
-    
-    // Fetch Thirdweb in-app wallet profiles to display the user's email 
-    // since Supabase might not have it synced properly.
+
     const { data: linkedProfiles } = useProfiles({ client: thirdwebClient });
     const thirdwebProfile = linkedProfiles?.find(p => p.type === 'email' || p.type === 'google' || p.type === 'apple');
     const userEmail = profile?.email || thirdwebProfile?.details?.email || 'No email associated';
 
     const [displayName, setDisplayName] = useState('');
-    const [selectedAvatar, setSelectedAvatar] = useState<string>('pop');
     const [saving, setSaving] = useState(false);
+
+    // Image upload state
+    const [avatarUri, setAvatarUri] = useState<string | null>(null);
+    const [avatarFile, setAvatarFile] = useState<{ uri: string; name: string; mimeType: string } | null>(null);
 
     // Pre-fill with existing data
     useEffect(() => {
         if (profile) {
             const isWalletName = profile.displayName?.startsWith('0x') || !profile.displayName;
             setDisplayName(isWalletName ? '' : (profile.displayName || ''));
-            setSelectedAvatar(profile.avatarPath || 'pop');
+            if (profile.avatarPath && !profile.avatarPath.match(/^(pop|hiphop|rock|electronic|jazz|classical|rnb|lofi|country|metal|reggae|afrobeat)$/)) {
+                // Only set URI for actual uploaded images, not preset IDs
+                setAvatarUri(`${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`);
+            }
         }
     }, [profile]);
+
+    const pickAvatar = async () => {
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.8,
+            });
+            if (result.canceled || !result.assets?.length) return;
+            const asset = result.assets[0];
+            setAvatarUri(asset.uri);
+            const ext = asset.uri.split('.').pop() || 'jpg';
+            setAvatarFile({
+                uri: asset.uri,
+                name: `profile_photo.${ext}`,
+                mimeType: asset.mimeType || 'image/jpeg',
+            });
+        } catch (e) {
+            console.error('[edit-profile] pick avatar error:', e);
+        }
+    };
 
     const handleSave = async () => {
         if (!profile) return;
@@ -132,9 +154,21 @@ export default function EditProfileScreen() {
 
         setSaving(true);
         try {
+            let newAvatarPath = profile.avatarPath;
+
+            // Upload avatar if a new one was selected
+            if (avatarFile) {
+                const ext = avatarFile.name.split('.').pop() || 'jpg';
+                const fName = `${profile.id}_avatar_${Date.now()}.${ext}`;
+                const path = await uploadToStorage(
+                    'avatars', fName, avatarFile.uri, avatarFile.mimeType, profile.walletAddress
+                );
+                if (path) newAvatarPath = path;
+            }
+
             const updated = await updateProfile(profile.id, {
                 display_name: trimmedName,
-                avatar_path: selectedAvatar,
+                avatar_path: newAvatarPath || undefined as any,
             });
 
             if (updated) {
@@ -149,19 +183,15 @@ export default function EditProfileScreen() {
             }
         } catch (err) {
             console.error('[edit-profile] save error:', err);
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            if (isWeb) {
+                alert('Something went wrong. Please try again.');
+            } else {
+                Alert.alert('Error', 'Something went wrong. Please try again.');
+            }
         } finally {
             setSaving(false);
         }
     };
-
-    // Calculate avatar size based on screen width (4 columns)
-    const gridPadding = 16; // card padding
-    const avatarGap = 8;
-    const containerPadding = 16 * 2; // screen horizontal padding
-    const availableWidth = (isWeb ? 600 : screenWidth) - containerPadding - (gridPadding * 2);
-    const avatarCellWidth = (availableWidth - (avatarGap * 3)) / 4;
-    const avatarSize = Math.min(avatarCellWidth - 8, isWeb ? 64 : 58);
 
     const Container = isWeb ? View : SafeAreaView;
 
@@ -217,71 +247,53 @@ export default function EditProfileScreen() {
                         </AnimatedPressable>
                     </View>
 
-                    {/* Selected Avatar Preview */}
+                    {/* Profile Photo Upload */}
                     <GlassCard style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: 24, marginBottom: 24 }}>
-                        <View style={{
-                            padding: 4,
-                            borderRadius: 60,
-                            borderWidth: 3,
-                            borderColor: '#38b4ba',
-                        }}>
-                            <AvatarCircle
-                                emoji={getAvatarForPreset(selectedAvatar).emoji}
-                                gradient={getAvatarForPreset(selectedAvatar).gradient}
-                                size={isWeb ? 96 : 88}
-                                selected={false}
-                            />
-                        </View>
+                        <AnimatedPressable preset="icon" onPress={pickAvatar}>
+                            <View style={{
+                                padding: 4,
+                                borderRadius: 60,
+                                borderWidth: 3,
+                                borderColor: '#38b4ba',
+                                position: 'relative',
+                            }}>
+                                {avatarUri ? (
+                                    <Image
+                                        source={{ uri: avatarUri }}
+                                        style={{
+                                            width: isWeb ? 96 : 88,
+                                            height: isWeb ? 96 : 88,
+                                            borderRadius: (isWeb ? 96 : 88) / 2,
+                                        }}
+                                        contentFit="cover"
+                                    />
+                                ) : (
+                                    <DefaultAvatar size={isWeb ? 96 : 88} />
+                                )}
+                                {/* Camera overlay */}
+                                <View style={{
+                                    position: 'absolute', bottom: 0, right: 0,
+                                    width: 32, height: 32, borderRadius: 16,
+                                    backgroundColor: '#38b4ba',
+                                    alignItems: 'center', justifyContent: 'center',
+                                    borderWidth: 3, borderColor: isDark ? '#1e293b' : '#fff',
+                                }}>
+                                    <Camera size={14} color="#fff" />
+                                </View>
+                            </View>
+                        </AnimatedPressable>
                         <Text style={{
-                            color: colors.text.primary, fontSize: 18, fontWeight: '700',
+                            color: colors.text.primary, fontSize: 16, fontWeight: '700',
                             marginTop: 16, letterSpacing: -0.3,
                         }}>
-                            {getAvatarForPreset(selectedAvatar).emoji} {PRESET_AVATARS.find(a => a.id === selectedAvatar)?.label || 'Music Lover'}
+                            Profile Photo
                         </Text>
                         <Text style={{
                             color: colors.text.secondary, fontSize: 12,
                             marginTop: 6, textAlign: 'center',
                         }}>
-                            Choose an avatar that represents your music vibe
+                            Tap to upload a photo from your library
                         </Text>
-                    </GlassCard>
-
-                    {/* Avatar Grid */}
-                    <Text style={[styles.sectionLabel, { color: colors.text.tertiary }]}>CHOOSE YOUR AVATAR</Text>
-                    <GlassCard style={{ paddingVertical: gridPadding, marginBottom: 24 }}>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: gridPadding, gap: 16 }}
-                            style={{ flexDirection: 'row' }}
-                        >
-                            {PRESET_AVATARS.map((avatar) => {
-                                const isSelected = selectedAvatar === avatar.id;
-                                return (
-                                    <AnimatedPressable
-                                        key={avatar.id}
-                                        preset="icon"
-                                        onPress={() => setSelectedAvatar(avatar.id)}
-                                        style={{ alignItems: 'center' }}
-                                    >
-                                        <AvatarCircle
-                                            emoji={avatar.emoji}
-                                            gradient={avatar.gradient}
-                                            size={avatarSize}
-                                            selected={isSelected}
-                                        />
-                                        <Text style={{
-                                            color: isSelected ? '#38b4ba' : colors.text.secondary,
-                                            fontSize: 10, fontWeight: isSelected ? '700' : '500',
-                                            marginTop: 6, textAlign: 'center',
-                                            letterSpacing: isSelected ? 0.2 : 0,
-                                        }}>
-                                            {avatar.label}
-                                        </Text>
-                                    </AnimatedPressable>
-                                );
-                            })}
-                        </ScrollView>
                     </GlassCard>
 
                     {/* Name Input */}
@@ -369,15 +381,6 @@ const styles = StyleSheet.create({
         letterSpacing: 1.5,
         paddingHorizontal: 4,
         marginBottom: 10,
-    },
-    avatarGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-    },
-    avatarItem: {
-        alignItems: 'center',
-        paddingVertical: 10,
     },
     textInput: {
         fontSize: 16,
