@@ -25,15 +25,30 @@ export default function CreatorProfileScreen() {
     const { isDark, colors } = useTheme();
 
     // Real data hooks
-    const { data: artist, loading: loadingArtist } = useArtistById(id);
+    const { data: artist, loading: loadingArtist, error: artistError } = useArtistById(id);
     const { data: artistSongs, loading: loadingSongs } = useArtistSongs(id);
     const { following, toggle: toggleFollow } = useIsFollowing(id);
 
-    if (loadingArtist || !artist) {
+    if (loadingArtist) {
         return (
             <ScreenScaffold dominantColor="#74e5ea" contentContainerStyle={{ paddingBottom: 40 }}>
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
                     <ActivityIndicator size="large" color="#38b4ba" />
+                </View>
+            </ScreenScaffold>
+        );
+    }
+
+    if (!artist) {
+        return (
+            <ScreenScaffold dominantColor="#74e5ea" contentContainerStyle={{ paddingBottom: 40 }}>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 16 }}>
+                        {artistError || 'Artist not found'}
+                    </Text>
+                    <AnimatedPressable preset="button" onPress={() => router.back()} style={{ marginTop: 16 }}>
+                        <Text style={{ color: '#38b4ba', fontWeight: '700' }}>Go Back</Text>
+                    </AnimatedPressable>
                 </View>
             </ScreenScaffold>
         );

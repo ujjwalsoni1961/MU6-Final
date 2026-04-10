@@ -212,7 +212,7 @@ function WebArtistLogin() {
                     await refreshProfile();
                     router.replace('/(artist)/dashboard');
                 } else {
-                    alert('Something went wrong creating your artist profile. Please try again.');
+                    alert('Could not create your artist profile. Please check your connection and try again.');
                     setSaving(false);
                 }
             })();

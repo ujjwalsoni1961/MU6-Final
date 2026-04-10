@@ -216,6 +216,8 @@ interface AsyncState<T> {
     refresh: () => void;
 }
 
+const FETCH_TIMEOUT_MS = 15_000; // 15-second timeout for data fetches
+
 function useAsync<T>(fetcher: () => Promise<T>, initial: T, deps: any[] = []): AsyncState<T> {
     const [data, setData] = useState<T>(initial);
     const [loading, setLoading] = useState(true);
@@ -239,20 +241,26 @@ function useAsync<T>(fetcher: () => Promise<T>, initial: T, deps: any[] = []): A
         }
 
         setError(null);
-        fetcher()
+
+        // Race the fetcher against a timeout so loading never gets stuck
+        const timeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Request timed out. Pull down to retry.')), FETCH_TIMEOUT_MS),
+        );
+
+        Promise.race([fetcher(), timeout])
             .then((result) => {
                 if (!cancelled) {
                     setData(result);
-                    setLoading(false); // Only set loading false once we have data
+                    setLoading(false);
                 }
             })
             .catch((err) => {
                 if (!cancelled) {
-                    setError(err?.message || 'Unknown error');
-                    setLoading(false); // Make sure to stop loading on error too
+                    setError(err?.message || 'Something went wrong. Pull down to retry.');
+                    setLoading(false);
                 }
             });
-            
+
         return () => {
             cancelled = true;
         };

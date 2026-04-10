@@ -4,10 +4,11 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
-import { Plus, MoreHorizontal, Pencil } from 'lucide-react-native';
+import { Plus, MoreHorizontal, Pencil, Music } from 'lucide-react-native';
 import { useCreatorSongs } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import { Song } from '../../src/types';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 
@@ -61,7 +62,7 @@ function SongTableRow({ index, song, onPress }: { index: number; song: Song; onP
 export default function CreatorSongsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
-    const { data: creatorSongs, loading } = useCreatorSongs();
+    const { data: creatorSongs, loading, error, refresh } = useCreatorSongs();
     const Container = isWeb ? View : SafeAreaView;
 
     return (
@@ -111,6 +112,8 @@ export default function CreatorSongsScreen() {
                 {/* Songs */}
                 {loading ? (
                     <View style={{ padding: 40, alignItems: 'center' }}><ActivityIndicator size="small" color="#38b4ba" /></View>
+                ) : error ? (
+                    <ErrorState message={error} onRetry={refresh} />
                 ) : creatorSongs.length > 0 ? (
                     <View style={{
                         borderRadius: isWeb ? 0 : 16,
@@ -128,7 +131,9 @@ export default function CreatorSongsScreen() {
                     </View>
                 ) : (
                     <View style={{ padding: 40, alignItems: 'center' }}>
-                        <Text style={{ color: colors.text.secondary, fontSize: 16 }}>No songs uploaded yet</Text>
+                        <Music size={40} color={colors.text.muted} />
+                        <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600', marginTop: 12 }}>No songs uploaded yet</Text>
+                        <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>Tap "Upload New" to add your first track.</Text>
                     </View>
                 )}
             </ScrollView>

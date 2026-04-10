@@ -3,6 +3,7 @@ import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native'
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Bell, BellRing, DollarSign, UserPlus, Music, ShoppingBag, Megaphone } from 'lucide-react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
+import ErrorState from '../../src/components/shared/ErrorState';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/hooks/useData';
 
@@ -46,7 +47,7 @@ function timeAgo(dateStr: string): string {
 export default function NotificationsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
-    const { data: notifications, loading, markAllRead } = useNotifications();
+    const { data: notifications, loading, error, refresh, markAllRead } = useNotifications();
 
     // Mark all as read when the screen is viewed
     useEffect(() => {
@@ -138,6 +139,8 @@ export default function NotificationsScreen() {
                 <View style={{ padding: 40, alignItems: 'center' }}>
                     <ActivityIndicator size="small" color="#38b4ba" />
                 </View>
+            ) : error ? (
+                <ErrorState message={error} onRetry={refresh} />
             ) : notifications.length > 0 ? (
                 <FlatList
                     data={notifications}
@@ -151,6 +154,9 @@ export default function NotificationsScreen() {
                     <Bell size={48} color={colors.text.muted} />
                     <Text style={{ color: colors.text.secondary, fontSize: 16, marginTop: 16 }}>
                         No notifications yet
+                    </Text>
+                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>
+                        You'll be notified about royalties, sales, and new followers.
                     </Text>
                 </View>
             )}

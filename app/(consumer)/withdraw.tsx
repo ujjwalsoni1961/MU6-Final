@@ -112,7 +112,7 @@ export default function WithdrawScreen() {
             }
         } catch (err) {
             console.error('[withdraw] saveBankDetails error:', err);
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            Alert.alert('Save Failed', 'Could not save bank details. Please check your connection and try again.');
         } finally {
             setSubmitting(false);
         }
@@ -141,7 +141,7 @@ export default function WithdrawScreen() {
             }
         } catch (err) {
             console.error('[withdraw] createPayoutRequest error:', err);
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            Alert.alert('Withdrawal Failed', 'Could not submit withdrawal request. Please check your connection and try again.');
         } finally {
             setSubmitting(false);
         }

@@ -73,7 +73,7 @@ export default function BankDetailsScreen() {
             }
         } catch (err) {
             console.error('[bank-details] save error:', err);
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            Alert.alert('Save Failed', 'Could not save bank details. Please check your connection and try again.');
         } finally {
             setSubmitting(false);
         }

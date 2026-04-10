@@ -25,6 +25,8 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 async function uploadToStorage(
     bucket: string, filePath: string, fileUri: string, contentType: string, walletAddress?: string
 ): Promise<string | null> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000); // 30s upload timeout
     try {
         const response = await fetch(fileUri);
         const blob = await response.blob();
@@ -41,11 +43,15 @@ async function uploadToStorage(
             method: 'POST',
             headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
             body: formData,
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const result = await res.json();
         if (!res.ok || !result.success) return null;
         return result.path || filePath;
-    } catch (err) {
+    } catch (err: any) {
+        clearTimeout(timeoutId);
+        console.error('[upload] uploadToStorage error:', err?.message);
         return null;
     }
 }
@@ -181,12 +187,15 @@ export default function EditProfileScreen() {
                     Alert.alert('Error', 'Failed to save profile. Please try again.');
                 }
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('[edit-profile] save error:', err);
+            const msg = err?.name === 'AbortError'
+                ? 'Upload timed out. Check your connection and try again.'
+                : 'Could not save profile. Please check your connection and try again.';
             if (isWeb) {
-                alert('Something went wrong. Please try again.');
+                alert(msg);
             } else {
-                Alert.alert('Error', 'Something went wrong. Please try again.');
+                Alert.alert('Save Failed', msg);
             }
         } finally {
             setSaving(false);

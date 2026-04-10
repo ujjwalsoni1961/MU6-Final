@@ -1,12 +1,14 @@
 import React from 'react';
 import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Music } from 'lucide-react-native';
 import SongRow from '../../src/components/shared/SongRow';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useTheme } from '../../src/context/ThemeContext';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useTrendingSongs, useNewReleases } from '../../src/hooks/useData';
+import ErrorState from '../../src/components/shared/ErrorState';
+import EmptyState from '../../src/components/shared/EmptyState';
 import type { Song } from '../../src/types';
 
 const isWeb = Platform.OS === 'web';
@@ -18,12 +20,14 @@ export default function AllSongsScreen() {
     const params = useLocalSearchParams<{ section?: string }>();
     const section = params.section || 'new';
 
-    const { data: newReleases, loading: loadingNew } = useNewReleases(50);
-    const { data: trending, loading: loadingTrending } = useTrendingSongs(50);
+    const { data: newReleases, loading: loadingNew, error: errorNew, refresh: refreshNew } = useNewReleases(50);
+    const { data: trending, loading: loadingTrending, error: errorTrending, refresh: refreshTrending } = useTrendingSongs(50);
 
     const isNew = section === 'new';
     const songs = isNew ? newReleases : trending;
     const loading = isNew ? loadingNew : loadingTrending;
+    const error = isNew ? errorNew : errorTrending;
+    const refresh = isNew ? refreshNew : refreshTrending;
     const title = isNew ? 'New Releases' : 'Made For You';
 
     const renderSong = ({ item }: { item: Song }) => (
@@ -59,6 +63,8 @@ export default function AllSongsScreen() {
                 <View style={{ padding: 40, alignItems: 'center' }}>
                     <ActivityIndicator size="small" color="#38b4ba" />
                 </View>
+            ) : error ? (
+                <ErrorState message={error} onRetry={refresh} />
             ) : (
                 <FlatList
                     data={songs}
@@ -66,6 +72,13 @@ export default function AllSongsScreen() {
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 120 }}
                     showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={
+                        <EmptyState
+                            icon={<Music size={40} color="#38b4ba" />}
+                            title={isNew ? 'No new releases yet' : 'No songs found'}
+                            subtitle="Check back soon for fresh tracks"
+                        />
+                    }
                 />
             )}
         </View>

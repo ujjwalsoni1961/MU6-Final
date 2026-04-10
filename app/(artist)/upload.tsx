@@ -108,6 +108,8 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 async function uploadToStorage(
     bucket: string, filePath: string, fileUri: string, contentType: string, walletAddress?: string,
 ): Promise<string | null> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60_000); // 60s upload timeout
     try {
         const response = await fetch(fileUri);
         const blob = await response.blob();
@@ -122,15 +124,18 @@ async function uploadToStorage(
             method: 'POST',
             headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
             body: formData,
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const result = await res.json();
         if (!res.ok || !result.success) {
             console.error(`[upload] Edge Function error (${bucket}/${filePath}):`, result.error || result);
             return null;
         }
         return result.path || filePath;
-    } catch (err) {
-        console.error(`[upload] Storage upload exception (${bucket}/${filePath}):`, err);
+    } catch (err: any) {
+        clearTimeout(timeoutId);
+        console.error(`[upload] Storage upload exception (${bucket}/${filePath}):`, err?.message || err);
         return null;
     }
 }
@@ -411,8 +416,10 @@ export default function CreatorUploadScreen() {
             router.replace('/(artist)/songs');
         } catch (err: any) {
             console.error('[upload] Save error:', err);
-            const msg = err?.message || 'An unexpected error occurred.';
-            Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+            const msg = err?.name === 'AbortError'
+                ? 'Upload timed out. Please check your connection and try again.'
+                : (err?.message || 'Could not save the song. Please try again.');
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Upload Failed', msg);
         } finally {
             setPublishing(false);
             setSavingDraft(false);

@@ -1,11 +1,13 @@
 import React from 'react';
 import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Gem } from 'lucide-react-native';
 import NFTCard from '../../src/components/shared/NFTCard';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useNFTReleases } from '../../src/hooks/useData';
+import ErrorState from '../../src/components/shared/ErrorState';
+import EmptyState from '../../src/components/shared/EmptyState';
 import type { NFT } from '../../src/types';
 
 const isWeb = Platform.OS === 'web';
@@ -13,7 +15,7 @@ const isWeb = Platform.OS === 'web';
 export default function AllNFTsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
-    const { data: nftDrops, loading } = useNFTReleases();
+    const { data: nftDrops, loading, error, refresh } = useNFTReleases();
 
     const renderNFT = ({ item }: { item: NFT }) => (
         <View style={{ width: isWeb ? 220 : '50%', paddingHorizontal: 8, marginBottom: 16 }}>
@@ -51,6 +53,8 @@ export default function AllNFTsScreen() {
                 <View style={{ padding: 40, alignItems: 'center' }}>
                     <ActivityIndicator size="small" color="#38b4ba" />
                 </View>
+            ) : error ? (
+                <ErrorState message={error} onRetry={refresh} />
             ) : (
                 <FlatList
                     data={nftDrops}
@@ -62,6 +66,13 @@ export default function AllNFTsScreen() {
                         : { paddingHorizontal: 8, paddingBottom: 120 }
                     }
                     showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={
+                        <EmptyState
+                            icon={<Gem size={40} color="#38b4ba" />}
+                            title="No NFT drops yet"
+                            subtitle="New collectibles will appear here"
+                        />
+                    }
                 />
             )}
         </View>

@@ -876,7 +876,7 @@ export async function mintToken(
             .maybeSingle()).data;
 
         // Increment minted_count on the release so supply tracking is accurate
-        const { error: countError } = await supabase.rpc('increment_minted_count', { release_id: releaseId }).single();
+        const { error: countError } = await supabase.rpc('increment_minted_count', { release_id: releaseId }).maybeSingle();
         if (countError) {
             // Fallback: direct update if RPC not available
             await supabase

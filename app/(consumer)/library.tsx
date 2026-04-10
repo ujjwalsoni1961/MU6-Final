@@ -13,6 +13,7 @@ import NFTCard from '../../src/components/shared/NFTCard';
 import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { Song, NFT, Artist } from '../../src/types';
 import { useLikedSongs, useArtists, useOwnedNFTs } from '../../src/hooks/useData';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 const tabs = ['Songs', 'NFTs', 'Creators'];
@@ -75,9 +76,9 @@ export default function LibraryScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
 
     // Real data hooks
-    const { data: likedSongs, loading: loadingSongs, refresh: refreshLiked } = useLikedSongs();
-    const { data: artists, loading: loadingArtists, refresh: refreshArtists } = useArtists(20);
-    const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
+    const { data: likedSongs, loading: loadingSongs, error: errorSongs, refresh: refreshLiked } = useLikedSongs();
+    const { data: artists, loading: loadingArtists, error: errorArtists, refresh: refreshArtists } = useArtists(20);
+    const { data: ownedNFTs, loading: loadingNFTs, error: errorNFTs, refresh: refreshNFTs } = useOwnedNFTs();
 
     const [groupModalVisible, setGroupModalVisible] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState<NFT[]>([]);
@@ -198,9 +199,14 @@ export default function LibraryScreen() {
                         )}
                         scrollEventThrottle={16}
                         ListEmptyComponent={() => !isLoading ? (
-                            <View style={{ alignItems: 'center', paddingTop: 60 }}>
-                                <Text style={{ color: colors.text.secondary, fontSize: 16 }}>No NFTs in your collection yet</Text>
-                            </View>
+                            errorNFTs ? (
+                                <ErrorState message={errorNFTs} onRetry={refreshNFTs} />
+                            ) : (
+                                <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>No NFTs in your collection yet</Text>
+                                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>Mint or buy NFTs from the Marketplace.</Text>
+                                </View>
+                            )
                         ) : null}
                     />
                 ) : (
@@ -220,13 +226,22 @@ export default function LibraryScreen() {
                             { useNativeDriver: false }
                         )}
                         scrollEventThrottle={16}
-                        ListEmptyComponent={() => !isLoading ? (
-                            <View style={{ alignItems: 'center', paddingTop: 60 }}>
-                                <Text style={{ color: colors.text.secondary, fontSize: 16 }}>
-                                    {activeTab === 'Songs' ? 'No liked songs yet' : 'No creators to show'}
-                                </Text>
-                            </View>
-                        ) : null}
+                        ListEmptyComponent={() => {
+                            if (isLoading) return null;
+                            const currentError = activeTab === 'Songs' ? errorSongs : errorArtists;
+                            const currentRefresh = activeTab === 'Songs' ? refreshLiked : refreshArtists;
+                            if (currentError) return <ErrorState message={currentError} onRetry={currentRefresh} />;
+                            return (
+                                <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
+                                        {activeTab === 'Songs' ? 'No liked songs yet' : 'No creators to show'}
+                                    </Text>
+                                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>
+                                        {activeTab === 'Songs' ? 'Like songs to see them here.' : 'Discover creators on the home page.'}
+                                    </Text>
+                                </View>
+                            );
+                        }}
                     />
                 )}
             </View>

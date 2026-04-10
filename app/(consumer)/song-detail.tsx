@@ -28,7 +28,7 @@ export default function SongDetailScreen() {
     const { playSong } = usePlayer();
 
     // Real data hooks
-    const { data: song, loading: loadingSong } = useSongById(id);
+    const { data: song, loading: loadingSong, error: songError } = useSongById(id);
     const { data: moreSongs, loading: loadingMore } = useArtistSongs(song?._creatorId);
     const { data: nftReleases } = useNFTReleases(id);
     const { liked, toggle: toggleLike } = useIsLiked(id);
@@ -36,11 +36,26 @@ export default function SongDetailScreen() {
     const filteredMoreSongs = moreSongs.filter((s) => s.id !== id);
     const nftRelease = nftReleases[0]; // first release for this song
 
-    if (loadingSong || !song) {
+    if (loadingSong) {
         return (
             <ScreenScaffold dominantColor="#38b4ba" contentContainerStyle={{ paddingBottom: 120 }}>
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
                     <ActivityIndicator size="large" color="#38b4ba" />
+                </View>
+            </ScreenScaffold>
+        );
+    }
+
+    if (!song) {
+        return (
+            <ScreenScaffold dominantColor="#38b4ba" contentContainerStyle={{ paddingBottom: 120 }}>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 16 }}>
+                        {songError || 'Song not found'}
+                    </Text>
+                    <AnimatedPressable preset="button" onPress={() => router.back()} style={{ marginTop: 16 }}>
+                        <Text style={{ color: '#38b4ba', fontWeight: '700' }}>Go Back</Text>
+                    </AnimatedPressable>
                 </View>
             </ScreenScaffold>
         );

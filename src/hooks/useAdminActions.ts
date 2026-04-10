@@ -272,7 +272,7 @@ export function useAdminPayoutActions(refresh: () => void) {
             .from('payout_requests')
             .select('*, profile:profiles!profile_id (wallet_address)')
             .eq('id', payoutId)
-            .single();
+            .maybeSingle();
 
         if (!payout) {
             showToast('Payout request not found', 'error');

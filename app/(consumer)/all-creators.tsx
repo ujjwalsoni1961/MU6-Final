@@ -1,11 +1,13 @@
 import React from 'react';
 import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Users } from 'lucide-react-native';
 import CreatorCard from '../../src/components/shared/ArtistCard';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useArtists } from '../../src/hooks/useData';
+import ErrorState from '../../src/components/shared/ErrorState';
+import EmptyState from '../../src/components/shared/EmptyState';
 import type { Artist } from '../../src/types';
 
 const isWeb = Platform.OS === 'web';
@@ -13,7 +15,7 @@ const isWeb = Platform.OS === 'web';
 export default function AllCreatorsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
-    const { data: artists, loading } = useArtists(100);
+    const { data: artists, loading, error, refresh } = useArtists(100);
 
     const renderArtist = ({ item }: { item: Artist }) => (
         <View style={{ width: isWeb ? '25%' : '33.33%', paddingHorizontal: 8, marginBottom: 20, alignItems: 'center' }}>
@@ -48,6 +50,8 @@ export default function AllCreatorsScreen() {
                 <View style={{ padding: 40, alignItems: 'center' }}>
                     <ActivityIndicator size="small" color="#38b4ba" />
                 </View>
+            ) : error ? (
+                <ErrorState message={error} onRetry={refresh} />
             ) : (
                 <FlatList
                     data={artists}
@@ -56,6 +60,13 @@ export default function AllCreatorsScreen() {
                     numColumns={isWeb ? 4 : 3}
                     contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 120 }}
                     showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={
+                        <EmptyState
+                            icon={<Users size={40} color="#38b4ba" />}
+                            title="No creators yet"
+                            subtitle="Be the first to join the community"
+                        />
+                    }
                 />
             )}
         </View>

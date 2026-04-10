@@ -11,6 +11,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useTrendingSongs, useNewReleases, useArtists, useNFTReleases } from '../../src/hooks/useData';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 
@@ -85,6 +86,29 @@ function SectionLoader() {
     );
 }
 
+/* ─── Inline Error ─── */
+function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
+    const { colors } = useTheme();
+    return (
+        <View style={{ padding: 24, alignItems: 'center' }}>
+            <Text style={{ color: colors.text.secondary, fontSize: 13 }}>{message}</Text>
+            <AnimatedPressable preset="button" onPress={onRetry} style={{ marginTop: 8, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(56,180,186,0.12)' }}>
+                <Text style={{ color: '#38b4ba', fontSize: 13, fontWeight: '600' }}>Retry</Text>
+            </AnimatedPressable>
+        </View>
+    );
+}
+
+/* ─── Section Empty ─── */
+function SectionEmpty({ message }: { message: string }) {
+    const { colors } = useTheme();
+    return (
+        <View style={{ padding: 24, alignItems: 'center' }}>
+            <Text style={{ color: colors.text.muted, fontSize: 13 }}>{message}</Text>
+        </View>
+    );
+}
+
 /* ─── Main Screen ─── */
 export default function HomeScreen() {
     const router = useRouter();
@@ -93,10 +117,10 @@ export default function HomeScreen() {
     const { playSong } = usePlayer();
 
     // Real data hooks
-    const { data: trendingSongs, loading: loadingTrending } = useTrendingSongs(16);
-    const { data: newReleases, loading: loadingNew } = useNewReleases(6);
-    const { data: artists, loading: loadingArtists } = useArtists(10);
-    const { data: nftDrops, loading: loadingNFTs } = useNFTReleases();
+    const { data: trendingSongs, loading: loadingTrending, error: errorTrending, refresh: refreshTrending } = useTrendingSongs(16);
+    const { data: newReleases, loading: loadingNew, error: errorNew, refresh: refreshNew } = useNewReleases(6);
+    const { data: artists, loading: loadingArtists, error: errorArtists, refresh: refreshArtists } = useArtists(10);
+    const { data: nftDrops, loading: loadingNFTs, error: errorNFTs, refresh: refreshNFTs } = useNFTReleases();
 
     // Quick play chunks
     const quickPlaySongs = trendingSongs.slice(0, 16);
@@ -130,7 +154,11 @@ export default function HomeScreen() {
                             Quick Picks
                         </Text>
 
-                        {loadingTrending ? <SectionLoader /> : (
+                        {loadingTrending ? <SectionLoader /> : errorTrending ? (
+                            <SectionError message="Could not load songs" onRetry={refreshTrending} />
+                        ) : quickPlayChunks.length === 0 ? (
+                            <SectionEmpty message="No songs available yet" />
+                        ) : (
                             <ScrollView
                                 horizontal
                                 showsHorizontalScrollIndicator={false}
@@ -160,7 +188,11 @@ export default function HomeScreen() {
                     {/* ─── Jump Back In (New Releases) ─── */}
                     <View style={{ paddingHorizontal: hPad, marginBottom: 40 }}>
                         <SectionHeader title="Jump Back In" onViewAll={() => router.push({ pathname: '/(consumer)/all-songs', params: { section: 'new' } })} />
-                        {loadingNew ? <SectionLoader /> : (
+                        {loadingNew ? <SectionLoader /> : errorNew ? (
+                            <SectionError message="Could not load new releases" onRetry={refreshNew} />
+                        ) : newReleases.length === 0 ? (
+                            <SectionEmpty message="No new releases yet" />
+                        ) : (
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -hPad, paddingHorizontal: hPad }}>
                                 {newReleases.map((song) => (
                                     <SongCard
@@ -182,7 +214,11 @@ export default function HomeScreen() {
                     <View style={{ paddingHorizontal: hPad }}>
                         <SectionHeader title="Made For You" onViewAll={() => router.push({ pathname: '/(consumer)/all-songs', params: { section: 'trending' } })} />
                     </View>
-                    {loadingTrending ? <SectionLoader /> : (
+                    {loadingTrending ? <SectionLoader /> : errorTrending ? (
+                        <SectionError message="Could not load songs" onRetry={refreshTrending} />
+                    ) : trendingSongs.length <= 6 ? (
+                        <SectionEmpty message="More songs coming soon" />
+                    ) : (
                         <Animated.ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
@@ -207,7 +243,11 @@ export default function HomeScreen() {
                     <View style={{ paddingHorizontal: hPad }}>
                         <SectionHeader title="Top Creators" onViewAll={() => router.push('/(consumer)/all-creators')} />
                     </View>
-                    {loadingArtists ? <SectionLoader /> : (
+                    {loadingArtists ? <SectionLoader /> : errorArtists ? (
+                        <SectionError message="Could not load creators" onRetry={refreshArtists} />
+                    ) : artists.length === 0 ? (
+                        <SectionEmpty message="No creators yet" />
+                    ) : (
                         <Animated.ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
@@ -231,7 +271,11 @@ export default function HomeScreen() {
                     <View style={{ paddingHorizontal: hPad }}>
                         <SectionHeader title="New NFT Drops" onViewAll={() => router.push('/(consumer)/all-nfts')} />
                     </View>
-                    {loadingNFTs ? <SectionLoader /> : (
+                    {loadingNFTs ? <SectionLoader /> : errorNFTs ? (
+                        <SectionError message="Could not load NFT drops" onRetry={refreshNFTs} />
+                    ) : nftDrops.length === 0 ? (
+                        <SectionEmpty message="No NFT drops yet" />
+                    ) : (
                         <Animated.ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}

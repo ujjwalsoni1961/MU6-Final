@@ -23,6 +23,7 @@ import {
     useUpdateListingPrice,
     useCancelListing,
 } from '../../src/hooks/useData';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 const filters = ['All', 'Legendary', 'Rare', 'Common'];
@@ -40,7 +41,7 @@ export default function CollectionScreen() {
     const account = useActiveAccount();
 
     // Real data — owned NFTs with listing status
-    const { data: ownedNFTs, loading, refresh } = useOwnedNFTsWithStatus();
+    const { data: ownedNFTs, loading, error: collectionError, refresh } = useOwnedNFTsWithStatus();
 
     useFocusEffect(
         useCallback(() => {
@@ -340,12 +341,21 @@ export default function CollectionScreen() {
                     )}
                     scrollEventThrottle={16}
                     ListEmptyComponent={() => !loading ? (
-                        <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
-                            <Gem size={48} color={colors.text.muted} style={{ marginBottom: 16 }} />
-                            <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
-                                {activeFilter === 'All' ? 'No NFTs in your collection yet' : `No ${activeFilter.toLowerCase()} NFTs found`}
-                            </Text>
-                        </View>
+                        collectionError ? (
+                            <ErrorState message={collectionError} onRetry={refresh} />
+                        ) : (
+                            <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
+                                <Gem size={48} color={colors.text.muted} style={{ marginBottom: 16 }} />
+                                <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
+                                    {activeFilter === 'All' ? 'No NFTs in your collection yet' : `No ${activeFilter.toLowerCase()} NFTs found`}
+                                </Text>
+                                {activeFilter === 'All' && (
+                                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4, textAlign: 'center' }}>
+                                        Mint or buy NFTs from the Marketplace to see them here.
+                                    </Text>
+                                )}
+                            </View>
+                        )
                     ) : null}
                 />
             </View>

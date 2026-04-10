@@ -11,6 +11,7 @@ import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { NFT, Song } from '../../src/types';
 import { useCreatorNFTs, useCreatorSongs, useCreateNFTRelease } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import ErrorState from '../../src/components/shared/ErrorState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -31,7 +32,7 @@ export default function NFTManagerScreen() {
     const { profile } = useAuth();
     const account = useActiveAccount();
     const router = useRouter();
-    const { data: creatorNFTs, loading, refresh: refreshNFTs } = useCreatorNFTs();
+    const { data: creatorNFTs, loading, error: nftError, refresh: refreshNFTs } = useCreatorNFTs();
     const { data: creatorSongs, refresh: refreshSongs } = useCreatorSongs();
     const createRelease = useCreateNFTRelease();
 
@@ -174,6 +175,8 @@ export default function NFTManagerScreen() {
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                     <ActivityIndicator size="large" color="#8b5cf6" />
                 </View>
+            ) : nftError ? (
+                <ErrorState message={nftError} onRetry={refreshNFTs} />
             ) : creatorNFTs.length > 0 ? (
                 <FlatList
                     data={groupedNFTs}

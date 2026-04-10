@@ -8,6 +8,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCreatorDashboard, useCreatorSongs, useCreatorRoyalties, adaptSong } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 
@@ -103,7 +104,7 @@ export default function CreatorDashboardScreen() {
     const { profile, signOut } = useAuth();
     const { isDark, colors } = useTheme();
     const router = useRouter();
-    const { data: dashboard, loading: loadingDashboard } = useCreatorDashboard();
+    const { data: dashboard, loading: loadingDashboard, error: dashboardError, refresh: refreshDashboard } = useCreatorDashboard();
     const { data: creatorSongs, loading: loadingSongs } = useCreatorSongs();
     const { data: royalties } = useCreatorRoyalties();
 
@@ -120,6 +121,14 @@ export default function CreatorDashboardScreen() {
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
                     <ActivityIndicator size="large" color="#38b4ba" />
                 </View>
+            </Container>
+        );
+    }
+
+    if (dashboardError) {
+        return (
+            <Container style={{ flex: 1, backgroundColor: isWeb ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
+                <ErrorState message={dashboardError} onRetry={refreshDashboard} />
             </Container>
         );
     }

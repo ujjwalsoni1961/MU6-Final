@@ -518,7 +518,10 @@ export async function getNFTTokensByOwner(walletAddress: string): Promise<NFTTok
             release:nft_releases!nft_release_id (
                 *,
                 song:songs!song_id (
-                    id, title, cover_path, creator_id
+                    id, title, cover_path, creator_id,
+                    creator:profiles!creator_id (
+                        id, display_name, avatar_path
+                    )
                 )
             )
         `)
@@ -540,7 +543,10 @@ export async function getNFTTokensForRelease(releaseId: string): Promise<NFTToke
             release:nft_releases!nft_release_id (
                 *,
                 song:songs!song_id (
-                    id, title, cover_path, creator_id
+                    id, title, cover_path, creator_id,
+                    creator:profiles!creator_id (
+                        id, display_name, avatar_path
+                    )
                 )
             )
         `)
@@ -1628,7 +1634,7 @@ export async function getArtistBalance(profileId: string): Promise<{
 }> {
     const { data, error } = await supabase
         .rpc('get_artist_balance', { p_profile_id: profileId })
-        .single();
+        .maybeSingle();
 
     if (error || !data) {
         console.warn('[db] getArtistBalance rpc error, falling back to manual calc:', error);

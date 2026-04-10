@@ -87,7 +87,7 @@ export default function DepositScreen() {
             }
         } catch (err) {
             console.error('[deposit] openThirdwebPay error:', err);
-            Alert.alert('Error', 'Something went wrong opening the payment page.');
+            Alert.alert('Payment Error', 'Could not open the payment page. Please check your connection and try again.');
         } finally {
             setLoading(false);
         }

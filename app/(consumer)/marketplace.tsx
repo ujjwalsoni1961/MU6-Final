@@ -11,6 +11,7 @@ import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { NFT } from '../../src/types';
 import { useNFTReleases, useMarketplaceListings } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 const filters = ['All', 'Drops', 'Resale', 'Rare', 'Legendary'];
@@ -33,9 +34,10 @@ export default function MarketplaceScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
 
     // Both data sources
-    const { data: nftReleases, loading: releasesLoading, refresh: refreshReleases } = useNFTReleases();
-    const { data: listings, loading: listingsLoading, refresh: refreshListings } = useMarketplaceListings();
+    const { data: nftReleases, loading: releasesLoading, error: releasesError, refresh: refreshReleases } = useNFTReleases();
+    const { data: listings, loading: listingsLoading, error: listingsError, refresh: refreshListings } = useMarketplaceListings();
     const loading = releasesLoading || listingsLoading;
+    const error = releasesError || listingsError;
 
     useFocusEffect(
         useCallback(() => {
@@ -204,9 +206,17 @@ export default function MarketplaceScreen() {
                     )}
                     scrollEventThrottle={16}
                     ListEmptyComponent={() => !loading ? (
-                        <View style={{ alignItems: 'center', paddingTop: 60 }}>
-                            <Text style={{ color: colors.text.secondary, fontSize: 16 }}>No NFTs available</Text>
-                        </View>
+                        error ? (
+                            <ErrorState message={error} onRetry={() => { refreshReleases(); refreshListings(); }} />
+                        ) : (
+                            <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                                <Zap size={48} color={colors.text.muted} />
+                                <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600', marginTop: 16 }}>No NFTs available yet</Text>
+                                <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4, textAlign: 'center', paddingHorizontal: 32 }}>
+                                    Music NFT drops and resale listings will appear here.
+                                </Text>
+                            </View>
+                        )
                     ) : null}
                 />
             </View>

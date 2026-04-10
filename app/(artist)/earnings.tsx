@@ -10,6 +10,7 @@ import { useCreatorRoyalties, useRoyaltyHistory } from '../../src/hooks/useData'
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { getArtistBalance } from '../../src/services/database';
+import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
 
@@ -23,8 +24,10 @@ function coverUrl(path: string | null | undefined): string {
     return `${SUPABASE_URL}/storage/v1/object/public/covers/${path}`;
 }
 
-/** Fetch real on-chain POL balance via JSON-RPC */
+/** Fetch real on-chain POL balance via JSON-RPC (with timeout) */
 async function fetchWalletBalancePol(walletAddress: string): Promise<number> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
     try {
         const response = await fetch(AMOY_RPC, {
             method: 'POST',
@@ -35,7 +38,9 @@ async function fetchWalletBalancePol(walletAddress: string): Promise<number> {
                 params: [walletAddress, 'latest'],
                 id: 1,
             }),
+            signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         const data = await response.json();
         const balanceWei = BigInt(data.result || '0');
         // Convert wei to POL (18 decimals)

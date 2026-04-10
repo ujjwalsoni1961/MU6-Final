@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useUserActivity } from '../../src/hooks/useData';
 import { getPublicUrl, UserActivity } from '../../src/services/database';
+import ErrorState from '../../src/components/shared/ErrorState';
 import { useWalletBalance } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 
@@ -156,7 +157,7 @@ export default function WalletScreen() {
     const balanceSymbol = balanceData?.symbol || 'POL';
 
     // User-scoped activity
-    const { data: activities, loading: activityLoading } = useUserActivity(activeFilter);
+    const { data: activities, loading: activityLoading, error: activityError, refresh: refreshActivity } = useUserActivity(activeFilter);
 
     const truncatedAddress = walletAddress
         ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
@@ -286,6 +287,8 @@ export default function WalletScreen() {
                         <View style={{ padding: 40, alignItems: 'center' }}>
                             <ActivityIndicator size="small" color="#38b4ba" />
                         </View>
+                    ) : activityError ? (
+                        <ErrorState message={activityError} onRetry={refreshActivity} />
                     ) : activities.length > 0 ? (
                         <View>
                             {activities.map((activity) => (
