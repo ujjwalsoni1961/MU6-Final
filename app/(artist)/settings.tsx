@@ -201,7 +201,7 @@ export default function SettingsScreen() {
                 {/* ─── Payout Information ─── */}
                 <SectionCard title="Payout Information" subtitle="How you receive payments" icon={CreditCard} style={{ zIndex: 10 }}>
                     <View style={{ gap: 14 }}>
-                        <View>
+                        <View style={{ zIndex: 20, position: 'relative' }}>
                             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
                                 Payment Method
                             </Text>
@@ -213,7 +213,7 @@ export default function SettingsScreen() {
                             />
                         </View>
 
-                        <View>
+                        <View style={{ zIndex: 1 }}>
                             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
                                 Account Holder Name
                             </Text>
@@ -226,7 +226,7 @@ export default function SettingsScreen() {
                             />
                         </View>
 
-                        <View>
+                        <View style={{ zIndex: 1 }}>
                             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
                                 {paymentMethod === 'crypto_wallet' ? 'Wallet Address' : 'IBAN'}
                             </Text>
@@ -239,7 +239,7 @@ export default function SettingsScreen() {
                             />
                         </View>
 
-                        <View>
+                        <View style={{ zIndex: 1 }}>
                             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
                                 Tax ID (optional)
                             </Text>
@@ -252,7 +252,7 @@ export default function SettingsScreen() {
                             />
                         </View>
 
-                        <View style={{ zIndex: 5 }}>
+                        <View style={{ zIndex: 10, position: 'relative' }}>
                             <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
                                 Payout Country
                             </Text>
