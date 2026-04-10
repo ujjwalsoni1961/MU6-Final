@@ -1,127 +1,128 @@
 import React from 'react';
-import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, Platform } from 'react-native';
+import {
+    Users, Music, Radio, Disc3, Tag, ShoppingBag,
+    DollarSign, ListMusic, TrendingUp, ArrowRight,
+} from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { Users as UsersIcon, Music, ArrowLeftRight, DollarSign } from 'lucide-react-native';
-import TransactionRow from '../../src/components/shared/TransactionRow';
-import { useAdminUsers, useAdminTransactions, useAdminPlatformStats } from '../../src/hooks/useData';
-import { useTheme } from '../../src/context/ThemeContext';
-import { User, Transaction } from '../../src/types';
+import { AdminScreen, AdminStatCard, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
+import { useAdminFullStats } from '../../src/hooks/useAdminData';
+import { useAdminUsers, useAdminTransactions } from '../../src/hooks/useData';
 
 const isWeb = Platform.OS === 'web';
 
-const roleColors: Record<string, { bg: string; text: string }> = {
-    consumer: { bg: 'rgba(56,180,186,0.15)', text: '#38b4ba' },
-    artist: { bg: 'rgba(139,92,246,0.15)', text: '#8b5cf6' },
-    admin: { bg: 'rgba(100,116,139,0.15)', text: '#64748b' },
-    listener: { bg: 'rgba(56,180,186,0.15)', text: '#38b4ba' },
-    creator: { bg: 'rgba(139,92,246,0.15)', text: '#8b5cf6' },
-};
-
-function StatCard({ title, value, icon, accent }: { title: string; value: string | number; icon: React.ReactNode; accent?: string }) {
-    const { isDark, colors } = useTheme();
+function QuickLink({ label, Icon, path }: { label: string; Icon: any; path: string }) {
+    const router = useRouter();
     return (
-        <View
+        <AnimatedPressable
+            preset="card" hapticType="none"
+            onPress={() => router.push(path as any)}
             style={{
-                flex: 1, margin: 6, padding: isWeb ? 24 : 16, borderRadius: 16,
-                backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'),
-                borderWidth: 1,
-                borderColor: isDark ? 'rgba(255,255,255,0.06)' : (isWeb ? '#f1f5f9' : 'rgba(255,255,255,0.4)'),
-                alignItems: 'center',
-                shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 8,
+                flexDirection: 'row', alignItems: 'center',
+                backgroundColor: '#0f1724', borderRadius: 12,
+                padding: 14, marginBottom: 8,
+                borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
             }}
         >
-            {icon}
-            <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: accent || colors.text.primary, marginTop: 8 }}>{value}</Text>
-            <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4 }}>{title}</Text>
-        </View>
+            <Icon size={16} color="#38b4ba" />
+            <Text style={{ flex: 1, color: '#f1f5f9', fontSize: 14, fontWeight: '600', marginLeft: 12 }}>{label}</Text>
+            <ArrowRight size={14} color="#475569" />
+        </AnimatedPressable>
     );
 }
 
 export default function AdminDashboardScreen() {
-    const { isDark, colors } = useTheme();
-    const { data: stats, loading: loadingStats } = useAdminPlatformStats();
-    const { data: users, loading: loadingUsers } = useAdminUsers(10);
-    const { data: transactions, loading: loadingTxns } = useAdminTransactions(5);
-
-    const totalFees = transactions.filter((t) => t.fee).reduce((sum, t) => sum + (t.fee || 0), 0);
-    const Container = isWeb ? View : SafeAreaView;
+    const { data: stats, loading: loadingStats, refresh } = useAdminFullStats();
+    const { data: recentUsers } = useAdminUsers(5);
+    const { data: recentTxns } = useAdminTransactions(5);
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isWeb ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: isWeb ? 32 : 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
-                <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: colors.text.primary, marginBottom: 4, letterSpacing: -1 }}>
-                    Admin Dashboard
-                </Text>
-                <Text style={{ fontSize: 14, color: colors.text.secondary, marginBottom: 24 }}>Platform overview and management.</Text>
+        <AdminScreen title="Dashboard" subtitle="Platform overview and management" loading={loadingStats} onRetry={refresh}>
+            {/* Stats Grid */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 32 }}>
+                <AdminStatCard title="Total Users" value={stats.totalUsers} icon={<Users size={20} color="#38b4ba" />} />
+                <AdminStatCard title="Artists" value={stats.totalArtists} icon={<Users size={20} color="#a78bfa" />} accent="#a78bfa" />
+                <AdminStatCard title="Consumers" value={stats.totalConsumers} icon={<Users size={20} color="#60a5fa" />} accent="#60a5fa" />
+                <AdminStatCard title="Songs" value={stats.totalSongs} icon={<Music size={20} color="#8b5cf6" />} accent="#8b5cf6" />
+                <AdminStatCard title="Streams" value={stats.totalStreams} icon={<Radio size={20} color="#38b4ba" />} />
+                <AdminStatCard title="NFT Releases" value={stats.totalNFTReleases} icon={<Disc3 size={20} color="#f59e0b" />} accent="#f59e0b" />
+                <AdminStatCard title="NFT Tokens" value={stats.totalNFTTokens} icon={<Tag size={20} color="#4ade80" />} accent="#4ade80" />
+                <AdminStatCard title="Listings" value={stats.totalListings} icon={<ShoppingBag size={20} color="#f87171" />} accent="#f87171" />
+                <AdminStatCard title="Royalty Events" value={stats.totalRoyaltyEvents} icon={<DollarSign size={20} color="#facc15" />} accent="#facc15" />
+                <AdminStatCard title="Playlists" value={stats.totalPlaylists} icon={<ListMusic size={20} color="#94a3b8" />} accent="#94a3b8" />
+            </View>
 
-                {/* Stats */}
-                {loadingStats ? (
-                    <View style={{ padding: 40, alignItems: 'center' }}><ActivityIndicator size="small" color="#38b4ba" /></View>
-                ) : (
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 28 }}>
-                        <StatCard title="Total Users" value={stats.totalUsers} icon={<UsersIcon size={20} color="#38b4ba" />} />
-                        <StatCard title="Total Songs" value={stats.totalSongs} icon={<Music size={20} color="#8b5cf6" />} />
-                        <StatCard title="Listings" value={stats.totalListings} icon={<ArrowLeftRight size={20} color="#f59e0b" />} />
-                        <StatCard title="Fees (POL)" value={totalFees.toFixed(4)} icon={<DollarSign size={20} color="#ef4444" />} accent="#38b4ba" />
-                    </View>
-                )}
-
-                {/* Recent Transactions */}
-                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 12 }}>Recent Transactions</Text>
-                {loadingTxns ? (
-                    <View style={{ padding: 20, alignItems: 'center' }}><ActivityIndicator size="small" color="#38b4ba" /></View>
-                ) : transactions.length > 0 ? (
-                    <View style={{
-                        borderRadius: 16,
-                        backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'),
-                        borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : (isWeb ? '#f1f5f9' : 'rgba(255,255,255,0.4)'),
-                        overflow: 'hidden', marginBottom: 28,
-                    }}>
-                        {transactions.map((tx) => (
-                            <TransactionRow key={tx.id} type={tx.type} songTitle={tx.songTitle} amount={tx.price} date={tx.date ? new Date(tx.date).toLocaleDateString() : ''} status={tx.status} />
+            {/* Two-column on web: Recent Users + Recent Transactions */}
+            <View style={isWeb ? { flexDirection: 'row', gap: 24 } : {}}>
+                {/* Recent Users */}
+                <View style={{ flex: 1, marginBottom: 24 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#f1f5f9', marginBottom: 12 }}>
+                        Recent Users
+                    </Text>
+                    <View style={{ backgroundColor: '#0f1724', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                        {recentUsers.length === 0 ? (
+                            <View style={{ padding: 20 }}><Text style={{ color: '#475569' }}>No users yet</Text></View>
+                        ) : recentUsers.map((user, i) => (
+                            <View key={user.id} style={{
+                                flexDirection: 'row', alignItems: 'center', padding: 14,
+                                borderBottomWidth: i < recentUsers.length - 1 ? 1 : 0,
+                                borderBottomColor: 'rgba(255,255,255,0.04)',
+                            }}>
+                                <View style={{
+                                    width: 36, height: 36, borderRadius: 18,
+                                    backgroundColor: 'rgba(56,180,186,0.1)',
+                                    alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                    <Text style={{ color: '#38b4ba', fontWeight: '700', fontSize: 14 }}>
+                                        {(user.name || '?')[0].toUpperCase()}
+                                    </Text>
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 12 }}>
+                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{user.name}</Text>
+                                    <Text style={{ color: '#475569', fontSize: 11 }}>{user.joinedDate}</Text>
+                                </View>
+                                <StatusBadge status={user.role} />
+                            </View>
                         ))}
                     </View>
-                ) : (
-                    <View style={{ padding: 20, marginBottom: 28 }}>
-                        <Text style={{ color: colors.text.secondary }}>No transactions yet</Text>
-                    </View>
-                )}
+                </View>
 
-                {/* New Users */}
-                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 12 }}>New Users</Text>
-                {loadingUsers ? (
-                    <View style={{ padding: 20, alignItems: 'center' }}><ActivityIndicator size="small" color="#38b4ba" /></View>
-                ) : (
-                    users.map((user: User) => {
-                        const rc = roleColors[user.role] || roleColors.consumer;
-                        return (
-                            <AnimatedPressable
-                                key={user.id}
-                                preset="row"
-                                hapticType="none"
-                                style={{
-                                    flexDirection: 'row', alignItems: 'center',
-                                    marginBottom: 6, padding: 14, borderRadius: 12,
-                                    backgroundColor: isWeb ? (isDark ? colors.bg.card : '#f8fafc') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.3)'),
-                                    borderWidth: 1,
-                                    borderColor: isDark ? 'rgba(255,255,255,0.06)' : (isWeb ? '#f1f5f9' : 'rgba(255,255,255,0.3)'),
-                                }}
-                            >
-                                <Image source={{ uri: user.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} contentFit="cover" />
-                                <View style={{ flex: 1, marginLeft: 12 }}>
-                                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13 }}>{user.name}</Text>
-                                    <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>Joined {user.joinedDate}</Text>
+                {/* Recent Transactions */}
+                <View style={{ flex: 1, marginBottom: 24 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#f1f5f9', marginBottom: 12 }}>
+                        Recent Transactions
+                    </Text>
+                    <View style={{ backgroundColor: '#0f1724', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                        {recentTxns.length === 0 ? (
+                            <View style={{ padding: 20 }}><Text style={{ color: '#475569' }}>No transactions yet</Text></View>
+                        ) : recentTxns.map((tx, i) => (
+                            <View key={tx.id} style={{
+                                flexDirection: 'row', alignItems: 'center', padding: 14,
+                                borderBottomWidth: i < recentTxns.length - 1 ? 1 : 0,
+                                borderBottomColor: 'rgba(255,255,255,0.04)',
+                            }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{tx.songTitle || 'Unknown'}</Text>
+                                    <Text style={{ color: '#475569', fontSize: 11 }}>{tx.date ? new Date(tx.date).toLocaleDateString() : ''}</Text>
                                 </View>
-                                <View style={{ backgroundColor: rc.bg, borderRadius: 9999, paddingHorizontal: 8, paddingVertical: 2 }}>
-                                    <Text style={{ color: rc.text, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' }}>{user.role}</Text>
-                                </View>
-                            </AnimatedPressable>
-                        );
-                    })
-                )}
-            </ScrollView>
-        </Container>
+                                <Text style={{ color: '#38b4ba', fontWeight: '700', fontSize: 13, marginRight: 8 }}>
+                                    {tx.price?.toFixed(4)} POL
+                                </Text>
+                                <StatusBadge status={tx.status} />
+                            </View>
+                        ))}
+                    </View>
+                </View>
+            </View>
+
+            {/* Quick Links */}
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#f1f5f9', marginBottom: 12 }}>Quick Links</Text>
+            <QuickLink label="Manage Users" Icon={Users} path="/(admin)/users" />
+            <QuickLink label="View All Songs" Icon={Music} path="/(admin)/songs" />
+            <QuickLink label="NFT Releases" Icon={Disc3} path="/(admin)/nft-releases" />
+            <QuickLink label="View Streams" Icon={Radio} path="/(admin)/streams" />
+            <QuickLink label="Platform Settings" Icon={TrendingUp} path="/(admin)/platform-settings" />
+        </AdminScreen>
     );
 }
