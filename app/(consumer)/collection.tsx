@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
     View, Text, ScrollView, FlatList, Platform, useWindowDimensions,
     Animated, ActivityIndicator, Modal, TextInput, Alert,
+    TouchableWithoutFeedback, PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -62,6 +63,50 @@ export default function CollectionScreen() {
     // Group Modal state
     const [groupModalVisible, setGroupModalVisible] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState<OwnedNFT[]>([]);
+
+    // Swipe-to-dismiss for list/manage modal
+    const modalSwipeY = useRef(new Animated.Value(0)).current;
+    const modalPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => false,
+            onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10 && Math.abs(gs.dy) > Math.abs(gs.dx),
+            onPanResponderMove: (_, gs) => {
+                if (gs.dy > 0) modalSwipeY.setValue(gs.dy);
+            },
+            onPanResponderRelease: (_, gs) => {
+                if (gs.dy > 80 || gs.vy > 0.5) {
+                    Animated.timing(modalSwipeY, { toValue: 600, duration: 200, useNativeDriver: true }).start(() => {
+                        setModalVisible(false);
+                        modalSwipeY.setValue(0);
+                    });
+                } else {
+                    Animated.spring(modalSwipeY, { toValue: 0, useNativeDriver: true, tension: 100, friction: 12 }).start();
+                }
+            },
+        })
+    ).current;
+
+    // Swipe-to-dismiss for group modal
+    const groupSwipeY = useRef(new Animated.Value(0)).current;
+    const groupPanResponder = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => false,
+            onMoveShouldSetPanResponder: (_, gs) => gs.dy > 10 && Math.abs(gs.dy) > Math.abs(gs.dx),
+            onPanResponderMove: (_, gs) => {
+                if (gs.dy > 0) groupSwipeY.setValue(gs.dy);
+            },
+            onPanResponderRelease: (_, gs) => {
+                if (gs.dy > 80 || gs.vy > 0.5) {
+                    Animated.timing(groupSwipeY, { toValue: 600, duration: 200, useNativeDriver: true }).start(() => {
+                        setGroupModalVisible(false);
+                        groupSwipeY.setValue(0);
+                    });
+                } else {
+                    Animated.spring(groupSwipeY, { toValue: 0, useNativeDriver: true, tension: 100, friction: 12 }).start();
+                }
+            },
+        })
+    ).current;
 
     const filteredNFTs = ownedNFTs.filter((nft) => {
         if (activeFilter === 'All') return true;
@@ -300,14 +345,22 @@ export default function CollectionScreen() {
                 visible={modalVisible}
                 transparent
                 animationType="slide"
-                onRequestClose={() => setModalVisible(false)}
+                onRequestClose={() => { setModalVisible(false); modalSwipeY.setValue(0); }}
             >
-                <View style={{
-                    flex: 1,
-                    backgroundColor: 'rgba(0,0,0,0.6)',
-                    justifyContent: 'flex-end',
-                }}>
+                <TouchableWithoutFeedback onPress={() => { setModalVisible(false); modalSwipeY.setValue(0); }}>
                     <View style={{
+                        flex: 1,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        justifyContent: 'flex-end',
+                    }} />
+                </TouchableWithoutFeedback>
+                <Animated.View
+                    {...modalPanResponder.panHandlers}
+                    style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
                         backgroundColor: isDark ? '#1a1a2e' : '#ffffff',
                         borderTopLeftRadius: 28,
                         borderTopRightRadius: 28,
@@ -315,13 +368,15 @@ export default function CollectionScreen() {
                         paddingBottom: 40,
                         paddingHorizontal: 20,
                         maxHeight: '70%',
-                    }}>
-                        {/* Handle */}
-                        <View style={{
-                            width: 40, height: 4, borderRadius: 2,
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
-                            alignSelf: 'center', marginBottom: 16,
-                        }} />
+                        transform: [{ translateY: modalSwipeY }],
+                    }}
+                >
+                    {/* Handle */}
+                    <View style={{
+                        width: 40, height: 4, borderRadius: 2,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
+                        alignSelf: 'center', marginBottom: 16,
+                    }} />
 
                         {/* Header */}
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -464,34 +519,43 @@ export default function CollectionScreen() {
                                 )}
                             </>
                         )}
-                    </View>
-                </View>
+                </Animated.View>
             </Modal>
             {/* ── Group Details Modal ── */}
             <Modal
                 visible={groupModalVisible}
                 transparent
                 animationType="slide"
-                onRequestClose={() => setGroupModalVisible(false)}
+                onRequestClose={() => { setGroupModalVisible(false); groupSwipeY.setValue(0); }}
             >
-                <View style={{
-                    flex: 1,
-                    backgroundColor: 'rgba(0,0,0,0.6)',
-                    justifyContent: 'flex-end',
-                }}>
+                <TouchableWithoutFeedback onPress={() => { setGroupModalVisible(false); groupSwipeY.setValue(0); }}>
                     <View style={{
+                        flex: 1,
+                        backgroundColor: 'rgba(0,0,0,0.6)',
+                        justifyContent: 'flex-end',
+                    }} />
+                </TouchableWithoutFeedback>
+                <Animated.View
+                    {...groupPanResponder.panHandlers}
+                    style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
                         backgroundColor: isDark ? '#1a1a2e' : '#ffffff',
                         borderTopLeftRadius: 28,
                         borderTopRightRadius: 28,
                         paddingTop: 8,
                         paddingBottom: Math.max(insets.bottom, 20),
                         maxHeight: '85%',
-                    }}>
-                        <View style={{
-                            width: 40, height: 4, borderRadius: 2,
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
-                            alignSelf: 'center', marginBottom: 16,
-                        }} />
+                        transform: [{ translateY: groupSwipeY }],
+                    }}
+                >
+                    <View style={{
+                        width: 40, height: 4, borderRadius: 2,
+                        backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
+                        alignSelf: 'center', marginBottom: 16,
+                    }} />
                         
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 12 }}>
                             <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
@@ -567,8 +631,7 @@ export default function CollectionScreen() {
                                 ))}
                             </View>
                         </ScrollView>
-                    </View>
-                </View>
+                </Animated.View>
             </Modal>
         </ScreenScaffold>
     );

@@ -17,7 +17,7 @@ import * as Clipboard from 'expo-clipboard';
 const isWeb = Platform.OS === 'web';
 
 const CHAIN_ID = 80002; // Polygon Amoy
-const THIRDWEB_CLIENT_ID = process.env.EXPO_PUBLIC_THIRDWEB_CLIENT_ID || '';
+const THIRDWEB_CLIENT_ID = process.env.EXPO_PUBLIC_THIRDWEB_CLIENT_ID || '64c9d6a04c2edcf1c8b117db980edd41';
 
 /**
  * Build the Thirdweb Pay link for the user's wallet.
