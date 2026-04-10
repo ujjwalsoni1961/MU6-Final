@@ -1,10 +1,11 @@
 import React, { useRef, useEffect } from 'react';
-import { Animated, Platform, View } from 'react-native';
+import { Animated, Platform, View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Search, Bell } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
+import { useUnreadNotificationCount } from '../../hooks/useData';
 import AnimatedPressable from '../shared/AnimatedPressable';
 
 interface MobileHeaderProps {
@@ -15,6 +16,7 @@ export default function MobileHeader({ scrollY }: MobileHeaderProps) {
     const { colors, isDark } = useTheme();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { data: unreadCount } = useUnreadNotificationCount();
 
     const headerHeight = insets.top + 56;
 
@@ -111,7 +113,7 @@ export default function MobileHeader({ scrollY }: MobileHeaderProps) {
                 {/* Notifications */}
                 <AnimatedPressable
                     preset="icon"
-                    onPress={() => {/* TODO */ }}
+                    onPress={() => router.push('/(consumer)/notifications')}
                     style={{
                         width: 36,
                         height: 36,
@@ -120,6 +122,24 @@ export default function MobileHeader({ scrollY }: MobileHeaderProps) {
                     }}
                 >
                     <Bell size={20} color={isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)'} />
+                    {unreadCount > 0 && (
+                        <View style={{
+                            position: 'absolute',
+                            top: 2,
+                            right: 2,
+                            minWidth: 16,
+                            height: 16,
+                            borderRadius: 8,
+                            backgroundColor: '#ef4444',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            paddingHorizontal: 4,
+                        }}>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                            </Text>
+                        </View>
+                    )}
                 </AnimatedPressable>
 
                 {/* Profile Avatar */}

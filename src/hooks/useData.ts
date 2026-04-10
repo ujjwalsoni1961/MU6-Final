@@ -326,6 +326,19 @@ export function useSongById(id: string | undefined) {
     );
 }
 
+/** Search artists by name */
+export function useSearchArtists(query: string | undefined) {
+    return useAsync(
+        async () => {
+            if (!query) return [];
+            const artists = await db.searchArtists(query);
+            return artists.map((a) => adaptArtist(a));
+        },
+        [] as Artist[],
+        [query],
+    );
+}
+
 /** Artists list */
 export function useArtists(limit = 20) {
     return useAsync(
@@ -488,6 +501,82 @@ export function useIsFollowing(artistId: string | undefined) {
     }, [artistId, profile?.id, following]);
 
     return { following, toggle };
+}
+
+// ────────────────────────────────────────────
+// NOTIFICATIONS
+// ────────────────────────────────────────────
+
+interface NotificationItem {
+    id: string;
+    type: string;
+    title: string;
+    body: string | null;
+    isRead: boolean;
+    createdAt: string;
+}
+
+/** Notifications for the current user */
+export function useNotifications(limit = 50) {
+    const { profile } = useAuth();
+    const state = useAsync(
+        async () => {
+            if (!profile?.id) return [];
+            const { supabase: client } = await import('../lib/supabase');
+            const { data, error } = await client
+                .from('notifications')
+                .select('*')
+                .eq('profile_id', profile.id)
+                .order('created_at', { ascending: false })
+                .limit(limit);
+
+            if (error || !data) return [];
+            return data.map((row: any): NotificationItem => ({
+                id: row.id,
+                type: row.type,
+                title: row.title,
+                body: row.body,
+                isRead: row.is_read,
+                createdAt: row.created_at,
+            }));
+        },
+        [] as NotificationItem[],
+        [profile?.id, limit],
+    );
+
+    const markAllRead = useCallback(async () => {
+        if (!profile?.id) return;
+        const { supabase: client } = await import('../lib/supabase');
+        await client
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('profile_id', profile.id)
+            .eq('is_read', false);
+        state.refresh();
+    }, [profile?.id, state.refresh]);
+
+    return { ...state, markAllRead };
+}
+
+/** Unread notification count for the current user (for badge) */
+export function useUnreadNotificationCount() {
+    const { profile } = useAuth();
+    return useAsync(
+        async () => {
+            if (!profile?.id) return 0;
+            const { supabase: client } = await import('../lib/supabase');
+            const { count, error } = await client
+                .from('notifications')
+                .select('*', { count: 'exact', head: true })
+                .eq('profile_id', profile.id)
+                .eq('is_read', false);
+
+            if (error) return 0;
+            return count || 0;
+        },
+        0,
+        [profile?.id],
+    );
 }
 
 // ────────────────────────────────────────────
