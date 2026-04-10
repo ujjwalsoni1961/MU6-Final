@@ -485,6 +485,31 @@ export async function getNFTReleaseById(releaseId: string): Promise<NFTRelease |
     return mapNFTReleaseRow(data);
 }
 
+export async function getNFTTokenById(tokenId: string): Promise<NFTToken | null> {
+    const { data, error } = await supabase
+        .from('nft_tokens')
+        .select(`
+            *,
+            release:nft_releases!nft_release_id (
+                *,
+                song:songs!song_id (
+                    id, title, cover_path, creator_id,
+                    creator:profiles!creator_id (
+                        id, display_name, avatar_path
+                    )
+                )
+            )
+        `)
+        .eq('id', tokenId)
+        .maybeSingle();
+
+    if (error || !data) {
+        if (error) console.error('[db] getNFTTokenById error:', error);
+        return null;
+    }
+    return mapNFTTokenRow(data);
+}
+
 export async function getNFTTokensByOwner(walletAddress: string): Promise<NFTToken[]> {
     const { data, error } = await supabase
         .from('nft_tokens')

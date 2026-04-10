@@ -406,6 +406,18 @@ export function useNFTReleaseById(id: string) {
     );
 }
 
+export function useNFTTokenById(id: string) {
+    return useAsync(
+        async () => {
+            if (!id) return null;
+            const token = await db.getNFTTokenById(id);
+            return token ? adaptNFTToken(token) : null;
+        },
+        null as NFT | null,
+        [id],
+    );
+}
+
 /** Marketplace listings (active) */
 export function useMarketplaceListings(limit?: number) {
     return useAsync(

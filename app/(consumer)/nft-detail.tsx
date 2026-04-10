@@ -15,6 +15,7 @@ import { useActiveAccount } from 'thirdweb/react';
 import {
     useNFTReleases,
     useNFTReleaseById,
+    useNFTTokenById,
     useMarketplaceListings,
     useMintToken,
     useBuyListing,
@@ -44,8 +45,9 @@ export default function NFTDetailScreen() {
     // Data hooks
     const { data: allNFTs, loading: releasesLoading } = useNFTReleases();
     const { data: singleRelease, loading: singleLoading } = useNFTReleaseById(viewMode === 'release' ? id : '');
+    const { data: singleToken, loading: tokenLoading } = useNFTTokenById(viewMode === 'release' ? id : '');
     const { data: allListings, loading: listingsLoading } = useMarketplaceListings();
-    const loading = releasesLoading || listingsLoading || singleLoading;
+    const loading = releasesLoading || listingsLoading || singleLoading || tokenLoading;
 
     // Mutation hooks
     const mintHook = useMintToken();
@@ -55,10 +57,10 @@ export default function NFTDetailScreen() {
     const [tradeHistory, setTradeHistory] = useState<TradeEvent[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
 
-    // Find the relevant NFT
+    // Find the relevant NFT (try release ID first, then token ID as fallback from collection)
     const nft = viewMode === 'listing'
         ? allListings.find((l) => l.listingId === listingParam || l.id === id)
-        : (singleRelease || allNFTs.find((n) => n.id === id));
+        : (singleRelease || allNFTs.find((n) => n.id === id) || singleToken);
 
     const listing = viewMode === 'listing'
         ? allListings.find((l) => l.listingId === listingParam || l.id === id)
@@ -142,11 +144,51 @@ export default function NFTDetailScreen() {
         return () => { isMounted = false; };
     }, [nft, listing]);
 
-    if (loading || !nft) {
+    if (loading) {
         return (
             <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
                 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 100 }}>
                     <ActivityIndicator size="large" color="#8b5cf6" />
+                </View>
+            </ScreenScaffold>
+        );
+    }
+
+    if (!nft) {
+        return (
+            <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
+                <View style={{ paddingHorizontal: 16 }}>
+                    <AnimatedPressable
+                        preset="icon"
+                        onPress={() => router.back()}
+                        style={{
+                            width: 40, height: 40, borderRadius: 20, marginTop: isWeb ? 20 : 8, marginBottom: 8,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                            alignItems: 'center' as const, justifyContent: 'center' as const,
+                            borderWidth: 1,
+                            borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+                        }}
+                    >
+                        <ChevronLeft size={22} color={colors.text.primary} />
+                    </AnimatedPressable>
+                </View>
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
+                        NFT not found
+                    </Text>
+                    <AnimatedPressable
+                        preset="button"
+                        onPress={() => router.back()}
+                        style={{
+                            marginTop: 16,
+                            backgroundColor: '#8b5cf6',
+                            borderRadius: 20,
+                            paddingVertical: 12,
+                            paddingHorizontal: 24,
+                        }}
+                    >
+                        <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 14 }}>Go Back</Text>
+                    </AnimatedPressable>
                 </View>
             </ScreenScaffold>
         );
