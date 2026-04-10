@@ -34,9 +34,9 @@ export default function NFTCard({
             preset="card"
             onPress={onPress}
             style={{
-                flex: 1,
+                flex: variant === 'manage' ? undefined : 1,
                 margin: 6,
-                borderRadius: isWeb ? 16 : 24,
+                borderRadius: variant === 'manage' ? 14 : (isWeb ? 16 : 24),
                 overflow: 'hidden',
                 backgroundColor: isWeb
                     ? colors.bg.card
@@ -53,11 +53,11 @@ export default function NFTCard({
             }}
         >
             {/* Image */}
-            <View style={{ overflow: 'hidden', borderTopLeftRadius: isWeb ? 16 : 24, borderTopRightRadius: isWeb ? 16 : 24 }}>
-                <Image source={{ uri: cover }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" />
+            <View style={{ overflow: 'hidden', borderTopLeftRadius: variant === 'manage' ? 14 : (isWeb ? 16 : 24), borderTopRightRadius: variant === 'manage' ? 14 : (isWeb ? 16 : 24) }}>
+                <Image source={{ uri: cover }} style={{ width: '100%', aspectRatio: variant === 'manage' ? 4 / 3 : 1, maxHeight: variant === 'manage' ? 160 : undefined }} contentFit="cover" />
                 <LinearGradient
                     colors={['transparent', 'rgba(0,0,0,0.9)'] as any}
-                    style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }}
+                    style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: variant === 'manage' ? 70 : 100 }}
                 />
                 {/* Rarity badge — top LEFT */}
                 <View style={{ position: 'absolute', top: 8, left: 8 }}>
@@ -67,17 +67,17 @@ export default function NFTCard({
                 <View style={{ position: 'absolute', top: 8, right: 8 }}>
                     <PriceTag price={price} dark />
                 </View>
-                <View style={{ position: 'absolute', bottom: 12, left: 12, right: 12 }}>
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13, lineHeight: 20, paddingBottom: 2 }} numberOfLines={1}>{title}</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: 11, lineHeight: 14 }} numberOfLines={1}>{artist}</Text>
+                <View style={{ position: 'absolute', bottom: variant === 'manage' ? 8 : 12, left: variant === 'manage' ? 8 : 12, right: variant === 'manage' ? 8 : 12 }}>
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: variant === 'manage' ? 12 : 13, lineHeight: variant === 'manage' ? 16 : 20, paddingBottom: 2 }} numberOfLines={1}>{title}</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: variant === 'manage' ? 10 : 11, lineHeight: variant === 'manage' ? 12 : 14 }} numberOfLines={1}>{artist}</Text>
                 </View>
             </View>
 
             {/* Bottom section */}
-            <View style={{ padding: 12 }}>
+            <View style={{ padding: variant === 'manage' ? 8 : 12 }}>
                 <Text style={{
                     color: isDark ? '#94a3b8' : '#475569',
-                    fontSize: 10,
+                    fontSize: variant === 'manage' ? 9 : 10,
                     fontWeight: '600',
                     textTransform: 'uppercase',
                     letterSpacing: 1.5,
@@ -90,14 +90,14 @@ export default function NFTCard({
                         onPress={onPress}
                         style={{
                             backgroundColor: variant === 'manage' ? (isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.12)') : '#8b5cf6',
-                            borderRadius: isWeb ? 10 : 14,
-                            paddingVertical: 10,
+                            borderRadius: variant === 'manage' ? 8 : (isWeb ? 10 : 14),
+                            paddingVertical: variant === 'manage' ? 7 : 10,
                             alignItems: 'center' as const,
-                            marginTop: 8,
+                            marginTop: variant === 'manage' ? 6 : 8,
                             ...(variant === 'manage' ? { borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' } : {}),
                         }}
                     >
-                        <Text style={{ color: variant === 'manage' ? '#8b5cf6' : '#ffffff', fontWeight: '700', fontSize: 13 }}>
+                        <Text style={{ color: variant === 'manage' ? '#8b5cf6' : '#ffffff', fontWeight: '700', fontSize: variant === 'manage' ? 11 : 13 }}>
                             {variant === 'manage' ? 'View Details' : 'Collect Now'}
                         </Text>
                     </AnimatedPressable>
