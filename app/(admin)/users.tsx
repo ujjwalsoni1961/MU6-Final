@@ -1,100 +1,136 @@
-import React from 'react';
-import { View, Text, FlatList, Platform } from 'react-native';
-import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { useAdminUsers } from '../../src/hooks/useData';
-import LoadingState from '../../src/components/shared/LoadingState';
-import { useTheme } from '../../src/context/ThemeContext';
-import { User } from '../../src/types';
+import React, { useState, useCallback } from 'react';
+import { View, Text, Platform } from 'react-native';
+import {
+    AdminScreen, AdminSearchBar, AdminFilterPills,
+    AdminDataTable, AdminPagination, StatusBadge,
+} from '../../src/components/admin/AdminScreenWrapper';
+import { useAdminUsersFiltered } from '../../src/hooks/useAdminData';
 
 const isWeb = Platform.OS === 'web';
+const PAGE_SIZE = 20;
 
-const roleColors: Record<string, { bg: string; text: string }> = {
-    consumer: { bg: 'rgba(56,180,186,0.15)', text: '#38b4ba' },
-    artist: { bg: 'rgba(139,92,246,0.15)', text: '#8b5cf6' },
-    admin: { bg: 'rgba(100,116,139,0.15)', text: '#64748b' },
-    listener: { bg: 'rgba(56,180,186,0.15)', text: '#38b4ba' },
-    creator: { bg: 'rgba(139,92,246,0.15)', text: '#8b5cf6' },
-};
-
-const statusColors: Record<string, { bg: string; text: string }> = {
-    active: { bg: 'rgba(34,197,94,0.15)', text: '#16a34a' },
-    suspended: { bg: 'rgba(239,68,68,0.15)', text: '#dc2626' },
-};
+const roleOptions = [
+    { label: 'All Roles', value: '' },
+    { label: 'Artist', value: 'creator' },
+    { label: 'Listener', value: 'listener' },
+    { label: 'Admin', value: 'admin' },
+];
 
 export default function AdminUsersScreen() {
-    const { isDark, colors } = useTheme();
-    const { data: users, loading, error, refresh } = useAdminUsers();
-    const Container = isWeb ? View : SafeAreaView;
+    const [search, setSearch] = useState('');
+    const [roleFilter, setRoleFilter] = useState('');
+    const [offset, setOffset] = useState(0);
 
-    const renderUser = ({ item }: { item: User }) => {
-        const rc = roleColors[item.role] || roleColors.consumer;
-        const sc = statusColors[item.status] || statusColors.active;
-        const truncatedWallet = item.walletAddress
-            ? `${item.walletAddress.slice(0, 6)}...${item.walletAddress.slice(-4)}`
-            : '—';
+    const { data, loading, error, refresh } = useAdminUsersFiltered({
+        search,
+        role: roleFilter,
+        limit: PAGE_SIZE,
+        offset,
+    });
 
-        return (
-            <AnimatedPressable
-                preset="row"
-                hapticType="none"
-                style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    marginBottom: 6,
-                    padding: 14,
-                    borderRadius: 12,
-                    backgroundColor: isWeb
-                        ? (isDark ? colors.bg.card : '#f8fafc')
-                        : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.3)'),
-                    borderWidth: 1,
-                    borderColor: isDark
-                        ? 'rgba(255,255,255,0.06)'
-                        : (isWeb ? '#f1f5f9' : 'rgba(255,255,255,0.3)'),
-                }}
-            >
-                <Image source={{ uri: item.avatar }} style={{ width: 40, height: 40, borderRadius: 20 }} contentFit="cover" />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{item.name}</Text>
-                    <Text style={{ color: colors.text.secondary, fontSize: 11 }}>{item.email || 'No email'}</Text>
-                    {isWeb && (
-                        <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2, fontFamily: 'monospace' }}>
-                            {truncatedWallet}
-                        </Text>
-                    )}
-                </View>
-                <View style={{ backgroundColor: rc.bg, borderRadius: 9999, paddingHorizontal: 8, paddingVertical: 2, marginRight: 6 }}>
-                    <Text style={{ color: rc.text, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' }}>{item.role}</Text>
-                </View>
-                <View style={{ backgroundColor: sc.bg, borderRadius: 9999, paddingHorizontal: 8, paddingVertical: 2 }}>
-                    <Text style={{ color: sc.text, fontSize: 10, fontWeight: '600', textTransform: 'capitalize' }}>{item.status}</Text>
-                </View>
-            </AnimatedPressable>
-        );
-    };
+    const handleSearch = useCallback((text: string) => {
+        setSearch(text);
+        setOffset(0);
+    }, []);
+
+    const handleRoleFilter = useCallback((role: string) => {
+        setRoleFilter(role);
+        setOffset(0);
+    }, []);
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isWeb ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
-            <View style={{ padding: isWeb ? 32 : 16 }}>
-                <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: colors.text.primary, letterSpacing: -1, marginBottom: 4 }}>
-                    Users
-                </Text>
-                {!loading && (
-                    <Text style={{ fontSize: 14, color: colors.text.secondary, marginBottom: 8 }}>
-                        {users.length} registered {users.length === 1 ? 'user' : 'users'}
-                    </Text>
+        <AdminScreen
+            title="Users"
+            subtitle={!loading ? `${data.total} registered users` : undefined}
+            loading={loading}
+            error={error}
+            onRetry={refresh}
+        >
+            <AdminSearchBar
+                value={search}
+                onChangeText={handleSearch}
+                placeholder="Search by name, email, or wallet..."
+            />
+
+            <AdminFilterPills
+                options={roleOptions}
+                selected={roleFilter}
+                onSelect={handleRoleFilter}
+            />
+
+            <AdminDataTable
+                headers={['User', 'Email', 'Wallet', 'Role', 'Country', 'Joined']}
+                data={data.users}
+                emptyMessage="No users found"
+                renderRow={(user) => (
+                    <View style={{
+                        flexDirection: isWeb ? 'row' : 'column',
+                        alignItems: isWeb ? 'center' : 'flex-start',
+                        padding: 14,
+                    }}>
+                        {isWeb ? (
+                            <>
+                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                    <View style={{
+                                        width: 32, height: 32, borderRadius: 16,
+                                        backgroundColor: 'rgba(56,180,186,0.1)',
+                                        alignItems: 'center', justifyContent: 'center', marginRight: 10,
+                                    }}>
+                                        <Text style={{ color: '#38b4ba', fontWeight: '700', fontSize: 13 }}>
+                                            {(user.name || '?')[0].toUpperCase()}
+                                        </Text>
+                                    </View>
+                                    <View>
+                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{user.name}</Text>
+                                        {user.isVerified && <Text style={{ color: '#4ade80', fontSize: 10 }}>Verified</Text>}
+                                    </View>
+                                </View>
+                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{user.email || '—'}</Text>
+                                <Text style={{ flex: 1, color: '#475569', fontSize: 11, fontFamily: 'monospace' }}>
+                                    {user.walletAddress ? `${user.walletAddress.slice(0, 6)}...${user.walletAddress.slice(-4)}` : '—'}
+                                </Text>
+                                <View style={{ flex: 1 }}><StatusBadge status={user.role} /></View>
+                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{user.country || '—'}</Text>
+                                <Text style={{ flex: 1, color: '#475569', fontSize: 12 }}>
+                                    {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
+                                </Text>
+                            </>
+                        ) : (
+                            <>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                    <View style={{
+                                        width: 36, height: 36, borderRadius: 18,
+                                        backgroundColor: 'rgba(56,180,186,0.1)',
+                                        alignItems: 'center', justifyContent: 'center', marginRight: 10,
+                                    }}>
+                                        <Text style={{ color: '#38b4ba', fontWeight: '700' }}>
+                                            {(user.name || '?')[0].toUpperCase()}
+                                        </Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14 }}>{user.name}</Text>
+                                        <Text style={{ color: '#64748b', fontSize: 12 }}>{user.email || '—'}</Text>
+                                    </View>
+                                    <StatusBadge status={user.role} />
+                                </View>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                    <Text style={{ color: '#475569', fontSize: 11 }}>
+                                        {user.country || 'No country'} | {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '—'}
+                                    </Text>
+                                </View>
+                            </>
+                        )}
+                    </View>
                 )}
-            </View>
-            <LoadingState loading={loading} error={error} onRetry={refresh}>
-                <FlatList
-                    data={users}
-                    renderItem={renderUser}
-                    keyExtractor={(item) => item.id}
-                    contentContainerStyle={{ paddingHorizontal: isWeb ? 32 : 16, paddingBottom: 40 }}
-                    showsVerticalScrollIndicator={false}
-                />
-            </LoadingState>
-        </Container>
+            />
+
+            <AdminPagination
+                offset={offset}
+                limit={PAGE_SIZE}
+                total={data.total}
+                onPrev={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                onNext={() => { if (offset + PAGE_SIZE < data.total) setOffset(offset + PAGE_SIZE); }}
+            />
+        </AdminScreen>
     );
 }

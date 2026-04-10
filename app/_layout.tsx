@@ -9,6 +9,7 @@ import AnimatedBackground from '../src/components/shared/AnimatedBackground';
 
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { AuthProvider } from '../src/context/AuthContext';
+import { AdminAuthProvider } from '../src/context/AdminAuthContext';
 
 function MainLayout() {
     const isWeb = Platform.OS === 'web';
@@ -26,6 +27,7 @@ function MainLayout() {
                 <Stack.Screen name="(consumer)" />
                 <Stack.Screen name="(artist)" />
                 <Stack.Screen name="(admin)" />
+                <Stack.Screen name="admin-login" />
             </Stack>
         </View>
     );
@@ -37,7 +39,9 @@ export default function RootLayout() {
             <ThirdwebProvider>
                 <ThemeProvider>
                     <AuthProvider>
-                        <MainLayout />
+                        <AdminAuthProvider>
+                            <MainLayout />
+                        </AdminAuthProvider>
                     </AuthProvider>
                 </ThemeProvider>
             </ThirdwebProvider>
