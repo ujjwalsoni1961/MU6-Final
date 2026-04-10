@@ -70,8 +70,8 @@ const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const MAX_UINT256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
 
 /** Supabase URL for edge function calls */
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 /** Check if an address is the native token (ETH/MATIC) */
 function isNativeToken(addr: string): boolean {

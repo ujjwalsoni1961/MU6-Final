@@ -285,8 +285,8 @@ export function useAdminPayoutActions(refresh: () => void) {
         const recipientWallet = (payout.profile as any)?.wallet_address;
         if (payout.payment_method === 'crypto_wallet' && recipientWallet) {
             try {
-                const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
-                const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+                const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+                const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
                 const amountWei = BigInt(Math.floor((payout.amount_eur || 0) * 1e18)).toString();
                 const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
                     method: 'POST',

@@ -1,7 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ── Config ──
 const THIRDWEB_SECRET_KEY = Deno.env.get("THIRDWEB_SECRET_KEY") || "";
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const SERVER_WALLET = "0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39";
 const DEFAULT_CONTRACT = "0xACF1145AdE250D356e1B2869E392e6c748c14C0E";
 const CHAIN_ID = 80002;
@@ -18,6 +21,29 @@ function jsonResponse(data: unknown, status = 200) {
         status,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
+}
+
+async function verifyAuth(req: Request): Promise<{ valid: boolean; error?: string }> {
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) {
+        return { valid: false, error: "Missing Authorization header" };
+    }
+
+    const token = authHeader.replace("Bearer ", "");
+    if (!token) {
+        return { valid: false, error: "Missing auth token" };
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+        return { valid: false, error: "Invalid or expired auth token" };
+    }
+
+    return { valid: true };
 }
 
 async function callEngine(requestBody: unknown) {
@@ -71,6 +97,12 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: "THIRDWEB_SECRET_KEY not configured" }, 500);
     }
 
+    // ── Auth check ──
+    const auth = await verifyAuth(req);
+    if (!auth.valid) {
+        return jsonResponse({ error: auth.error || "Unauthorized" }, 401);
+    }
+
     try {
         const body = await req.json();
         const { action } = body;
@@ -99,17 +131,12 @@ Deno.serve(async (req: Request) => {
         }
 
         // ── Server Claim ──
-        // The server wallet claims an NFT on behalf of the buyer.
-        // This uses the server wallet's MINTER_ROLE and pays the on-chain claim price.
-        // The NFT is minted directly to the receiverAddress.
         if (action === "serverClaim") {
             const { receiverAddress, contractAddress, onChainPriceWei } = body;
             if (!receiverAddress) return jsonResponse({ error: "Missing receiverAddress" }, 400);
 
-            // Read the active claim condition to know the price
-            // (passed from client or we use 0)
             const priceWei = onChainPriceWei || "0";
-            
+
             const requestBody = {
                 executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
                 params: [{

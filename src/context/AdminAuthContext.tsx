@@ -1,12 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// ── Admin credentials (hardcoded for now) ──
-const ADMIN_CREDENTIALS = [
-    { username: 'admin', password: 'admin123' },
-];
+import { supabase } from '../lib/supabase';
 
 const ADMIN_SESSION_KEY = '@mu6_admin_session';
+const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export interface AdminSession {
     username: string;
@@ -23,17 +20,27 @@ interface AdminAuthContextType {
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
+function isSessionExpired(session: AdminSession): boolean {
+    const loginTime = new Date(session.loggedInAt).getTime();
+    return Date.now() - loginTime > SESSION_EXPIRY_MS;
+}
+
 export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     const [adminSession, setAdminSession] = useState<AdminSession | null>(null);
     const [isAdminLoading, setIsAdminLoading] = useState(true);
 
-    // Load session on mount
+    // Load session on mount, check expiry
     useEffect(() => {
         (async () => {
             try {
                 const stored = await AsyncStorage.getItem(ADMIN_SESSION_KEY);
                 if (stored) {
-                    setAdminSession(JSON.parse(stored));
+                    const session: AdminSession = JSON.parse(stored);
+                    if (isSessionExpired(session)) {
+                        await AsyncStorage.removeItem(ADMIN_SESSION_KEY);
+                    } else {
+                        setAdminSession(session);
+                    }
                 }
             } catch {
                 // ignore
@@ -44,19 +51,32 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const adminLogin = useCallback(async (username: string, password: string) => {
-        const match = ADMIN_CREDENTIALS.find(
-            (c) => c.username === username && c.password === password,
-        );
-        if (!match) {
-            return { success: false, error: 'Invalid username or password' };
+        try {
+            const { data, error } = await supabase.rpc('verify_admin_login', {
+                p_username: username,
+                p_password: password,
+            });
+
+            if (error) {
+                console.error('[AdminAuth] RPC error:', error.message);
+                return { success: false, error: 'Login failed. Please try again.' };
+            }
+
+            if (!data) {
+                return { success: false, error: 'Invalid username or password' };
+            }
+
+            const session: AdminSession = {
+                username,
+                loggedInAt: new Date().toISOString(),
+            };
+            await AsyncStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
+            setAdminSession(session);
+            return { success: true };
+        } catch (err: any) {
+            console.error('[AdminAuth] Login exception:', err);
+            return { success: false, error: 'Network error. Please try again.' };
         }
-        const session: AdminSession = {
-            username: match.username,
-            loggedInAt: new Date().toISOString(),
-        };
-        await AsyncStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(session));
-        setAdminSession(session);
-        return { success: true };
     }, []);
 
     const adminLogout = useCallback(async () => {
@@ -69,7 +89,7 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
             value={{
                 adminSession,
                 isAdminLoading,
-                isAdminLoggedIn: !!adminSession,
+                isAdminLoggedIn: !!adminSession && !isSessionExpired(adminSession),
                 adminLogin,
                 adminLogout,
             }}
