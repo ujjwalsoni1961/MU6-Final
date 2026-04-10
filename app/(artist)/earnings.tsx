@@ -9,6 +9,7 @@ import GlassCard from '../../src/components/shared/GlassCard';
 import { useCreatorRoyalties, useRoyaltyHistory } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
+import { getArtistBalance } from '../../src/services/database';
 
 const isWeb = Platform.OS === 'web';
 
@@ -171,7 +172,7 @@ function RoyaltyRow({ share }: { share: any }) {
 export default function EarningsScreen() {
     const { isDark, colors } = useTheme();
     const router = useRouter();
-    const { walletAddress } = useAuth();
+    const { walletAddress, profile } = useAuth();
     const { data: royalties, loading: loadingRoyalties } = useCreatorRoyalties();
     const { data: history, loading: loadingHistory } = useRoyaltyHistory(30);
     const Container = isWeb ? View : SafeAreaView;
@@ -179,6 +180,9 @@ export default function EarningsScreen() {
     // Real on-chain wallet balance
     const [walletBalance, setWalletBalance] = useState<number | null>(null);
     const [balanceLoading, setBalanceLoading] = useState(false);
+
+    // Available balance (accrued - paid out)
+    const [availableBalance, setAvailableBalance] = useState<{ totalEarned: number; totalPaidOut: number; availableBalance: number } | null>(null);
 
     const refreshBalance = useCallback(async () => {
         if (!walletAddress) return;
@@ -189,7 +193,12 @@ export default function EarningsScreen() {
         } finally {
             setBalanceLoading(false);
         }
-    }, [walletAddress]);
+        // Also refresh available balance
+        if (profile?.id) {
+            const ab = await getArtistBalance(profile.id);
+            setAvailableBalance(ab);
+        }
+    }, [walletAddress, profile?.id]);
 
     useEffect(() => {
         refreshBalance();
@@ -255,6 +264,33 @@ export default function EarningsScreen() {
                         </Text>
                     )}
                 </View>
+
+                {/* ── Available Balance (Accrued Earnings) ── */}
+                {availableBalance && availableBalance.totalEarned > 0 && (
+                    <View
+                        style={{
+                            padding: isWeb ? 20 : 16, borderRadius: 14,
+                            backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.4)'),
+                            borderWidth: 1, borderColor: 'rgba(56,180,186,0.25)',
+                            marginBottom: 20,
+                        }}
+                    >
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>
+                            Available for Payout
+                        </Text>
+                        <Text style={{ fontSize: 28, fontWeight: '800', color: '#38b4ba' }}>
+                            {availableBalance.availableBalance.toFixed(4)} <Text style={{ fontSize: 16, color: colors.text.muted }}>POL</Text>
+                        </Text>
+                        <View style={{ flexDirection: 'row', marginTop: 8, gap: 16 }}>
+                            <Text style={{ fontSize: 11, color: colors.text.muted }}>
+                                Earned: {availableBalance.totalEarned.toFixed(4)}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: colors.text.muted }}>
+                                Paid out: {availableBalance.totalPaidOut.toFixed(4)}
+                            </Text>
+                        </View>
+                    </View>
+                )}
 
                 {loadingRoyalties ? (
                     <View style={{ padding: 40, alignItems: 'center' }}><ActivityIndicator size="large" color="#38b4ba" /></View>

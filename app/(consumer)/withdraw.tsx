@@ -42,19 +42,22 @@ export default function WithdrawScreen() {
     // Recent payout requests
     const [payoutHistory, setPayoutHistory] = useState<db.PayoutRequest[]>([]);
 
-    // Wallet balance
+    // Available balance (accrued earnings minus payouts)
+    const [availableBalance, setAvailableBalance] = useState<{ totalEarned: number; totalPaidOut: number; availableBalance: number } | null>(null);
+
+    // Wallet balance (on-chain)
     const { data: balanceData } = useWalletBalance({
         chain: activeChain,
         address: walletAddress || undefined,
         client: thirdwebClient,
     });
 
-    const displayBalance = balanceData
-        ? parseFloat(balanceData.displayValue).toFixed(4)
+    const displayBalance = availableBalance
+        ? availableBalance.availableBalance.toFixed(4)
         : '0.00';
-    const balanceSymbol = balanceData?.symbol || 'POL';
+    const balanceSymbol = 'POL';
 
-    // Load bank details on mount
+    // Load bank details and balance on mount
     useEffect(() => {
         if (!profile?.id) {
             setStep('bank_form');
@@ -73,6 +76,10 @@ export default function WithdrawScreen() {
             } else {
                 setStep('bank_form');
             }
+
+            // Load available balance
+            const bal = await db.getArtistBalance(profile.id);
+            setAvailableBalance(bal);
 
             // Load payout history
             const history = await db.getPayoutRequests(profile.id);
@@ -123,14 +130,14 @@ export default function WithdrawScreen() {
 
         setSubmitting(true);
         try {
-            const requestId = await db.createPayoutRequest(profile.id, numAmount, bankDetails);
-            if (requestId) {
+            const result = await db.createPayoutRequest(profile.id, numAmount, bankDetails);
+            if (result.id) {
                 setStep('success');
                 // Refresh history
                 const history = await db.getPayoutRequests(profile.id);
                 setPayoutHistory(history);
             } else {
-                Alert.alert('Error', 'Failed to submit withdrawal request. Please try again.');
+                Alert.alert('Error', result.error || 'Failed to submit withdrawal request. Please try again.');
             }
         } catch (err) {
             console.error('[withdraw] createPayoutRequest error:', err);
@@ -275,7 +282,7 @@ export default function WithdrawScreen() {
                                 borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
                             }]}>
                                 <Text style={{ fontSize: 12, color: colors.text.secondary, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 }}>
-                                    Available Balance
+                                    Available Balance (Accrued Earnings)
                                 </Text>
                                 <Text style={{ fontSize: 32, fontWeight: '800', color: colors.text.primary, marginTop: 4 }}>
                                     {displayBalance}{' '}

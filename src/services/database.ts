@@ -763,6 +763,7 @@ export async function upsertSplitSheet(
 
 /**
  * Log a stream event. Marks as qualified if >= 15 seconds.
+ * Deduplication: same user can only count as 1 stream per song per 30 minutes.
  * The DB trigger auto-increments songs.plays_count for qualified streams.
  */
 export async function logStream(
@@ -771,6 +772,43 @@ export async function logStream(
     durationSeconds: number,
 ): Promise<StreamEntry | null> {
     const isQualified = durationSeconds >= 15;
+
+    // ── Stream deduplication: 30-minute window ──
+    // Same user can only generate 1 qualified stream per song per 30 minutes.
+    // Non-qualified streams are always logged (they don't generate revenue).
+    if (isQualified && listenerProfileId) {
+        const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+        const { data: recentStream } = await supabase
+            .from('streams')
+            .select('id')
+            .eq('song_id', songId)
+            .eq('listener_profile_id', listenerProfileId)
+            .eq('is_qualified', true)
+            .gte('started_at', thirtyMinAgo)
+            .limit(1)
+            .maybeSingle();
+
+        if (recentStream) {
+            console.log('[db] Stream dedup: skipping qualified stream for song', songId, '- already counted within 30 min');
+            // Still log the stream but as non-qualified (no revenue, no play count)
+            const { data, error } = await supabase
+                .from('streams')
+                .insert({
+                    song_id: songId,
+                    listener_profile_id: listenerProfileId,
+                    duration_seconds: durationSeconds,
+                    is_qualified: false, // deduplicated — no revenue
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error('[db] logStream (dedup) error:', error);
+                return null;
+            }
+            return mapStreamRow(data);
+        }
+    }
 
     const { data, error } = await supabase
         .from('streams')
@@ -1582,18 +1620,64 @@ export async function saveBankDetails(
     return true;
 }
 
-/** Create a payout request */
+/** Get artist's available balance (total earned - total paid out) */
+export async function getArtistBalance(profileId: string): Promise<{
+    totalEarned: number;
+    totalPaidOut: number;
+    availableBalance: number;
+}> {
+    const { data, error } = await supabase
+        .rpc('get_artist_balance', { p_profile_id: profileId })
+        .single();
+
+    if (error || !data) {
+        console.warn('[db] getArtistBalance rpc error, falling back to manual calc:', error);
+        // Fallback: manual calculation
+        const { data: shares } = await supabase
+            .from('royalty_shares')
+            .select('amount_eur')
+            .eq('linked_profile_id', profileId);
+        const totalEarned = (shares || []).reduce((sum, s) => sum + (parseFloat(s.amount_eur) || 0), 0);
+
+        const { data: payouts } = await supabase
+            .from('payout_requests')
+            .select('amount_eur')
+            .eq('profile_id', profileId)
+            .eq('status', 'completed');
+        const totalPaidOut = (payouts || []).reduce((sum, p) => sum + (parseFloat(p.amount_eur) || 0), 0);
+
+        return { totalEarned, totalPaidOut, availableBalance: totalEarned - totalPaidOut };
+    }
+
+    return {
+        totalEarned: parseFloat(data.total_earned) || 0,
+        totalPaidOut: parseFloat(data.total_paid_out) || 0,
+        availableBalance: parseFloat(data.available_balance) || 0,
+    };
+}
+
+/** Create a payout request with balance validation */
 export async function createPayoutRequest(
     profileId: string,
     amountEur: number,
     bankDetails: BankDetails,
-): Promise<string | null> {
+    paymentMethod: string = 'bank_transfer',
+): Promise<{ id: string | null; error?: string }> {
+    // Validate against available balance
+    const balance = await getArtistBalance(profileId);
+    if (amountEur > balance.availableBalance) {
+        return {
+            id: null,
+            error: `Insufficient balance. Available: ${balance.availableBalance.toFixed(4)} POL, requested: ${amountEur.toFixed(4)} POL`,
+        };
+    }
+
     const { data, error } = await supabase
         .from('payout_requests')
         .insert({
             profile_id: profileId,
             amount_eur: amountEur,
-            payment_method: 'bank_transfer',
+            payment_method: paymentMethod,
             payment_details: bankDetails,
             status: 'pending',
         })
@@ -1602,9 +1686,9 @@ export async function createPayoutRequest(
 
     if (error || !data) {
         console.error('[db] createPayoutRequest error:', error);
-        return null;
+        return { id: null, error: error?.message || 'Failed to create payout request' };
     }
-    return data.id;
+    return { id: data.id };
 }
 
 /** Get payout requests for a specific user */

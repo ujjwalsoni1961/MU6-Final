@@ -267,17 +267,75 @@ export function useAdminMarketplaceActions(refresh: () => void) {
 
 export function useAdminPayoutActions(refresh: () => void) {
     const approvePayout = useCallback(async (payoutId: string) => {
+        // Fetch payout details to determine payment method
+        const { data: payout } = await supabase
+            .from('payout_requests')
+            .select('*, profile:profiles!profile_id (wallet_address)')
+            .eq('id', payoutId)
+            .single();
+
+        if (!payout) {
+            showToast('Payout request not found', 'error');
+            return;
+        }
+
+        let txHash: string | null = null;
+
+        // For crypto payouts: send testnet POL via server wallet
+        const recipientWallet = (payout.profile as any)?.wallet_address;
+        if (payout.payment_method === 'crypto_wallet' && recipientWallet) {
+            try {
+                const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
+                const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+                const amountWei = BigInt(Math.floor((payout.amount_eur || 0) * 1e18)).toString();
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify({
+                        action: 'transferFunds',
+                        recipientAddress: recipientWallet,
+                        amountWei,
+                    }),
+                });
+                const result = await response.json();
+                if (result.success && result.txHash) {
+                    txHash = result.txHash;
+                    console.log('[admin] Crypto payout sent, tx:', txHash);
+                } else {
+                    showToast(`Crypto transfer failed: ${result.error || 'Unknown error'}. Payout marked as approved, manual transfer needed.`, 'error');
+                }
+            } catch (err: any) {
+                console.error('[admin] Crypto payout transfer error:', err);
+                showToast('Crypto transfer failed. Payout approved but manual transfer needed.', 'error');
+            }
+        }
+
+        // For bank transfers: mark as approved with admin note
+        const updatePayload: Record<string, any> = {
+            status: 'completed',
+            processed_at: new Date().toISOString(),
+        };
+        if (txHash) {
+            updatePayload.tx_hash = txHash;
+        }
+        if (payout.payment_method === 'bank_transfer') {
+            updatePayload.admin_notes = 'Approved — manual bank transfer needed';
+        }
+
         const { error } = await supabase
             .from('payout_requests')
-            .update({ status: 'completed', processed_at: new Date().toISOString() })
+            .update(updatePayload)
             .eq('id', payoutId);
 
         if (error) {
             showToast('Failed to approve payout', 'error');
             return;
         }
-        await logAuditAction('approve_payout', 'payout_request', payoutId);
-        showToast('Payout approved successfully');
+        await logAuditAction('approve_payout', 'payout_request', payoutId, { txHash });
+        showToast(txHash ? 'Payout sent on-chain' : 'Payout approved successfully');
         refresh();
     }, [refresh]);
 
