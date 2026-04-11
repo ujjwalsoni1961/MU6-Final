@@ -16,6 +16,11 @@ const FROM_ADDRESS = 'MU6 <onboarding@resend.dev>';
 // ────────────────────────────────────────────
 
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+    if (!RESEND_API_KEY) {
+        console.warn('[email] EXPO_PUBLIC_RESEND_API_KEY not set — skipping email to:', to);
+        return false;
+    }
+    console.log('[email] Attempting to send email to:', to, '| Subject:', subject);
     try {
         const res = await fetch('https://api.resend.com/emails', {
             method: 'POST',
@@ -27,13 +32,13 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
         });
         const data = await res.json();
         if (data.id) {
-            console.log('[email] sent:', data.id);
+            console.log('[email] Sent successfully:', data.id);
             return true;
         }
-        console.warn('[email] failed:', data);
+        console.warn('[email] API response (not sent):', JSON.stringify(data));
         return false;
     } catch (err) {
-        console.error('[email] error:', err);
+        console.error('[email] Network/fetch error:', err);
         return false;
     }
 }

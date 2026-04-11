@@ -410,31 +410,48 @@ export default function SplitEditorScreen() {
 
         const result = await saveSplits(selectedSongId, splits);
         if (result) {
-            // Create invitations for unregistered users
-            const unregistered = rows.filter((r) => r.emailStatus === 'unregistered');
-            for (const r of unregistered) {
-                await createSplitInvitation({
-                    songId: selectedSongId,
-                    inviterProfileId: profile.id,
-                    inviteeEmail: r.partyEmail.trim(),
-                    inviteeName: r.partyName.trim(),
-                    role: r.role,
-                    sharePercent: parseFloat(r.sharePercent) || 0,
-                });
-                // Fire-and-forget email notification
+            // Find collaborators who are NOT the current user
+            // Send invite emails to anyone who isn't the logged-in creator
+            // (covers both 'unregistered' and 'unchecked' status — user may not have blurred the field)
+            const collaborators = rows.filter(
+                (r) => r.partyEmail.trim().toLowerCase() !== profile.email?.toLowerCase()
+                    && r.partyEmail.trim() !== ''
+            );
+
+            let inviteCount = 0;
+            for (const r of collaborators) {
+                const isUnregistered = r.emailStatus === 'unregistered' || r.emailStatus === 'unchecked';
+                if (isUnregistered) {
+                    // Create invitation record
+                    await createSplitInvitation({
+                        songId: selectedSongId,
+                        inviterProfileId: profile.id,
+                        inviteeEmail: r.partyEmail.trim(),
+                        inviteeName: r.partyName.trim(),
+                        role: r.role,
+                        sharePercent: parseFloat(r.sharePercent) || 0,
+                    });
+                    inviteCount++;
+                }
+
+                // Always send email notification to collaborators (registered or not)
+                console.log('[split-editor] Sending split invite email to:', r.partyEmail.trim());
                 void sendSplitInviteEmail(
                     r.partyEmail.trim(),
                     profile.displayName || 'An artist',
                     selectedSong?.title || 'a song',
                     r.role,
                     parseFloat(r.sharePercent) || 0,
-                ).catch(() => {});
+                ).catch((err) => console.warn('[split-editor] Email send failed:', err));
             }
-            if (unregistered.length > 0) {
+
+            if (inviteCount > 0) {
                 Alert.alert(
                     'Invitations Created',
-                    `${unregistered.length} invitation${unregistered.length > 1 ? 's' : ''} created for unregistered collaborators. They'll be auto-linked when they sign up.`,
+                    `${inviteCount} invitation${inviteCount > 1 ? 's' : ''} created for collaborators. They'll be auto-linked when they sign up.`,
                 );
+            } else if (collaborators.length > 0) {
+                Alert.alert('Split Sheet Saved', 'Collaborators have been notified by email.');
             }
             refreshSplits();
         }
