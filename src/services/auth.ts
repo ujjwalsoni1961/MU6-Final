@@ -90,17 +90,23 @@ export async function updateProfile(
         country: string;
     }>,
 ): Promise<UserProfile | null> {
+    console.log('[auth] updateProfile called:', profileId, JSON.stringify(updates));
     const { data, error } = await supabase
         .from('profiles')
         .update(updates)
         .eq('id', profileId)
         .select()
-        .single();
+        .maybeSingle();
 
-    if (error || !data) {
-        console.error('[auth] updateProfile error:', error);
+    if (error) {
+        console.error('[auth] updateProfile Supabase error:', error.message, error.code, error.details, error.hint);
         return null;
     }
+    if (!data) {
+        console.error('[auth] updateProfile returned no rows for id:', profileId, '— check RLS or ID mismatch');
+        return null;
+    }
+    console.log('[auth] updateProfile success:', data.id, data.display_name);
     return mapDbToProfile(data);
 }
 

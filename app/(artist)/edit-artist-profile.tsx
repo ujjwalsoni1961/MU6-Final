@@ -154,24 +154,34 @@ export default function EditArtistProfileScreen() {
             if (avatarFile) {
                 const ext = avatarFile.name.split('.').pop() || 'jpg';
                 const fName = `${profile.id}_avatar_${Date.now()}.${ext}`;
+                console.log('[edit-artist-profile] Uploading avatar:', fName);
                 const path = await uploadToStorage('avatars', fName, avatarFile.uri, avatarFile.mimeType);
+                console.log('[edit-artist-profile] Avatar upload result:', path);
                 if (path) newAvatarPath = path;
             }
 
             if (coverFile) {
                 const ext = coverFile.name.split('.').pop() || 'jpg';
                 const fName = `${profile.id}_cover_${Date.now()}.${ext}`;
+                console.log('[edit-artist-profile] Uploading cover:', fName);
                 const path = await uploadToStorage('covers', fName, coverFile.uri, coverFile.mimeType);
+                console.log('[edit-artist-profile] Cover upload result:', path);
                 if (path) newCoverPath = path;
             }
 
-            const updated = await updateProfile(profile.id, {
+            // Build update payload — only include fields that have values
+            const updates: Record<string, any> = {
                 display_name: displayName.trim(),
-                bio: bio.trim() || undefined as any,
-                country: country || undefined as any,
-                avatar_path: newAvatarPath || undefined as any,
-                cover_path: newCoverPath || undefined as any,
-            });
+            };
+            if (bio.trim()) updates.bio = bio.trim();
+            if (country) updates.country = country;
+            if (newAvatarPath) updates.avatar_path = newAvatarPath;
+            if (newCoverPath) updates.cover_path = newCoverPath;
+
+            console.log('[edit-artist-profile] Updating profile:', profile.id, updates);
+            const updated = await updateProfile(profile.id, updates);
+            console.log('[edit-artist-profile] Update result:', updated);
+
             if (updated) {
                 await refreshProfile();
                 const msg = 'Profile updated successfully!';
@@ -181,9 +191,9 @@ export default function EditArtistProfileScreen() {
                 const msg = 'Failed to update profile. Please try again.';
                 Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('[edit-artist-profile] save error:', err);
-            const msg = 'An unexpected error occurred.';
+            const msg = `Error: ${err?.message || 'An unexpected error occurred.'}`;
             Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
         } finally {
             setSaving(false);
