@@ -8,7 +8,8 @@
  * and log success/failure to console.
  */
 
-const RESEND_API_KEY = process.env.EXPO_PUBLIC_RESEND_API_KEY || '';
+// Read from env; the EXPO_PUBLIC_ prefix means Expo injects it at build time
+const RESEND_API_KEY = process.env.EXPO_PUBLIC_RESEND_API_KEY ?? '';
 const FROM_ADDRESS = 'MU6 <onboarding@resend.dev>';
 
 // ────────────────────────────────────────────
@@ -17,10 +18,11 @@ const FROM_ADDRESS = 'MU6 <onboarding@resend.dev>';
 
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
     if (!RESEND_API_KEY) {
-        console.warn('[email] EXPO_PUBLIC_RESEND_API_KEY not set — skipping email to:', to);
+        console.warn('[email] EXPO_PUBLIC_RESEND_API_KEY is empty! Check your .env file and restart Metro.');
+        console.warn('[email] Current value:', JSON.stringify(RESEND_API_KEY));
         return false;
     }
-    console.log('[email] Attempting to send email to:', to, '| Subject:', subject);
+    console.log('[email] Sending to:', to, '| Subject:', subject, '| Key prefix:', RESEND_API_KEY.substring(0, 6) + '...');
     try {
         const res = await fetch('https://api.resend.com/emails', {
             method: 'POST',
@@ -32,13 +34,16 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
         });
         const data = await res.json();
         if (data.id) {
-            console.log('[email] Sent successfully:', data.id);
+            console.log('[email] ✅ Sent successfully! ID:', data.id);
             return true;
         }
-        console.warn('[email] API response (not sent):', JSON.stringify(data));
+        // Resend returns specific error messages
+        console.warn('[email] ❌ Resend API rejected:', JSON.stringify(data));
+        // Common: "You can only send testing emails to your own email address"
+        // Fix: verify a domain at resend.com/domains
         return false;
     } catch (err) {
-        console.error('[email] Network/fetch error:', err);
+        console.error('[email] ❌ Network error:', err);
         return false;
     }
 }
