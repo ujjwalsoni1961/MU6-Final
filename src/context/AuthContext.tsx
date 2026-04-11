@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { useActiveAccount, useActiveWallet, useDisconnect } from 'thirdweb/react';
+import { useActiveAccount, useActiveWallet, useDisconnect, useIsAutoConnecting } from 'thirdweb/react';
 import { supabase, syncWalletProfile } from '../lib/supabase';
 
 // ── Types ──
@@ -34,6 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const account = useActiveAccount();
     const wallet = useActiveWallet();
     const { disconnect } = useDisconnect();
+    const isAutoConnecting = useIsAutoConnecting();
 
     const [profile, setProfile] = useState<UserProfile | null>(null);
     // BUG FIX #2: isLoading starts TRUE so that the root router
@@ -140,11 +141,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (walletAddress) {
             syncProfile(walletAddress);
-        } else {
+        } else if (!isAutoConnecting) {
+            // Only clear state if Thirdweb is done trying to auto-reconnect.
+            // Without this check, a page refresh clears the wallet state before
+            // Thirdweb has a chance to restore the session from localStorage.
             setProfile(null);
             setIsLoading(false);
         }
-    }, [walletAddress, syncProfile]);
+        // Keep isLoading=true while auto-connecting with no wallet yet
+    }, [walletAddress, syncProfile, isAutoConnecting]);
 
     return (
         <AuthContext.Provider

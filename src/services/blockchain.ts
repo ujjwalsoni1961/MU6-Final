@@ -743,22 +743,19 @@ export async function mintToken(
     account?: Account,
 ): Promise<{ success: boolean; tokenId?: string; error?: string }> {
     try {
-        const { data: release } = await supabase
-            .from('nft_releases')
-            .select('*')
-            .eq('id', releaseId)
-            .maybeSingle();
+        // Parallelize: fetch release data + supply check + on-chain totalSupply simultaneously
+        const [releaseResult, supplyCheckResult, onChainSupply] = await Promise.all([
+            supabase.from('nft_releases').select('*').eq('id', releaseId).maybeSingle(),
+            supabase.rpc('check_nft_supply', { p_release_id: releaseId }).maybeSingle(),
+            isContractReady() ? getTotalSupply().catch(() => null) : Promise.resolve(null),
+        ]);
 
+        const release = releaseResult.data;
         if (!release) return { success: false, error: 'Release not found' };
 
-        // Atomic supply check: use RPC that checks minted_count < total_supply in a single query.
-        // This prevents race conditions where two concurrent buyers both pass the check.
-        const { data: canMint, error: supplyCheckErr } = await supabase
-            .rpc('check_nft_supply', { p_release_id: releaseId })
-            .maybeSingle();
-
+        // Supply check
+        const { data: canMint, error: supplyCheckErr } = supplyCheckResult;
         if (supplyCheckErr || !canMint?.can_mint) {
-            // Fallback to non-atomic check if RPC not available
             if (supplyCheckErr) {
                 console.warn('[blockchain] check_nft_supply RPC not available, using fallback:', supplyCheckErr.message);
                 if (release.minted_count >= release.total_supply) {
@@ -769,21 +766,14 @@ export async function mintToken(
             }
         }
 
-        // The on-chain token ID is determined by totalSupply() BEFORE claiming.
-        // DropERC721 uses 0-based sequential IDs: first claimed = 0, second = 1, etc.
-        // We read it before claim so we know exactly which token ID was assigned.
-        let onChainTokenId: string | null = null;
-        let paidOnChain = false;           // Only true if buyer actually paid
+        let onChainTokenId: string | null = onChainSupply !== null ? onChainSupply.toString() : null;
+        if (onChainTokenId) console.log('[blockchain] on-chain totalSupply for token ID:', onChainTokenId);
+
+        let paidOnChain = false;
         let confirmedPriceWei: bigint = BigInt(0);
         let paymentTxHash: string | null = null;
 
         // ── PAYMENT-FIRST PURCHASE FLOW ──
-        // The on-chain `claim` function requires admin-set claim conditions which
-        // we cannot modify (server wallet lacks DEFAULT_ADMIN_ROLE). Instead:
-        // 1. Buyer sends the NFT price (from DB) directly to the server wallet
-        // 2. NFT ownership is recorded in the database
-        // 3. Server wallet transfers the artist's share to their wallet
-        // On-chain NFT claiming can be re-enabled once admin access is restored.
         const releasePriceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
 
         if (releasePriceWei > BigInt(0) && !account) {
@@ -791,17 +781,6 @@ export async function mintToken(
                 success: false,
                 error: 'Wallet not connected. Please connect your wallet to purchase this NFT.',
             };
-        }
-
-        // Read on-chain totalSupply for token ID assignment (read-only, always works)
-        if (isContractReady()) {
-            try {
-                const supply = await getTotalSupply();
-                onChainTokenId = supply.toString();
-                console.log('[blockchain] on-chain totalSupply for token ID:', onChainTokenId);
-            } catch (supplyErr) {
-                console.warn('[blockchain] Could not read totalSupply:', supplyErr);
-            }
         }
 
         // Buyer sends POL to the server wallet as payment
@@ -828,38 +807,36 @@ export async function mintToken(
             }
         }
 
-        // ── On-chain minting via server wallet ──
-        // After buyer pays, mint an actual on-chain ERC-721 token to their wallet.
-        // The server wallet has MINTER_ROLE and pays the on-chain claim price from its balance.
-        // This is best-effort: if it fails, DB record still gets created.
-        let mintTxHash: string | null = paymentTxHash;
-        if (isContractReady() && paidOnChain) {
-            try {
-                console.log('[blockchain] Minting on-chain token to', buyerWallet);
-                const claimResult = await serverClaim(
-                    buyerWallet,
-                    '0', // on-chain price = 0 since buyer already paid the server wallet
-                    release.contract_address || CONTRACTS.SONG_NFT,
-                );
-                if (claimResult.success && claimResult.txHash) {
-                    mintTxHash = claimResult.txHash;
-                    console.log('[blockchain] On-chain mint succeeded, tx:', mintTxHash);
-                    // Re-read totalSupply to get the actual minted token ID
-                    try {
-                        const newSupply = await getTotalSupply();
-                        onChainTokenId = (newSupply - BigInt(1)).toString();
-                        console.log('[blockchain] On-chain token ID after mint:', onChainTokenId);
-                    } catch {}
-                } else {
-                    console.warn('[blockchain] On-chain mint failed (non-blocking):', claimResult.error);
-                }
-            } catch (mintErr) {
-                console.warn('[blockchain] On-chain mint call failed (non-blocking):', mintErr);
-            }
-        }
-
         // Use on-chain token ID if available, otherwise fall back to minted_count (0-based)
         const tokenId = onChainTokenId || `${release.minted_count}`;
+        let mintTxHash: string | null = paymentTxHash;
+
+        // ── On-chain minting via server wallet (fire-and-forget) ──
+        // After buyer pays, mint an actual on-chain ERC-721 token to their wallet.
+        // The server wallet has MINTER_ROLE and pays the on-chain claim price from its balance.
+        // This runs in the background so the user gets instant purchase confirmation.
+        if (isContractReady() && paidOnChain) {
+            serverClaim(
+                buyerWallet,
+                '0', // on-chain price = 0 since buyer already paid the server wallet
+                release.contract_address || CONTRACTS.SONG_NFT,
+            ).then((claimResult) => {
+                if (claimResult.success && claimResult.txHash) {
+                    console.log('[blockchain] Background on-chain mint succeeded, tx:', claimResult.txHash);
+                    // Update the DB record with the mint tx hash
+                    supabase
+                        .from('nft_tokens')
+                        .update({ mint_tx_hash: claimResult.txHash })
+                        .eq('nft_release_id', releaseId)
+                        .eq('token_id', tokenId)
+                        .then(() => {});
+                } else {
+                    console.warn('[blockchain] Background on-chain mint failed:', claimResult.error);
+                }
+            }).catch((mintErr) => {
+                console.warn('[blockchain] Background on-chain mint call failed:', mintErr);
+            });
+        }
 
         // Create token record in Supabase (idempotent: ON CONFLICT DO NOTHING)
         // If a previous attempt already created the row (e.g. on-chain succeeded,
