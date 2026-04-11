@@ -5,12 +5,25 @@ import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/a
 import { ToggleSwitch, RowActions } from '../../src/components/admin/AdminActionComponents';
 import { useAdminNFTReleases } from '../../src/hooks/useAdminData';
 import { useAdminNFTReleaseActions } from '../../src/hooks/useAdminActions';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
 export default function AdminNFTReleasesScreen() {
     const { data: releases, loading, error, refresh } = useAdminNFTReleases();
     const actions = useAdminNFTReleaseActions(refresh);
+    const { colors } = useTheme();
+
+    const nftColumns = [
+        { label: 'Song', flex: 1.2 },
+        { label: 'Artist', flex: 1 },
+        { label: 'Tier', flex: 0.7 },
+        { label: 'Rarity', flex: 0.7 },
+        { label: 'Minted', flex: 0.7 },
+        { label: 'Price', flex: 0.7 },
+        { label: 'Status', flex: 0.7 },
+        { label: 'Actions', flex: 0.8 },
+    ];
 
     return (
         <AdminScreen
@@ -22,8 +35,10 @@ export default function AdminNFTReleasesScreen() {
         >
             <AdminDataTable
                 headers={['Song', 'Artist', 'Tier', 'Rarity', 'Minted', 'Price', 'Status', 'Actions']}
+                columns={nftColumns}
                 data={releases}
                 emptyMessage="No NFT releases found"
+                minTableWidth={900}
                 renderRow={(r) => (
                     <View style={{
                         flexDirection: isWeb ? 'row' : 'column',
@@ -32,29 +47,29 @@ export default function AdminNFTReleasesScreen() {
                     }}>
                         {isWeb ? (
                             <>
-                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center' }}>
                                     <Disc3 size={16} color="#f59e0b" style={{ marginRight: 10 }} />
-                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{r.songTitle}</Text>
+                                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>{r.songTitle}</Text>
                                 </View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{r.artistName}</Text>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{r.tierName}</Text>
-                                <View style={{ flex: 1 }}><StatusBadge status={r.rarity} /></View>
-                                <Text style={{ flex: 1, color: '#38b4ba', fontSize: 12, fontWeight: '600' }}>
+                                <Text style={{ flex: 1, color: colors.text.secondary, fontSize: 12 }} numberOfLines={1}>{r.artistName}</Text>
+                                <Text style={{ flex: 0.7, color: colors.text.secondary, fontSize: 12 }}>{r.tierName}</Text>
+                                <View style={{ flex: 0.7 }}><StatusBadge status={r.rarity} /></View>
+                                <Text style={{ flex: 0.7, color: colors.accent.cyan, fontSize: 12, fontWeight: '600' }}>
                                     {r.mintedCount}/{r.totalSupply}
                                 </Text>
-                                <Text style={{ flex: 1, color: '#facc15', fontSize: 12, fontWeight: '600' }}>
+                                <Text style={{ flex: 0.7, color: colors.status.warning, fontSize: 12, fontWeight: '600' }}>
                                     {r.priceEth ? `${r.priceEth} ETH` : 'Free'}
                                 </Text>
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 0.7 }}>
                                     <StatusBadge status={r.isActive ? 'active' : 'delisted'} />
                                 </View>
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 0.8 }}>
                                     <RowActions>
                                         <ToggleSwitch
                                             value={r.isActive}
                                             onToggle={() => actions.toggleActive(r.id, r.isActive)}
                                             label="Active"
-                                            activeColor="#4ade80"
+                                            activeColor={colors.status.success}
                                         />
                                     </RowActions>
                                 </View>
@@ -64,14 +79,14 @@ export default function AdminNFTReleasesScreen() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                                     <Disc3 size={18} color="#f59e0b" style={{ marginRight: 10 }} />
                                     <View style={{ flex: 1 }}>
-                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14 }}>{r.songTitle}</Text>
-                                        <Text style={{ color: '#64748b', fontSize: 12 }}>{r.artistName} | {r.tierName}</Text>
+                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{r.songTitle}</Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12 }}>{r.artistName} | {r.tierName}</Text>
                                     </View>
                                     <StatusBadge status={r.rarity} />
                                 </View>
-                                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8 }}>
-                                    <Text style={{ color: '#38b4ba', fontSize: 12 }}>{r.mintedCount}/{r.totalSupply} minted</Text>
-                                    <Text style={{ color: '#facc15', fontSize: 12 }}>{r.priceEth ? `${r.priceEth} ETH` : 'Free'}</Text>
+                                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+                                    <Text style={{ color: colors.accent.cyan, fontSize: 12 }}>{r.mintedCount}/{r.totalSupply} minted</Text>
+                                    <Text style={{ color: colors.status.warning, fontSize: 12 }}>{r.priceEth ? `${r.priceEth} ETH` : 'Free'}</Text>
                                     <StatusBadge status={r.isActive ? 'active' : 'delisted'} />
                                 </View>
                                 <RowActions>

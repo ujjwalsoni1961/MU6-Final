@@ -5,6 +5,7 @@ import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/a
 import { ActionButton, ConfirmModal, RowActions } from '../../src/components/admin/AdminActionComponents';
 import { useAdminNFTTokens } from '../../src/hooks/useAdminData';
 import { useAdminNFTTokenActions } from '../../src/hooks/useAdminActions';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -13,6 +14,7 @@ export default function AdminNFTTokensScreen() {
     const actions = useAdminNFTTokenActions(refresh);
     const [voidTarget, setVoidTarget] = useState<{ id: string; tokenId: string } | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    const { colors } = useTheme();
 
     const handleVoid = async () => {
         if (!voidTarget) return;
@@ -21,6 +23,16 @@ export default function AdminNFTTokensScreen() {
         setActionLoading(false);
         setVoidTarget(null);
     };
+
+    const tokenColumns = [
+        { label: 'Song', flex: 1.2 },
+        { label: 'Tier', flex: 0.7 },
+        { label: 'Rarity', flex: 0.7 },
+        { label: 'Token ID', flex: 0.8 },
+        { label: 'Owner', flex: 1 },
+        { label: 'Status', flex: 0.7 },
+        { label: 'Actions', flex: 0.7 },
+    ];
 
     return (
         <AdminScreen
@@ -32,8 +44,10 @@ export default function AdminNFTTokensScreen() {
         >
             <AdminDataTable
                 headers={['Song', 'Tier', 'Rarity', 'Token ID', 'Owner', 'Status', 'Actions']}
+                columns={tokenColumns}
                 data={tokens}
                 emptyMessage="No NFT tokens found"
+                minTableWidth={850}
                 renderRow={(t) => (
                     <View style={{
                         flexDirection: isWeb ? 'row' : 'column',
@@ -43,26 +57,26 @@ export default function AdminNFTTokensScreen() {
                     }}>
                         {isWeb ? (
                             <>
-                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                                    <Tag size={16} color={t.isVoided ? '#f87171' : '#4ade80'} style={{ marginRight: 10 }} />
-                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{t.songTitle}</Text>
+                                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center' }}>
+                                    <Tag size={16} color={t.isVoided ? colors.status.error : colors.status.success} style={{ marginRight: 10 }} />
+                                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>{t.songTitle}</Text>
                                 </View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{t.tierName}</Text>
-                                <View style={{ flex: 1 }}><StatusBadge status={t.rarity} /></View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12, fontFamily: 'monospace' }}>#{t.onChainTokenId || '—'}</Text>
-                                <Text style={{ flex: 1, color: '#475569', fontSize: 11, fontFamily: 'monospace' }}>
+                                <Text style={{ flex: 0.7, color: colors.text.secondary, fontSize: 12 }}>{t.tierName}</Text>
+                                <View style={{ flex: 0.7 }}><StatusBadge status={t.rarity} /></View>
+                                <Text style={{ flex: 0.8, color: colors.text.secondary, fontSize: 12, fontFamily: 'monospace' }}>#{t.onChainTokenId || '—'}</Text>
+                                <Text style={{ flex: 1, color: colors.text.muted, fontSize: 11, fontFamily: 'monospace' }}>
                                     {t.ownerWallet ? `${t.ownerWallet.slice(0, 6)}...${t.ownerWallet.slice(-4)}` : '—'}
                                 </Text>
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 0.7 }}>
                                     <StatusBadge status={t.isVoided ? 'voided' : 'active'} />
                                 </View>
-                                <View style={{ flex: 1 }}>
+                                <View style={{ flex: 0.7 }}>
                                     <RowActions>
                                         {!t.isVoided && (
                                             <ActionButton
-                                                icon={<Ban size={12} color="#f87171" />}
+                                                icon={<Ban size={12} color={colors.status.error} />}
                                                 label="Void"
-                                                color="#f87171"
+                                                color={colors.status.error}
                                                 onPress={() => setVoidTarget({ id: t.id, tokenId: t.onChainTokenId })}
                                             />
                                         )}
@@ -72,22 +86,22 @@ export default function AdminNFTTokensScreen() {
                         ) : (
                             <>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                                    <Tag size={18} color={t.isVoided ? '#f87171' : '#4ade80'} style={{ marginRight: 10 }} />
+                                    <Tag size={18} color={t.isVoided ? colors.status.error : colors.status.success} style={{ marginRight: 10 }} />
                                     <View style={{ flex: 1 }}>
-                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14 }}>{t.songTitle}</Text>
-                                        <Text style={{ color: '#64748b', fontSize: 12 }}>{t.tierName} | #{t.onChainTokenId}</Text>
+                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{t.songTitle}</Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12 }}>{t.tierName} | #{t.onChainTokenId}</Text>
                                     </View>
                                     <StatusBadge status={t.isVoided ? 'voided' : t.rarity} />
                                 </View>
                                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <Text style={{ color: '#475569', fontSize: 11 }}>
+                                    <Text style={{ color: colors.text.muted, fontSize: 11 }}>
                                         Owner: {t.ownerWallet ? `${t.ownerWallet.slice(0, 8)}...` : '—'}
                                     </Text>
                                     {!t.isVoided && (
                                         <ActionButton
-                                            icon={<Ban size={12} color="#f87171" />}
+                                            icon={<Ban size={12} color={colors.status.error} />}
                                             label="Void"
-                                            color="#f87171"
+                                            color={colors.status.error}
                                             onPress={() => setVoidTarget({ id: t.id, tokenId: t.onChainTokenId })}
                                         />
                                     )}

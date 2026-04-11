@@ -1,8 +1,8 @@
 import React from 'react';
 import { View, Text, Platform } from 'react-native';
-import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
-import { FileCode, ExternalLink } from 'lucide-react-native';
+import { FileCode } from 'lucide-react-native';
 import { AdminScreen } from '../../src/components/admin/AdminScreenWrapper';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -21,42 +21,44 @@ const contracts: ContractInfo[] = [
 ];
 
 function ContractCard({ contract }: { contract: ContractInfo }) {
+    const { colors } = useTheme();
+
     return (
         <View
             style={{
                 padding: isWeb ? 24 : 16,
                 borderRadius: 16,
-                backgroundColor: '#0f1724',
+                backgroundColor: colors.bg.card,
                 borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.06)',
+                borderColor: colors.border.glass,
                 marginBottom: 12,
             }}
         >
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                 <View style={{
                     width: 44, height: 44, borderRadius: 22,
-                    backgroundColor: 'rgba(56,180,186,0.1)',
+                    backgroundColor: `${colors.accent.cyan}15`,
                     alignItems: 'center', justifyContent: 'center', marginRight: 12,
                 }}>
-                    <FileCode size={20} color="#38b4ba" />
+                    <FileCode size={20} color={colors.accent.cyan} />
                 </View>
                 <View style={{ flex: 1 }}>
-                    <Text style={{ color: '#f1f5f9', fontWeight: '700', fontSize: 16 }}>{contract.name}</Text>
-                    <Text style={{ color: '#64748b', fontSize: 12 }}>{contract.subtitle}</Text>
+                    <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 16 }}>{contract.name}</Text>
+                    <Text style={{ color: colors.text.secondary, fontSize: 12 }}>{contract.subtitle}</Text>
                 </View>
             </View>
             <View style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.muted, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>
                     Contract Address
                 </Text>
-                <Text style={{ color: '#94a3b8', fontSize: 13, fontFamily: isWeb ? 'monospace' : undefined }}>{contract.address}</Text>
+                <Text style={{ color: colors.text.secondary, fontSize: 13, fontFamily: isWeb ? 'monospace' : undefined }}>{contract.address}</Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{ backgroundColor: 'rgba(56,180,186,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ color: '#38b4ba', fontSize: 11, fontWeight: '600' }}>{contract.network}</Text>
+                <View style={{ backgroundColor: `${colors.accent.cyan}15`, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ color: colors.accent.cyan, fontSize: 11, fontWeight: '600' }}>{contract.network}</Text>
                 </View>
-                <View style={{ backgroundColor: 'rgba(34,197,94,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
-                    <Text style={{ color: '#4ade80', fontSize: 11, fontWeight: '600' }}>{contract.status}</Text>
+                <View style={{ backgroundColor: `${colors.status.success}15`, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
+                    <Text style={{ color: colors.status.success, fontSize: 11, fontWeight: '600' }}>{contract.status}</Text>
                 </View>
             </View>
         </View>

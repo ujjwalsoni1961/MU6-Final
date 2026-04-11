@@ -11,8 +11,11 @@ import {
 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { useNotifications, useUnreadNotificationCount } from '../../hooks/useData';
 import AnimatedPressable from '../shared/AnimatedPressable';
+
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 
 interface MobileHeaderProps {
     scrollY?: Animated.Value;
@@ -50,7 +53,13 @@ export default function MobileHeader({ scrollY }: MobileHeaderProps) {
     const { colors, isDark } = useTheme();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { profile } = useAuth();
     const { data: unreadCount } = useUnreadNotificationCount();
+
+    // Build avatar URL from profile
+    const avatarUrl = profile?.avatarPath
+        ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`
+        : null;
     const { data: notifications, loading: notifLoading, markAllRead } = useNotifications(20);
 
     const headerHeight = insets.top + 56;
@@ -220,11 +229,23 @@ export default function MobileHeader({ scrollY }: MobileHeaderProps) {
                             borderColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)',
                         }}
                     >
-                        <Image
-                            source={{ uri: 'https://picsum.photos/seed/user-avatar/200/200' }}
-                            style={{ width: '100%', height: '100%' }}
-                            contentFit="cover"
-                        />
+                        {avatarUrl ? (
+                            <Image
+                                source={{ uri: avatarUrl }}
+                                style={{ width: '100%', height: '100%' }}
+                                contentFit="cover"
+                            />
+                        ) : (
+                            <View style={{
+                                width: '100%', height: '100%',
+                                backgroundColor: 'rgba(56,180,186,0.15)',
+                                alignItems: 'center', justifyContent: 'center',
+                            }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#38b4ba' }}>
+                                    {profile?.displayName?.charAt(0)?.toUpperCase() || '?'}
+                                </Text>
+                            </View>
+                        )}
                     </AnimatedPressable>
                 </View>
             </Animated.View>

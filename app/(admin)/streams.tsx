@@ -3,6 +3,7 @@ import { View, Text, Platform } from 'react-native';
 import { Radio } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
 import { useAdminStreams } from '../../src/hooks/useAdminData';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -15,6 +16,7 @@ function formatDuration(seconds: number): string {
 
 export default function AdminStreamsScreen() {
     const { data: streams, loading, error, refresh } = useAdminStreams(100);
+    const { colors } = useTheme();
 
     return (
         <AdminScreen
@@ -37,24 +39,24 @@ export default function AdminStreamsScreen() {
                         {isWeb ? (
                             <>
                                 <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                                    <Radio size={16} color="#38b4ba" style={{ marginRight: 10 }} />
-                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{s.songTitle}</Text>
+                                    <Radio size={16} color={colors.accent.cyan} style={{ marginRight: 10 }} />
+                                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>{s.songTitle}</Text>
                                 </View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{s.listenerName}</Text>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{formatDuration(s.durationSeconds)}</Text>
+                                <Text style={{ flex: 1, color: colors.text.secondary, fontSize: 12 }} numberOfLines={1}>{s.listenerName}</Text>
+                                <Text style={{ flex: 1, color: colors.text.secondary, fontSize: 12 }}>{formatDuration(s.durationSeconds)}</Text>
                                 <View style={{ flex: 1 }}>
                                     <StatusBadge status={s.isQualified ? 'active' : 'pending'} />
                                 </View>
-                                <Text style={{ flex: 1, color: '#475569', fontSize: 12 }}>
+                                <Text style={{ flex: 1, color: colors.text.muted, fontSize: 12 }}>
                                     {s.startedAt ? new Date(s.startedAt).toLocaleString() : '—'}
                                 </Text>
                             </>
                         ) : (
                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                <Radio size={18} color="#38b4ba" style={{ marginRight: 10 }} />
+                                <Radio size={18} color={colors.accent.cyan} style={{ marginRight: 10 }} />
                                 <View style={{ flex: 1 }}>
-                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14 }}>{s.songTitle}</Text>
-                                    <Text style={{ color: '#64748b', fontSize: 12 }}>
+                                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{s.songTitle}</Text>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 12 }}>
                                         {s.listenerName} | {formatDuration(s.durationSeconds)}
                                     </Text>
                                 </View>

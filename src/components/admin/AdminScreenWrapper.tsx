@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, ScrollView, Platform, ActivityIndicator, TextInput } from 'react-native';
-import { Search, RefreshCw } from 'lucide-react-native';
+import { Search, RefreshCw, Inbox } from 'lucide-react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
+import { useTheme } from '../../context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -23,8 +24,10 @@ export function AdminScreen({
     onRetry?: () => void;
     rightAction?: React.ReactNode;
 }) {
+    const { colors } = useTheme();
+
     return (
-        <View style={{ flex: 1, backgroundColor: '#030711' }}>
+        <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
             <ScrollView
                 style={{ flex: 1 }}
                 contentContainerStyle={{ padding: isWeb ? 32 : 16, paddingBottom: 60 }}
@@ -32,31 +35,31 @@ export function AdminScreen({
             >
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
                     <View>
-                        <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: '#f1f5f9', letterSpacing: -1 }}>
+                        <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
                             {title}
                         </Text>
                         {subtitle ? (
-                            <Text style={{ fontSize: 14, color: '#64748b', marginTop: 4 }}>{subtitle}</Text>
+                            <Text style={{ fontSize: 14, color: colors.text.secondary, marginTop: 4 }}>{subtitle}</Text>
                         ) : null}
                     </View>
                     {rightAction || (onRetry ? (
                         <AnimatedPressable preset="icon" hapticType="none" onPress={onRetry} style={{ padding: 8 }}>
-                            <RefreshCw size={18} color="#64748b" />
+                            <RefreshCw size={18} color={colors.text.secondary} />
                         </AnimatedPressable>
                     ) : null)}
                 </View>
 
                 {loading ? (
                     <View style={{ padding: 60, alignItems: 'center' }}>
-                        <ActivityIndicator size="large" color="#38b4ba" />
+                        <ActivityIndicator size="large" color={colors.accent.cyan} />
                     </View>
                 ) : error ? (
                     <View style={{ padding: 40, alignItems: 'center' }}>
-                        <Text style={{ color: '#f87171', fontSize: 14, marginBottom: 12 }}>{error}</Text>
+                        <Text style={{ color: colors.status.error, fontSize: 14, marginBottom: 12 }}>{error}</Text>
                         {onRetry && (
                             <AnimatedPressable preset="card" hapticType="none" onPress={onRetry}
-                                style={{ backgroundColor: 'rgba(56,180,186,0.1)', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 }}>
-                                <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Retry</Text>
+                                style={{ backgroundColor: `${colors.accent.cyan}15`, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10 }}>
+                                <Text style={{ color: colors.accent.cyan, fontWeight: '600' }}>Retry</Text>
                             </AnimatedPressable>
                         )}
                     </View>
@@ -76,22 +79,24 @@ export function AdminSearchBar({
     onChangeText: (text: string) => void;
     placeholder?: string;
 }) {
+    const { colors } = useTheme();
+
     return (
         <View style={{
             flexDirection: 'row', alignItems: 'center',
-            backgroundColor: 'rgba(255,255,255,0.04)',
+            backgroundColor: colors.bg.glass,
             borderRadius: 12, borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.08)',
+            borderColor: colors.border.glass,
             paddingHorizontal: 14, marginBottom: 20,
         }}>
-            <Search size={16} color="#475569" />
+            <Search size={16} color={colors.text.muted} />
             <TextInput
                 value={value}
                 onChangeText={onChangeText}
                 placeholder={placeholder}
-                placeholderTextColor="#475569"
+                placeholderTextColor={colors.text.muted}
                 style={{
-                    flex: 1, padding: 12, color: '#f1f5f9', fontSize: 14,
+                    flex: 1, padding: 12, color: colors.text.primary, fontSize: 14,
                     ...(isWeb ? { outlineStyle: 'none' } as any : {}),
                 }}
             />
@@ -109,6 +114,8 @@ export function AdminFilterPills({
     selected: string;
     onSelect: (value: string) => void;
 }) {
+    const { colors } = useTheme();
+
     return (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
             {options.map((opt) => {
@@ -122,12 +129,12 @@ export function AdminFilterPills({
                         style={{
                             paddingHorizontal: 14, paddingVertical: 8,
                             borderRadius: 20,
-                            backgroundColor: active ? 'rgba(56,180,186,0.15)' : 'rgba(255,255,255,0.04)',
+                            backgroundColor: active ? `${colors.accent.cyan}15` : colors.bg.glass,
                             borderWidth: 1,
-                            borderColor: active ? 'rgba(56,180,186,0.3)' : 'rgba(255,255,255,0.08)',
+                            borderColor: active ? `${colors.accent.cyan}30` : colors.border.glass,
                         }}
                     >
-                        <Text style={{ color: active ? '#38b4ba' : '#94a3b8', fontSize: 12, fontWeight: '600' }}>
+                        <Text style={{ color: active ? colors.accent.cyan : colors.text.secondary, fontSize: 12, fontWeight: '600' }}>
                             {opt.label}
                         </Text>
                     </AnimatedPressable>
@@ -137,50 +144,80 @@ export function AdminFilterPills({
     );
 }
 
+/* ─── Column width config ─── */
+export interface ColumnConfig {
+    label: string;
+    flex?: number;
+    width?: number;
+    minWidth?: number;
+}
+
 /* ─── Data table ─── */
 export function AdminDataTable({
     headers,
+    columns,
     data,
     renderRow,
     emptyMessage = 'No data found',
+    minTableWidth,
 }: {
     headers: string[];
+    columns?: ColumnConfig[];
     data: any[];
     renderRow: (item: any, index: number) => React.ReactNode;
     emptyMessage?: string;
+    minTableWidth?: number;
 }) {
+    const { colors } = useTheme();
+
     if (data.length === 0) {
         return (
-            <View style={{ padding: 40, alignItems: 'center' }}>
-                <Text style={{ color: '#475569', fontSize: 14 }}>{emptyMessage}</Text>
+            <View style={{
+                padding: 60, alignItems: 'center',
+                backgroundColor: colors.bg.card,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: colors.border.glass,
+            }}>
+                <Inbox size={32} color={colors.text.muted} style={{ marginBottom: 12 }} />
+                <Text style={{ color: colors.text.muted, fontSize: 14 }}>{emptyMessage}</Text>
             </View>
         );
     }
 
-    return (
+    const resolvedColumns: ColumnConfig[] = columns || headers.map((h) => ({ label: h }));
+
+    const tableContent = (
         <View style={{
             borderRadius: 16,
-            backgroundColor: '#0f1724',
+            backgroundColor: colors.bg.card,
             borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.06)',
+            borderColor: colors.border.glass,
             overflow: 'hidden',
+            ...(minTableWidth && isWeb ? { minWidth: minTableWidth } : {}),
         }}>
             {/* Header */}
             {isWeb && (
                 <View style={{
                     flexDirection: 'row',
-                    paddingHorizontal: 16,
+                    paddingHorizontal: 14,
                     paddingVertical: 12,
-                    backgroundColor: 'rgba(255,255,255,0.02)',
+                    backgroundColor: colors.bg.glass,
                     borderBottomWidth: 1,
-                    borderBottomColor: 'rgba(255,255,255,0.06)',
+                    borderBottomColor: colors.border.glass,
                 }}>
-                    {headers.map((h) => (
-                        <Text key={h} style={{
-                            flex: 1, color: '#475569', fontSize: 11,
-                            fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1,
+                    {resolvedColumns.map((col, i) => (
+                        <Text key={i} style={{
+                            flex: col.flex ?? 1,
+                            ...(col.width ? { width: col.width, flex: undefined as any } : {}),
+                            ...(col.minWidth ? { minWidth: col.minWidth } : {}),
+                            color: colors.text.muted,
+                            fontSize: 11,
+                            fontWeight: '700',
+                            textTransform: 'uppercase',
+                            letterSpacing: 1,
                         }}>
-                            {h}
+                            {col.label}
                         </Text>
                     ))}
                 </View>
@@ -189,13 +226,23 @@ export function AdminDataTable({
             {data.map((item, i) => (
                 <View key={item.id || i} style={{
                     borderBottomWidth: i < data.length - 1 ? 1 : 0,
-                    borderBottomColor: 'rgba(255,255,255,0.04)',
+                    borderBottomColor: colors.border.base,
                 }}>
                     {renderRow(item, i)}
                 </View>
             ))}
         </View>
     );
+
+    if (minTableWidth && isWeb) {
+        return (
+            <ScrollView horizontal showsHorizontalScrollIndicator style={{ marginBottom: 4 }}>
+                {tableContent}
+            </ScrollView>
+        );
+    }
+
+    return tableContent;
 }
 
 /* ─── Stat card for dashboard ─── */
@@ -210,6 +257,8 @@ export function AdminStatCard({
     icon: React.ReactNode;
     accent?: string;
 }) {
+    const { colors } = useTheme();
+
     return (
         <View
             style={{
@@ -218,17 +267,17 @@ export function AdminStatCard({
                 margin: 6,
                 padding: isWeb ? 20 : 16,
                 borderRadius: 16,
-                backgroundColor: '#0f1724',
+                backgroundColor: colors.bg.card,
                 borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.06)',
+                borderColor: colors.border.glass,
             }}
         >
             <View style={{ marginBottom: 12 }}>{icon}</View>
-            <Text style={{ fontSize: isWeb ? 28 : 22, fontWeight: '800', color: '#f1f5f9' }}>
+            <Text style={{ fontSize: isWeb ? 28 : 22, fontWeight: '800', color: colors.text.primary }}>
                 {value}
             </Text>
             <Text style={{
-                fontSize: 10, fontWeight: '700', color: '#475569',
+                fontSize: 10, fontWeight: '700', color: colors.text.muted,
                 textTransform: 'uppercase', letterSpacing: 1.5, marginTop: 4,
             }}>
                 {title}
@@ -292,6 +341,7 @@ export function AdminPagination({
     onPrev: () => void;
     onNext: () => void;
 }) {
+    const { colors } = useTheme();
     const currentPage = Math.floor(offset / limit) + 1;
     const totalPages = Math.ceil(total / limit);
 
@@ -304,13 +354,13 @@ export function AdminPagination({
                 onPress={onPrev}
                 style={{
                     paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10,
-                    backgroundColor: offset > 0 ? 'rgba(56,180,186,0.1)' : 'rgba(255,255,255,0.02)',
+                    backgroundColor: offset > 0 ? `${colors.accent.cyan}15` : colors.bg.glass,
                     opacity: offset > 0 ? 1 : 0.4,
                 }}
             >
-                <Text style={{ color: '#38b4ba', fontSize: 13, fontWeight: '600' }}>Previous</Text>
+                <Text style={{ color: colors.accent.cyan, fontSize: 13, fontWeight: '600' }}>Previous</Text>
             </AnimatedPressable>
-            <Text style={{ color: '#64748b', fontSize: 13 }}>
+            <Text style={{ color: colors.text.secondary, fontSize: 13 }}>
                 Page {currentPage} of {totalPages}
             </Text>
             <AnimatedPressable
@@ -318,11 +368,11 @@ export function AdminPagination({
                 onPress={onNext}
                 style={{
                     paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10,
-                    backgroundColor: offset + limit < total ? 'rgba(56,180,186,0.1)' : 'rgba(255,255,255,0.02)',
+                    backgroundColor: offset + limit < total ? `${colors.accent.cyan}15` : colors.bg.glass,
                     opacity: offset + limit < total ? 1 : 0.4,
                 }}
             >
-                <Text style={{ color: '#38b4ba', fontSize: 13, fontWeight: '600' }}>Next</Text>
+                <Text style={{ color: colors.accent.cyan, fontSize: 13, fontWeight: '600' }}>Next</Text>
             </AnimatedPressable>
         </View>
     );

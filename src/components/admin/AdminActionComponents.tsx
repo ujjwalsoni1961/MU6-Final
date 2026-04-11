@@ -14,6 +14,7 @@ import {
     View, Text, Modal, TextInput, Platform, Animated,
     TouchableOpacity, Switch,
 } from 'react-native';
+import { useTheme } from '../../context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
@@ -37,6 +38,8 @@ export function ConfirmModal({
     onCancel: () => void;
     loading?: boolean;
 }) {
+    const { colors } = useTheme();
+
     return (
         <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
             <View style={{
@@ -44,14 +47,14 @@ export function ConfirmModal({
                 justifyContent: 'center', alignItems: 'center', padding: 20,
             }}>
                 <View style={{
-                    backgroundColor: '#0f1724', borderRadius: 16, padding: 24,
+                    backgroundColor: colors.bg.card, borderRadius: 16, padding: 24,
                     width: isWeb ? 420 : '100%', maxWidth: 420,
-                    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+                    borderWidth: 1, borderColor: colors.border.glass,
                 }}>
-                    <Text style={{ color: '#f1f5f9', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+                    <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
                         {title}
                     </Text>
-                    <Text style={{ color: '#94a3b8', fontSize: 14, lineHeight: 20, marginBottom: 24 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 14, lineHeight: 20, marginBottom: 24 }}>
                         {message}
                     </Text>
                     <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
@@ -60,10 +63,10 @@ export function ConfirmModal({
                             disabled={loading}
                             style={{
                                 paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
-                                backgroundColor: 'rgba(255,255,255,0.06)',
+                                backgroundColor: colors.bg.glass,
                             }}
                         >
-                            <Text style={{ color: '#94a3b8', fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+                            <Text style={{ color: colors.text.secondary, fontWeight: '600', fontSize: 14 }}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={onConfirm}
@@ -134,17 +137,19 @@ export function ToggleSwitch({
     activeColor?: string;
     disabled?: boolean;
 }) {
+    const { colors } = useTheme();
+
     return (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             {label ? (
-                <Text style={{ color: '#94a3b8', fontSize: 11 }}>{label}</Text>
+                <Text style={{ color: colors.text.secondary, fontSize: 11 }}>{label}</Text>
             ) : null}
             <Switch
                 value={value}
                 onValueChange={onToggle}
                 disabled={disabled}
-                trackColor={{ false: '#334155', true: `${activeColor}50` }}
-                thumbColor={value ? activeColor : '#64748b'}
+                trackColor={{ false: colors.text.muted, true: `${activeColor}50` }}
+                thumbColor={value ? activeColor : colors.text.secondary}
                 style={{ transform: [{ scale: 0.75 }] }}
             />
         </View>
@@ -224,6 +229,7 @@ export function BroadcastModal({
     onCancel: () => void;
     loading?: boolean;
 }) {
+    const { colors } = useTheme();
     const [title, setTitle] = useState('');
     const [body, setBody] = useState('');
     const [type, setType] = useState('announcement');
@@ -245,16 +251,16 @@ export function BroadcastModal({
                 justifyContent: 'center', alignItems: 'center', padding: 20,
             }}>
                 <View style={{
-                    backgroundColor: '#0f1724', borderRadius: 16, padding: 24,
+                    backgroundColor: colors.bg.card, borderRadius: 16, padding: 24,
                     width: isWeb ? 480 : '100%', maxWidth: 480,
-                    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+                    borderWidth: 1, borderColor: colors.border.glass,
                 }}>
-                    <Text style={{ color: '#f1f5f9', fontSize: 18, fontWeight: '700', marginBottom: 20 }}>
+                    <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: '700', marginBottom: 20 }}>
                         Broadcast Notification
                     </Text>
 
                     {/* Type selector */}
-                    <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
                         Type
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -264,13 +270,13 @@ export function BroadcastModal({
                                 onPress={() => setType(t)}
                                 style={{
                                     paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
-                                    backgroundColor: type === t ? 'rgba(56,180,186,0.15)' : 'rgba(255,255,255,0.04)',
+                                    backgroundColor: type === t ? `${colors.accent.cyan}15` : colors.bg.glass,
                                     borderWidth: 1,
-                                    borderColor: type === t ? 'rgba(56,180,186,0.3)' : 'rgba(255,255,255,0.08)',
+                                    borderColor: type === t ? `${colors.accent.cyan}30` : colors.border.glass,
                                 }}
                             >
                                 <Text style={{
-                                    color: type === t ? '#38b4ba' : '#94a3b8',
+                                    color: type === t ? colors.accent.cyan : colors.text.secondary,
                                     fontSize: 12, fontWeight: '600', textTransform: 'capitalize',
                                 }}>
                                     {t}
@@ -280,37 +286,37 @@ export function BroadcastModal({
                     </View>
 
                     {/* Title */}
-                    <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
                         Title
                     </Text>
                     <TextInput
                         value={title}
                         onChangeText={setTitle}
                         placeholder="Notification title..."
-                        placeholderTextColor="#475569"
+                        placeholderTextColor={colors.text.muted}
                         style={{
-                            backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10,
-                            borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-                            padding: 12, color: '#f1f5f9', fontSize: 14, marginBottom: 16,
+                            backgroundColor: colors.bg.glass, borderRadius: 10,
+                            borderWidth: 1, borderColor: colors.border.glass,
+                            padding: 12, color: colors.text.primary, fontSize: 14, marginBottom: 16,
                             ...(isWeb ? { outlineStyle: 'none' } as any : {}),
                         }}
                     />
 
                     {/* Body */}
-                    <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
                         Message
                     </Text>
                     <TextInput
                         value={body}
                         onChangeText={setBody}
                         placeholder="Notification message..."
-                        placeholderTextColor="#475569"
+                        placeholderTextColor={colors.text.muted}
                         multiline
                         numberOfLines={4}
                         style={{
-                            backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10,
-                            borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-                            padding: 12, color: '#f1f5f9', fontSize: 14, marginBottom: 24,
+                            backgroundColor: colors.bg.glass, borderRadius: 10,
+                            borderWidth: 1, borderColor: colors.border.glass,
+                            padding: 12, color: colors.text.primary, fontSize: 14, marginBottom: 24,
                             minHeight: 100, textAlignVertical: 'top',
                             ...(isWeb ? { outlineStyle: 'none' } as any : {}),
                         }}
@@ -323,17 +329,17 @@ export function BroadcastModal({
                             disabled={loading}
                             style={{
                                 paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
-                                backgroundColor: 'rgba(255,255,255,0.06)',
+                                backgroundColor: colors.bg.glass,
                             }}
                         >
-                            <Text style={{ color: '#94a3b8', fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+                            <Text style={{ color: colors.text.secondary, fontWeight: '600', fontSize: 14 }}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             onPress={handleSend}
                             disabled={loading || !title.trim()}
                             style={{
                                 paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
-                                backgroundColor: '#38b4ba',
+                                backgroundColor: colors.accent.cyan,
                                 opacity: loading || !title.trim() ? 0.5 : 1,
                             }}
                         >

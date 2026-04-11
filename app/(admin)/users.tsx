@@ -10,6 +10,7 @@ import {
 } from '../../src/components/admin/AdminActionComponents';
 import { useAdminUsersFiltered } from '../../src/hooks/useAdminData';
 import { useAdminUserActions } from '../../src/hooks/useAdminActions';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 const PAGE_SIZE = 20;
@@ -28,6 +29,7 @@ export default function AdminUsersScreen() {
     const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
     const [blockTarget, setBlockTarget] = useState<{ id: string; name: string; isBlocked: boolean } | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    const { colors } = useTheme();
 
     const { data, loading, error, refresh } = useAdminUsersFiltered({
         search,
@@ -64,6 +66,14 @@ export default function AdminUsersScreen() {
         setBlockTarget(null);
     };
 
+    const userColumns = [
+        { label: 'User', flex: 1.2 },
+        { label: 'Email', flex: 1 },
+        { label: 'Role', flex: 0.7 },
+        { label: 'Status', flex: 0.8 },
+        { label: 'Actions', flex: 1.5 },
+    ];
+
     return (
         <AdminScreen
             title="Users"
@@ -86,6 +96,7 @@ export default function AdminUsersScreen() {
 
             <AdminDataTable
                 headers={['User', 'Email', 'Role', 'Status', 'Actions']}
+                columns={userColumns}
                 data={data.users}
                 emptyMessage="No users found"
                 renderRow={(user) => (
@@ -96,24 +107,24 @@ export default function AdminUsersScreen() {
                     }}>
                         {isWeb ? (
                             <>
-                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{
                                         width: 32, height: 32, borderRadius: 16,
-                                        backgroundColor: user.isBlocked ? 'rgba(239,68,68,0.1)' : 'rgba(56,180,186,0.1)',
+                                        backgroundColor: user.isBlocked ? `${colors.status.error}15` : `${colors.accent.cyan}15`,
                                         alignItems: 'center', justifyContent: 'center', marginRight: 10,
                                     }}>
-                                        <Text style={{ color: user.isBlocked ? '#f87171' : '#38b4ba', fontWeight: '700', fontSize: 13 }}>
+                                        <Text style={{ color: user.isBlocked ? colors.status.error : colors.accent.cyan, fontWeight: '700', fontSize: 13 }}>
                                             {(user.name || '?')[0].toUpperCase()}
                                         </Text>
                                     </View>
                                     <View>
-                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{user.name}</Text>
-                                        {user.isVerified && <Text style={{ color: '#4ade80', fontSize: 10 }}>Verified</Text>}
+                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13 }}>{user.name}</Text>
+                                        {user.isVerified && <Text style={{ color: colors.status.success, fontSize: 10 }}>Verified</Text>}
                                     </View>
                                 </View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{user.email || '—'}</Text>
-                                <View style={{ flex: 1 }}><StatusBadge status={user.role} /></View>
-                                <View style={{ flex: 1, flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
+                                <Text style={{ flex: 1, color: colors.text.secondary, fontSize: 12 }}>{user.email || '—'}</Text>
+                                <View style={{ flex: 0.7 }}><StatusBadge status={user.role} /></View>
+                                <View style={{ flex: 0.8, flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
                                     {!user.isActive && <StatusBadge status="disabled" />}
                                     {user.isBlocked && <StatusBadge status="blocked" />}
                                     {user.isActive && !user.isBlocked && <StatusBadge status="active" />}
@@ -124,25 +135,25 @@ export default function AdminUsersScreen() {
                                             value={user.isActive}
                                             onToggle={() => actions.toggleActive(user.id, user.isActive)}
                                             label="Active"
-                                            activeColor="#4ade80"
+                                            activeColor={colors.status.success}
                                         />
                                         {user.role === 'creator' && (
                                             <ActionButton
-                                                icon={user.isVerified ? <ShieldOff size={12} color="#facc15" /> : <ShieldCheck size={12} color="#4ade80" />}
+                                                icon={user.isVerified ? <ShieldOff size={12} color={colors.status.warning} /> : <ShieldCheck size={12} color={colors.status.success} />}
                                                 label={user.isVerified ? 'Unverify' : 'Verify'}
-                                                color={user.isVerified ? '#facc15' : '#4ade80'}
+                                                color={user.isVerified ? colors.status.warning : colors.status.success}
                                                 onPress={() => actions.toggleVerified(user.id, user.isVerified)}
                                             />
                                         )}
                                         <ActionButton
-                                            icon={<Ban size={12} color={user.isBlocked ? '#38b4ba' : '#f87171'} />}
+                                            icon={<Ban size={12} color={user.isBlocked ? colors.accent.cyan : colors.status.error} />}
                                             label={user.isBlocked ? 'Unblock' : 'Block'}
-                                            color={user.isBlocked ? '#38b4ba' : '#f87171'}
+                                            color={user.isBlocked ? colors.accent.cyan : colors.status.error}
                                             onPress={() => setBlockTarget({ id: user.id, name: user.name, isBlocked: user.isBlocked })}
                                         />
                                         <ActionButton
-                                            icon={<Trash2 size={12} color="#f87171" />}
-                                            color="#f87171"
+                                            icon={<Trash2 size={12} color={colors.status.error} />}
+                                            color={colors.status.error}
                                             onPress={() => setDeleteTarget({ id: user.id, name: user.name })}
                                         />
                                     </RowActions>
@@ -153,16 +164,16 @@ export default function AdminUsersScreen() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                                     <View style={{
                                         width: 36, height: 36, borderRadius: 18,
-                                        backgroundColor: user.isBlocked ? 'rgba(239,68,68,0.1)' : 'rgba(56,180,186,0.1)',
+                                        backgroundColor: user.isBlocked ? `${colors.status.error}15` : `${colors.accent.cyan}15`,
                                         alignItems: 'center', justifyContent: 'center', marginRight: 10,
                                     }}>
-                                        <Text style={{ color: user.isBlocked ? '#f87171' : '#38b4ba', fontWeight: '700' }}>
+                                        <Text style={{ color: user.isBlocked ? colors.status.error : colors.accent.cyan, fontWeight: '700' }}>
                                             {(user.name || '?')[0].toUpperCase()}
                                         </Text>
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14 }}>{user.name}</Text>
-                                        <Text style={{ color: '#64748b', fontSize: 12 }}>{user.email || '—'}</Text>
+                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{user.name}</Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12 }}>{user.email || '—'}</Text>
                                     </View>
                                     <StatusBadge status={user.role} />
                                 </View>
@@ -178,21 +189,21 @@ export default function AdminUsersScreen() {
                                     />
                                     {user.role === 'creator' && (
                                         <ActionButton
-                                            icon={user.isVerified ? <ShieldOff size={12} color="#facc15" /> : <ShieldCheck size={12} color="#4ade80" />}
+                                            icon={user.isVerified ? <ShieldOff size={12} color={colors.status.warning} /> : <ShieldCheck size={12} color={colors.status.success} />}
                                             label={user.isVerified ? 'Unverify' : 'Verify'}
-                                            color={user.isVerified ? '#facc15' : '#4ade80'}
+                                            color={user.isVerified ? colors.status.warning : colors.status.success}
                                             onPress={() => actions.toggleVerified(user.id, user.isVerified)}
                                         />
                                     )}
                                     <ActionButton
-                                        icon={<Ban size={12} color="#f87171" />}
+                                        icon={<Ban size={12} color={colors.status.error} />}
                                         label={user.isBlocked ? 'Unblock' : 'Block'}
-                                        color="#f87171"
+                                        color={colors.status.error}
                                         onPress={() => setBlockTarget({ id: user.id, name: user.name, isBlocked: user.isBlocked })}
                                     />
                                     <ActionButton
-                                        icon={<Trash2 size={12} color="#f87171" />}
-                                        color="#f87171"
+                                        icon={<Trash2 size={12} color={colors.status.error} />}
+                                        color={colors.status.error}
                                         onPress={() => setDeleteTarget({ id: user.id, name: user.name })}
                                     />
                                 </RowActions>
@@ -231,7 +242,7 @@ export default function AdminUsersScreen() {
                     : `Are you sure you want to block "${blockTarget?.name}"? They will not be able to log in or interact with the platform.`
                 }
                 confirmLabel={blockTarget?.isBlocked ? 'Unblock' : 'Block'}
-                confirmColor={blockTarget?.isBlocked ? '#38b4ba' : '#ef4444'}
+                confirmColor={blockTarget?.isBlocked ? colors.accent.cyan : '#ef4444'}
                 onConfirm={handleBlock}
                 onCancel={() => setBlockTarget(null)}
                 loading={actionLoading}

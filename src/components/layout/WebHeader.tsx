@@ -8,6 +8,8 @@ import { useSongs } from '../../hooks/useData';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
+
 interface WebHeaderProps {
     scrollY?: Animated.Value;
 }
@@ -18,7 +20,12 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
     const [showDropdown, setShowDropdown] = useState(false);
     const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { isDark, colors, toggleTheme } = useTheme();
-    const { signOut } = useAuth();
+    const { signOut, profile } = useAuth();
+
+    // Build avatar URL from profile
+    const avatarUrl = profile?.avatarPath
+        ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`
+        : null;
 
     // Search State
     const [searchQuery, setSearchQuery] = useState('');
@@ -331,11 +338,17 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                             cursor: 'pointer' as any,
                         })}
                     >
-                        <Image
-                            source={{ uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100' }}
-                            style={{ width: 35, height: 35, borderRadius: 17.5 }}
-                            contentFit="cover"
-                        />
+                        {avatarUrl ? (
+                            <Image
+                                source={{ uri: avatarUrl }}
+                                style={{ width: 35, height: 35, borderRadius: 17.5 }}
+                                contentFit="cover"
+                            />
+                        ) : (
+                            <View style={{ width: 35, height: 35, borderRadius: 17.5, backgroundColor: 'rgba(56,180,186,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                                <User size={18} color="#38b4ba" />
+                            </View>
+                        )}
                     </Pressable>
                 </Animated.View>
 

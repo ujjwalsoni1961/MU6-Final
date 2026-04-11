@@ -180,11 +180,11 @@ function SplitPartyCard({ index, row, total, onChange, onRemove, canRemove, colo
             <RolePicker value={row.role} onChange={(v) => onChange('role', v)} colors={colors} isDark={isDark} />
 
             {/* Share Percent */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14 }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1, marginRight: 8 }}>
-                    Share
-                </Text>
-                <View style={{ flex: 1, maxWidth: 120, flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1, marginTop: 14, marginBottom: 6 }}>
+                Share
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ width: 100, flexDirection: 'row', alignItems: 'center' }}>
                     <TextInput
                         value={row.sharePercent}
                         onChangeText={(v) => onChange('sharePercent', v)}
@@ -192,7 +192,7 @@ function SplitPartyCard({ index, row, total, onChange, onRemove, canRemove, colo
                         placeholderTextColor={colors.text.muted}
                         keyboardType="decimal-pad"
                         style={{
-                            flex: 1,
+                            width: 80,
                             fontSize: 18, fontWeight: '700', color: colors.text.primary,
                             paddingHorizontal: 12, paddingVertical: 8,
                             borderRadius: 10,
@@ -202,7 +202,7 @@ function SplitPartyCard({ index, row, total, onChange, onRemove, canRemove, colo
                             textAlign: 'center',
                         }}
                     />
-                    <Percent size={14} color={colors.text.muted} style={{ marginLeft: 4 }} />
+                    <Percent size={14} color={colors.text.muted} style={{ marginLeft: 6 }} />
                 </View>
 
                 {/* Progress bar */}

@@ -10,6 +10,7 @@ import {
 } from '../../src/components/admin/AdminActionComponents';
 import { useAdminSongsFiltered } from '../../src/hooks/useAdminData';
 import { useAdminSongActions } from '../../src/hooks/useAdminActions';
+import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 const PAGE_SIZE = 20;
@@ -32,6 +33,7 @@ export default function AdminSongsScreen() {
     const [offset, setOffset] = useState(0);
     const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    const { colors } = useTheme();
 
     const { data, loading, error, refresh } = useAdminSongsFiltered({
         search,
@@ -55,6 +57,15 @@ export default function AdminSongsScreen() {
         setDeleteTarget(null);
     };
 
+    const songColumns = [
+        { label: 'Song', flex: 1.2 },
+        { label: 'Artist', flex: 1 },
+        { label: 'Genre', flex: 0.7 },
+        { label: 'Plays', flex: 0.7 },
+        { label: 'Status', flex: 1 },
+        { label: 'Actions', flex: 1.5 },
+    ];
+
     return (
         <AdminScreen
             title="Songs"
@@ -77,6 +88,7 @@ export default function AdminSongsScreen() {
 
             <AdminDataTable
                 headers={['Song', 'Artist', 'Genre', 'Plays', 'Status', 'Actions']}
+                columns={songColumns}
                 data={data.songs}
                 emptyMessage="No songs found"
                 renderRow={(song) => (
@@ -87,19 +99,19 @@ export default function AdminSongsScreen() {
                     }}>
                         {isWeb ? (
                             <>
-                                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center' }}>
                                     <View style={{
                                         width: 36, height: 36, borderRadius: 8,
-                                        backgroundColor: song.isFeatured ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.1)',
+                                        backgroundColor: song.isFeatured ? `${colors.accent.purple}15` : `${colors.accent.purple}10`,
                                         alignItems: 'center', justifyContent: 'center', marginRight: 10,
                                     }}>
-                                        {song.isFeatured ? <Star size={16} color="#a78bfa" /> : <Music size={16} color="#8b5cf6" />}
+                                        {song.isFeatured ? <Star size={16} color="#a78bfa" /> : <Music size={16} color={colors.accent.purple} />}
                                     </View>
-                                    <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 13 }}>{song.title}</Text>
+                                    <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 13, flexShrink: 1 }} numberOfLines={1}>{song.title}</Text>
                                 </View>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{song.artistName}</Text>
-                                <Text style={{ flex: 1, color: '#94a3b8', fontSize: 12 }}>{song.genre}</Text>
-                                <Text style={{ flex: 1, color: '#38b4ba', fontSize: 12, fontWeight: '600' }}>{song.playsCount.toLocaleString()}</Text>
+                                <Text style={{ flex: 1, color: colors.text.secondary, fontSize: 12 }} numberOfLines={1}>{song.artistName}</Text>
+                                <Text style={{ flex: 0.7, color: colors.text.secondary, fontSize: 12 }}>{song.genre}</Text>
+                                <Text style={{ flex: 0.7, color: colors.accent.cyan, fontSize: 12, fontWeight: '600' }}>{song.playsCount.toLocaleString()}</Text>
                                 <View style={{ flex: 1, flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
                                     <StatusBadge status={song.isPublished ? 'active' : 'pending'} />
                                     {!song.isListed && <StatusBadge status="delisted" />}
@@ -111,17 +123,17 @@ export default function AdminSongsScreen() {
                                             value={song.isListed}
                                             onToggle={() => actions.toggleListed(song.id, song.isListed)}
                                             label="Listed"
-                                            activeColor="#4ade80"
+                                            activeColor={colors.status.success}
                                         />
                                         <ActionButton
-                                            icon={<Star size={12} color={song.isFeatured ? '#facc15' : '#64748b'} />}
+                                            icon={<Star size={12} color={song.isFeatured ? colors.status.warning : colors.text.secondary} />}
                                             label={song.isFeatured ? 'Unfeature' : 'Feature'}
-                                            color={song.isFeatured ? '#facc15' : '#64748b'}
+                                            color={song.isFeatured ? colors.status.warning : colors.text.secondary}
                                             onPress={() => actions.toggleFeatured(song.id, song.isFeatured)}
                                         />
                                         <ActionButton
-                                            icon={<Trash2 size={12} color="#f87171" />}
-                                            color="#f87171"
+                                            icon={<Trash2 size={12} color={colors.status.error} />}
+                                            color={colors.status.error}
                                             onPress={() => setDeleteTarget({ id: song.id, title: song.title })}
                                         />
                                     </RowActions>
@@ -132,21 +144,21 @@ export default function AdminSongsScreen() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                                     <View style={{
                                         width: 40, height: 40, borderRadius: 8,
-                                        backgroundColor: 'rgba(139,92,246,0.1)',
+                                        backgroundColor: `${colors.accent.purple}10`,
                                         alignItems: 'center', justifyContent: 'center', marginRight: 10,
                                     }}>
-                                        {song.isFeatured ? <Star size={18} color="#a78bfa" /> : <Music size={18} color="#8b5cf6" />}
+                                        {song.isFeatured ? <Star size={18} color="#a78bfa" /> : <Music size={18} color={colors.accent.purple} />}
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text style={{ color: '#f1f5f9', fontWeight: '600', fontSize: 14 }}>{song.title}</Text>
-                                        <Text style={{ color: '#64748b', fontSize: 12 }}>{song.artistName} | {song.genre}</Text>
+                                        <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{song.title}</Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12 }}>{song.artistName} | {song.genre}</Text>
                                     </View>
                                     <StatusBadge status={song.isPublished ? 'active' : 'pending'} />
                                 </View>
                                 <View style={{ flexDirection: 'row', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
                                     {!song.isListed && <StatusBadge status="delisted" />}
                                     {song.isFeatured && <StatusBadge status="featured" />}
-                                    <Text style={{ color: '#38b4ba', fontSize: 12 }}>{song.playsCount} plays</Text>
+                                    <Text style={{ color: colors.accent.cyan, fontSize: 12 }}>{song.playsCount} plays</Text>
                                 </View>
                                 <RowActions>
                                     <ToggleSwitch
@@ -155,14 +167,14 @@ export default function AdminSongsScreen() {
                                         label="Listed"
                                     />
                                     <ActionButton
-                                        icon={<Star size={12} color={song.isFeatured ? '#facc15' : '#64748b'} />}
+                                        icon={<Star size={12} color={song.isFeatured ? colors.status.warning : colors.text.secondary} />}
                                         label={song.isFeatured ? 'Unfeature' : 'Feature'}
-                                        color={song.isFeatured ? '#facc15' : '#64748b'}
+                                        color={song.isFeatured ? colors.status.warning : colors.text.secondary}
                                         onPress={() => actions.toggleFeatured(song.id, song.isFeatured)}
                                     />
                                     <ActionButton
-                                        icon={<Trash2 size={12} color="#f87171" />}
-                                        color="#f87171"
+                                        icon={<Trash2 size={12} color={colors.status.error} />}
+                                        color={colors.status.error}
                                         onPress={() => setDeleteTarget({ id: song.id, title: song.title })}
                                     />
                                 </RowActions>

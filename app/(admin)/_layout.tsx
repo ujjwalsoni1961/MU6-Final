@@ -9,6 +9,7 @@ import {
     Settings, ScrollText, Bell, ListMusic,
 } from 'lucide-react-native';
 import { useAdminAuth } from '../../src/context/AdminAuthContext';
+import { useTheme } from '../../src/context/ThemeContext';
 import { ToastProvider } from '../../src/components/admin/AdminActionComponents';
 
 const isWeb = Platform.OS === 'web';
@@ -73,6 +74,8 @@ const navSections: NavSection[] = [
 function SidebarItem({ label, Icon, active, onPress }: {
     label: string; Icon: any; active: boolean; onPress: () => void;
 }) {
+    const { colors } = useTheme();
+
     return (
         <AnimatedPressable
             preset="row"
@@ -86,16 +89,16 @@ function SidebarItem({ label, Icon, active, onPress }: {
                 borderRadius: 10,
                 marginBottom: 1,
                 backgroundColor: active
-                    ? 'rgba(56,180,186,0.12)'
+                    ? `${colors.accent.cyan}12`
                     : 'transparent',
                 borderWidth: active ? 1 : 0,
-                borderColor: active ? 'rgba(56,180,186,0.2)' : 'transparent',
+                borderColor: active ? `${colors.accent.cyan}20` : 'transparent',
             }}
         >
-            <Icon size={16} color={active ? '#38b4ba' : '#64748b'} />
+            <Icon size={16} color={active ? colors.accent.cyan : colors.text.muted} />
             <Text
                 style={{
-                    color: active ? '#38b4ba' : '#94a3b8',
+                    color: active ? colors.accent.cyan : colors.text.secondary,
                     fontSize: 13,
                     fontWeight: active ? '600' : '500',
                     marginLeft: 10,
@@ -112,27 +115,28 @@ function AdminSidebar() {
     const router = useRouter();
     const pathname = usePathname();
     const { adminLogout } = useAdminAuth();
+    const { colors } = useTheme();
 
     return (
         <View
             style={{
                 width: 220,
-                backgroundColor: '#0a0f1a',
+                backgroundColor: colors.bg.card,
                 borderRightWidth: 1,
-                borderRightColor: 'rgba(255,255,255,0.06)',
+                borderRightColor: colors.border.glass,
                 height: '100%' as any,
             }}
         >
             {/* Header */}
-            <View style={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
+            <View style={{ paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: colors.border.glass }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                    <Text style={{ fontSize: 24, fontWeight: '800', color: '#f1f5f9', letterSpacing: -2, fontStyle: 'italic' }}>
+                    <Text style={{ fontSize: 24, fontWeight: '800', color: colors.text.primary, letterSpacing: -2, fontStyle: 'italic' }}>
                         MU6
                     </Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Shield size={12} color="#ef4444" />
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#ef4444', marginLeft: 6, textTransform: 'uppercase', letterSpacing: 1 }}>
+                    <Shield size={12} color={colors.status.error} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: colors.status.error, marginLeft: 6, textTransform: 'uppercase', letterSpacing: 1 }}>
                         Super Admin
                     </Text>
                 </View>
@@ -147,7 +151,7 @@ function AdminSidebar() {
                 {navSections.map((section) => (
                     <View key={section.title} style={{ marginBottom: 16 }}>
                         <Text style={{
-                            fontSize: 10, fontWeight: '700', color: '#475569',
+                            fontSize: 10, fontWeight: '700', color: colors.text.muted,
                             textTransform: 'uppercase', letterSpacing: 1.5,
                             paddingHorizontal: 14, marginBottom: 6,
                         }}>
@@ -170,7 +174,7 @@ function AdminSidebar() {
             </ScrollView>
 
             {/* Logout */}
-            <View style={{ paddingHorizontal: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
+            <View style={{ paddingHorizontal: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: colors.border.glass, paddingTop: 12 }}>
                 <AnimatedPressable
                     preset="row"
                     hapticType="none"
@@ -186,8 +190,8 @@ function AdminSidebar() {
                         borderRadius: 10,
                     }}
                 >
-                    <LogOut size={16} color="#ef4444" />
-                    <Text style={{ color: '#ef4444', fontSize: 13, fontWeight: '600', marginLeft: 10 }}>
+                    <LogOut size={16} color={colors.status.error} />
+                    <Text style={{ color: colors.status.error, fontSize: 13, fontWeight: '600', marginLeft: 10 }}>
                         Sign Out
                     </Text>
                 </AnimatedPressable>
@@ -207,6 +211,7 @@ const allScreens = [
 /* ─── Layout Entry Point ─── */
 export default function AdminLayout() {
     const { isAdminLoggedIn, isAdminLoading } = useAdminAuth();
+    const { colors } = useTheme();
     const router = useRouter();
 
     // Redirect to admin login if not authenticated
@@ -218,17 +223,17 @@ export default function AdminLayout() {
 
     if (isAdminLoading) {
         return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#030711' }}>
-                <ActivityIndicator size="large" color="#38b4ba" />
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg.base }}>
+                <ActivityIndicator size="large" color={colors.accent.cyan} />
             </View>
         );
     }
 
     if (!isAdminLoggedIn) {
         return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#030711' }}>
-                <ActivityIndicator size="large" color="#38b4ba" />
-                <Text style={{ color: '#64748b', marginTop: 12, fontSize: 14 }}>Redirecting to login...</Text>
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg.base }}>
+                <ActivityIndicator size="large" color={colors.accent.cyan} />
+                <Text style={{ color: colors.text.secondary, marginTop: 12, fontSize: 14 }}>Redirecting to login...</Text>
             </View>
         );
     }
@@ -237,18 +242,18 @@ export default function AdminLayout() {
         <Tabs
             screenOptions={{
                 headerShown: false,
-                tabBarActiveTintColor: '#38b4ba',
-                tabBarInactiveTintColor: '#475569',
+                tabBarActiveTintColor: colors.accent.cyan,
+                tabBarInactiveTintColor: colors.text.muted,
                 tabBarStyle: isWeb ? { display: 'none' } : {
-                    backgroundColor: '#0a0f1a',
+                    backgroundColor: colors.bg.card,
                     borderTopWidth: 1,
-                    borderTopColor: 'rgba(255,255,255,0.06)',
+                    borderTopColor: colors.border.glass,
                     paddingBottom: 4,
                     paddingTop: 4,
                     height: 56,
                 },
                 tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
-                sceneStyle: { backgroundColor: '#030711' },
+                sceneStyle: { backgroundColor: colors.bg.base },
             }}
         >
             {allScreens.map((name) => (
@@ -268,9 +273,9 @@ export default function AdminLayout() {
     if (isWeb) {
         return (
             <ToastProvider>
-                <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: '#030711' }}>
+                <View style={{ flex: 1, flexDirection: 'row', height: '100%' as any, backgroundColor: colors.bg.base }}>
                     <AdminSidebar />
-                    <View style={{ flex: 1, backgroundColor: '#030711' }}>
+                    <View style={{ flex: 1, backgroundColor: colors.bg.base }}>
                         {tabScreens}
                     </View>
                 </View>
