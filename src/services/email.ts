@@ -1,49 +1,64 @@
 /**
  * MU6 Email Notification Service
  *
- * Client-side email delivery via Resend REST API.
- * API key is send-only (restricted) — safe for client-side use on testnet.
+ * Email delivery via Resend REST API.
+ * On native (iOS/Android): calls Resend directly with the API key.
+ * On web: proxies through a Supabase Edge Function to avoid CORS.
  *
  * All functions are fire-and-forget: they never throw, never block the UI,
  * and log success/failure to console.
  */
 
-// Read from env; the EXPO_PUBLIC_ prefix means Expo injects it at build time
+import { Platform } from 'react-native';
+
 const RESEND_API_KEY = process.env.EXPO_PUBLIC_RESEND_API_KEY ?? '';
 const FROM_ADDRESS = 'MU6 <onboarding@resend.dev>';
+
+// Supabase Edge Function URL — used on web to avoid CORS (browser blocks direct Resend calls)
+const SUPABASE_EMAIL_URL = 'https://ukavmvxelsfdfktiiyvg.supabase.co/functions/v1/send-email';
 
 // ────────────────────────────────────────────
 // Core send function
 // ────────────────────────────────────────────
 
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
-    if (!RESEND_API_KEY) {
-        console.warn('[email] EXPO_PUBLIC_RESEND_API_KEY is empty! Check your .env file and restart Metro.');
-        console.warn('[email] Current value:', JSON.stringify(RESEND_API_KEY));
-        return false;
-    }
-    console.log('[email] Sending to:', to, '| Subject:', subject, '| Key prefix:', RESEND_API_KEY.substring(0, 6) + '...');
+    console.log('[email] Sending to:', to, '| Subject:', subject);
     try {
-        const res = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${RESEND_API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ from: FROM_ADDRESS, to, subject, html }),
-        });
-        const data = await res.json();
-        if (data.id) {
-            console.log('[email] ✅ Sent successfully! ID:', data.id);
+        let data: any;
+
+        if (Platform.OS === 'web') {
+            // Web: proxy through Supabase Edge Function to avoid CORS
+            const res = await fetch(SUPABASE_EMAIL_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to, subject, html }),
+            });
+            data = await res.json();
+        } else {
+            // Native: call Resend directly (no CORS restriction)
+            if (!RESEND_API_KEY) {
+                console.warn('[email] EXPO_PUBLIC_RESEND_API_KEY not set — skipping');
+                return false;
+            }
+            const res = await fetch('https://api.resend.com/emails', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${RESEND_API_KEY}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ from: FROM_ADDRESS, to, subject, html }),
+            });
+            data = await res.json();
+        }
+
+        if (data.success || data.id) {
+            console.log('[email] ✅ Sent:', data.id);
             return true;
         }
-        // Resend returns specific error messages
-        console.warn('[email] ❌ Resend API rejected:', JSON.stringify(data));
-        // Common: "You can only send testing emails to your own email address"
-        // Fix: verify a domain at resend.com/domains
+        console.warn('[email] ❌ Failed:', JSON.stringify(data));
         return false;
     } catch (err) {
-        console.error('[email] ❌ Network error:', err);
+        console.error('[email] ❌ Error:', err);
         return false;
     }
 }

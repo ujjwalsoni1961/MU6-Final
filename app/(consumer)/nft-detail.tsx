@@ -27,6 +27,38 @@ import type { NFT, TradeEvent } from '../../src/types';
 
 type ViewMode = 'release' | 'listing';
 
+/** Convert raw blockchain/contract errors into short, readable messages */
+function friendlyError(raw: string): string {
+    const lower = raw.toLowerCase();
+    if (lower.includes('insufficient funds') || lower.includes('gas')) {
+        return 'Payment failed: Insufficient funds in your wallet. Please add more POL and try again.';
+    }
+    if (lower.includes('user rejected') || lower.includes('user denied')) {
+        return 'Transaction cancelled by user.';
+    }
+    if (lower.includes('sold out') || lower.includes('supply')) {
+        return 'This NFT is sold out.';
+    }
+    if (lower.includes('already minted') || lower.includes('already claimed')) {
+        return 'You have already minted this NFT.';
+    }
+    if (lower.includes('not active') || lower.includes('paused')) {
+        return 'This NFT sale is currently paused.';
+    }
+    if (lower.includes('network') || lower.includes('timeout')) {
+        return 'Network error. Please check your connection and try again.';
+    }
+    if (lower.includes('execution reverted')) {
+        // Extract a meaningful portion if possible
+        return 'Payment failed: Transaction was reverted by the blockchain. Your wallet was not charged.';
+    }
+    // Fallback: truncate overly long errors
+    if (raw.length > 120) {
+        return raw.substring(0, 117) + '...';
+    }
+    return raw;
+}
+
 export default function NFTDetailScreen() {
     const { id, mode: modeParam, listingId: listingParam } = useLocalSearchParams<{
         id: string;
@@ -206,8 +238,11 @@ export default function NFTDetailScreen() {
         : false;
 
     const actionLoading = mintHook.loading || buyHook.loading;
-    const actionError = mintHook.error || buyHook.error;
+    const rawActionError = mintHook.error || buyHook.error;
     const actionSuccess = mintHook.success || buyHook.success;
+
+    // Parse raw blockchain errors into user-friendly messages
+    const actionError = rawActionError ? friendlyError(rawActionError) : null;
 
     // Determine button state
     // Consumers can collect primary NFTs; creators see stats for their own releases
@@ -243,6 +278,12 @@ export default function NFTDetailScreen() {
         buttonDisabled = true;
         buttonColor = '#64748b';
     }
+
+    const handleCreatorPress = () => {
+        if (nft.creatorId) {
+            router.push({ pathname: '/(consumer)/artist-profile', params: { id: nft.creatorId } });
+        }
+    };
 
     return (
         <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
@@ -418,6 +459,7 @@ export default function NFTDetailScreen() {
                             </View>
                             <AnimatedPressable
                                 preset="icon"
+                                onPress={handleCreatorPress}
                                 style={{
                                     width: 36, height: 36, borderRadius: 18,
                                     alignItems: 'center' as const, justifyContent: 'center' as const,
