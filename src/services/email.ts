@@ -8,7 +8,7 @@
  * and log success/failure to console.
  */
 
-const RESEND_API_KEY = 're_Sfs6QE9i_844cN8yTQVcj4ZXYhVPSPeHo';
+const RESEND_API_KEY = process.env.EXPO_PUBLIC_RESEND_API_KEY || '';
 const FROM_ADDRESS = 'MU6 <onboarding@resend.dev>';
 
 // ────────────────────────────────────────────
