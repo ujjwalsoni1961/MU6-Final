@@ -22,6 +22,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useSongSplitSheet, useUpsertSplitSheet, useCreatorSongs } from '../../src/hooks/useData';
+import { lookupProfileByEmail, createSplitInvitation } from '../../src/services/database';
 import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
@@ -32,6 +33,9 @@ interface SplitRow {
     partyEmail: string;
     role: string;
     sharePercent: string; // Keep as string for text input
+    linkedProfileId?: string;
+    linkedWalletAddress?: string;
+    emailStatus: 'unchecked' | 'checking' | 'registered' | 'unregistered';
 }
 
 const ROLE_OPTIONS = ['Artist', 'Producer', 'Songwriter', 'Publisher', 'Featured', 'Other'];
@@ -76,12 +80,13 @@ function RolePicker({ value, onChange, colors, isDark }: {
 }
 
 /* ─── Split Party Card ─── */
-function SplitPartyCard({ index, row, total, onChange, onRemove, canRemove, colors, isDark }: {
+function SplitPartyCard({ index, row, total, onChange, onRemove, onEmailBlur, canRemove, colors, isDark }: {
     index: number;
     row: SplitRow;
     total: number;
     onChange: (field: keyof SplitRow, value: string) => void;
     onRemove: () => void;
+    onEmailBlur: () => void;
     canRemove: boolean;
     colors: any;
     isDark: boolean;
@@ -158,6 +163,7 @@ function SplitPartyCard({ index, row, total, onChange, onRemove, canRemove, colo
             <TextInput
                 value={row.partyEmail}
                 onChangeText={(v) => onChange('partyEmail', v)}
+                onBlur={onEmailBlur}
                 placeholder="email@example.com"
                 placeholderTextColor={colors.text.muted}
                 keyboardType="email-address"
@@ -169,9 +175,40 @@ function SplitPartyCard({ index, row, total, onChange, onRemove, canRemove, colo
                     backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
                     borderWidth: 1,
                     borderColor: isDark ? 'rgba(255,255,255,0.08)' : '#e2e8f0',
-                    marginBottom: 12,
+                    marginBottom: row.emailStatus === 'unchecked' || row.emailStatus === 'checking' ? 12 : 4,
                 }}
             />
+            {/* Email status badge */}
+            {row.emailStatus === 'checking' && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                    <ActivityIndicator size="small" color="#38b4ba" style={{ marginRight: 6 }} />
+                    <Text style={{ fontSize: 11, color: colors.text.muted }}>Checking...</Text>
+                </View>
+            )}
+            {row.emailStatus === 'registered' && (
+                <View style={{
+                    flexDirection: 'row', alignItems: 'center', marginBottom: 12,
+                    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
+                    backgroundColor: 'rgba(34,197,94,0.1)', alignSelf: 'flex-start',
+                }}>
+                    <Check size={12} color="#22c55e" />
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#22c55e', marginLeft: 4 }}>
+                        Registered user
+                    </Text>
+                </View>
+            )}
+            {row.emailStatus === 'unregistered' && (
+                <View style={{
+                    flexDirection: 'row', alignItems: 'center', marginBottom: 12,
+                    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6,
+                    backgroundColor: 'rgba(245,158,11,0.1)', alignSelf: 'flex-start',
+                }}>
+                    <AlertCircle size={12} color="#f59e0b" />
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#f59e0b', marginLeft: 4 }}>
+                        Not registered — will receive invitation
+                    </Text>
+                </View>
+            )}
 
             {/* Role */}
             <Text style={{ fontSize: 11, fontWeight: '600', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
@@ -251,6 +288,8 @@ export default function SplitEditorScreen() {
                 partyEmail: s.partyEmail,
                 role: s.role,
                 sharePercent: String(s.sharePercent),
+                linkedProfileId: s.linkedProfileId || undefined,
+                emailStatus: s.linkedProfileId ? 'registered' as const : 'unchecked' as const,
             })));
         } else if (profile && selectedSongId) {
             // Default: creator gets 100%
@@ -259,6 +298,8 @@ export default function SplitEditorScreen() {
                 partyEmail: profile.email || '',
                 role: 'Artist',
                 sharePercent: '100',
+                linkedProfileId: profile.id,
+                emailStatus: 'registered' as const,
             }]);
         }
         setInitialized(true);
@@ -275,14 +316,78 @@ export default function SplitEditorScreen() {
     const isValid = Math.abs(totalPercent - 100) < 0.01 && rows.length > 0 && rows.every((r) => r.partyName.trim() && r.partyEmail.trim());
     const remaining = 100 - totalPercent;
 
+    // Email lookup handler
+    const handleEmailBlur = async (index: number) => {
+        const email = rows[index]?.partyEmail?.trim();
+        if (!email || !email.includes('@')) return;
+
+        setRows((prev) => prev.map((r, i) => i === index ? { ...r, emailStatus: 'checking' as const } : r));
+
+        const result = await lookupProfileByEmail(email);
+        if (!result) {
+            setRows((prev) => prev.map((r, i) => i === index ? { ...r, emailStatus: 'unchecked' as const } : r));
+            return;
+        }
+
+        if (result.exists) {
+            setRows((prev) => prev.map((r, i) => i === index ? {
+                ...r,
+                emailStatus: 'registered' as const,
+                linkedProfileId: result.profileId,
+                linkedWalletAddress: result.walletAddress,
+                partyName: r.partyName || result.displayName || r.partyName,
+            } : r));
+        } else {
+            setRows((prev) => prev.map((r, i) => i === index ? {
+                ...r,
+                emailStatus: 'unregistered' as const,
+                linkedProfileId: undefined,
+                linkedWalletAddress: undefined,
+            } : r));
+        }
+    };
+
     // Handlers
     const updateRow = (index: number, field: keyof SplitRow, value: string) => {
-        setRows((prev) => prev.map((r, i) => i === index ? { ...r, [field]: value } : r));
+        setRows((prev) => {
+            const updated = prev.map((r, i) => i === index ? { ...r, [field]: value } : r);
+
+            // Auto-adjust other percentages when share changes
+            if (field === 'sharePercent') {
+                const changedPct = parseFloat(value) || 0;
+                const remaining = 100 - changedPct;
+                const otherRows = updated.filter((_, i) => i !== index);
+                const otherTotal = otherRows.reduce((s, r) => s + (parseFloat(r.sharePercent) || 0), 0);
+
+                if (otherRows.length > 0 && remaining >= 0) {
+                    if (otherTotal > 0) {
+                        return updated.map((r, i) => {
+                            if (i === index) return r;
+                            const ratio = (parseFloat(r.sharePercent) || 0) / otherTotal;
+                            return { ...r, sharePercent: (remaining * ratio).toFixed(2) };
+                        });
+                    } else {
+                        const equalShare = remaining / otherRows.length;
+                        return updated.map((r, i) => {
+                            if (i === index) return r;
+                            return { ...r, sharePercent: equalShare.toFixed(2) };
+                        });
+                    }
+                }
+            }
+
+            // Reset email status when email changes
+            if (field === 'partyEmail') {
+                return updated.map((r, i) => i === index ? { ...r, emailStatus: 'unchecked' as const, linkedProfileId: undefined, linkedWalletAddress: undefined } : r);
+            }
+
+            return updated;
+        });
         if (saveSuccess) resetSave();
     };
 
     const addRow = () => {
-        setRows((prev) => [...prev, { partyName: '', partyEmail: '', role: 'Other', sharePercent: '' }]);
+        setRows((prev) => [...prev, { partyName: '', partyEmail: '', role: 'Other', sharePercent: '', emailStatus: 'unchecked' }]);
     };
 
     const removeRow = (index: number) => {
@@ -291,18 +396,37 @@ export default function SplitEditorScreen() {
     };
 
     const handleSave = async () => {
-        if (!selectedSongId || !isValid) return;
+        if (!selectedSongId || !isValid || !profile) return;
 
         const splits = rows.map((r) => ({
             partyEmail: r.partyEmail.trim(),
             partyName: r.partyName.trim(),
             role: r.role,
             sharePercent: parseFloat(r.sharePercent) || 0,
-            linkedProfileId: r.partyEmail === profile?.email ? profile?.id : undefined,
+            linkedProfileId: r.linkedProfileId || (r.partyEmail === profile?.email ? profile?.id : undefined),
+            linkedWalletAddress: r.linkedWalletAddress,
         }));
 
         const result = await saveSplits(selectedSongId, splits);
         if (result) {
+            // Create invitations for unregistered users
+            const unregistered = rows.filter((r) => r.emailStatus === 'unregistered');
+            for (const r of unregistered) {
+                await createSplitInvitation({
+                    songId: selectedSongId,
+                    inviterProfileId: profile.id,
+                    inviteeEmail: r.partyEmail.trim(),
+                    inviteeName: r.partyName.trim(),
+                    role: r.role,
+                    sharePercent: parseFloat(r.sharePercent) || 0,
+                });
+            }
+            if (unregistered.length > 0) {
+                Alert.alert(
+                    'Invitations Created',
+                    `${unregistered.length} invitation${unregistered.length > 1 ? 's' : ''} created for unregistered collaborators. They'll be auto-linked when they sign up.`,
+                );
+            }
             refreshSplits();
         }
     };
@@ -501,6 +625,7 @@ export default function SplitEditorScreen() {
                                 total={totalPercent}
                                 onChange={(field, value) => updateRow(i, field, value)}
                                 onRemove={() => removeRow(i)}
+                                onEmailBlur={() => handleEmailBlur(i)}
                                 canRemove={rows.length > 1}
                                 colors={colors}
                                 isDark={isDark}

@@ -745,7 +745,7 @@ export async function upsertSplitSheet(
         song_id: songId,
         party_email: s.partyEmail,
         party_name: s.partyName,
-        role: s.role,
+        role: s.role.toLowerCase() as any,
         share_percent: s.sharePercent,
         linked_profile_id: s.linkedProfileId || null,
         linked_wallet_address: s.linkedWalletAddress || null,
@@ -761,6 +761,63 @@ export async function upsertSplitSheet(
         return [];
     }
     return (data || []).map(mapSplitRow);
+}
+
+/**
+ * Look up a profile by email via the SECURITY DEFINER RPC.
+ * Returns profile info if found, or { exists: false } if not.
+ */
+export async function lookupProfileByEmail(email: string): Promise<{
+    exists: boolean;
+    profileId?: string;
+    displayName?: string;
+    walletAddress?: string;
+} | null> {
+    const { data, error } = await supabase.rpc('lookup_profile_by_email', {
+        target_email: email.toLowerCase().trim(),
+    });
+
+    if (error) {
+        console.error('[db] lookupProfileByEmail error:', error);
+        return null;
+    }
+    if (!data || data.length === 0) return { exists: false };
+    const row = data[0];
+    return {
+        exists: true,
+        profileId: row.id,
+        displayName: row.display_name,
+        walletAddress: row.wallet_address,
+    };
+}
+
+/**
+ * Create a split invitation record for an unregistered email.
+ */
+export async function createSplitInvitation(params: {
+    songId: string;
+    inviterProfileId: string;
+    inviteeEmail: string;
+    inviteeName: string;
+    role: string;
+    sharePercent: number;
+}): Promise<boolean> {
+    const { error } = await supabase
+        .from('split_invitations')
+        .insert({
+            song_id: params.songId,
+            inviter_profile_id: params.inviterProfileId,
+            invitee_email: params.inviteeEmail.toLowerCase().trim(),
+            invitee_name: params.inviteeName,
+            role: params.role.toLowerCase() as any,
+            share_percent: params.sharePercent,
+        });
+
+    if (error) {
+        console.error('[db] createSplitInvitation error:', error);
+        return false;
+    }
+    return true;
 }
 
 // ────────────────────────────────────────────
