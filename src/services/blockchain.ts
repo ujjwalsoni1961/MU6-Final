@@ -749,8 +749,23 @@ export async function mintToken(
             .maybeSingle();
 
         if (!release) return { success: false, error: 'Release not found' };
-        if (release.minted_count >= release.total_supply) {
-            return { success: false, error: 'Sold out' };
+
+        // Atomic supply check: use RPC that checks minted_count < total_supply in a single query.
+        // This prevents race conditions where two concurrent buyers both pass the check.
+        const { data: canMint, error: supplyCheckErr } = await supabase
+            .rpc('check_nft_supply', { p_release_id: releaseId })
+            .maybeSingle();
+
+        if (supplyCheckErr || !canMint?.can_mint) {
+            // Fallback to non-atomic check if RPC not available
+            if (supplyCheckErr) {
+                console.warn('[blockchain] check_nft_supply RPC not available, using fallback:', supplyCheckErr.message);
+                if (release.minted_count >= release.total_supply) {
+                    return { success: false, error: 'Sold out' };
+                }
+            } else {
+                return { success: false, error: 'Sold out' };
+            }
         }
 
         // The on-chain token ID is determined by totalSupply() BEFORE claiming.
@@ -875,15 +890,9 @@ export async function mintToken(
             .eq('token_id', tokenId)
             .maybeSingle()).data;
 
-        // Increment minted_count on the release so supply tracking is accurate
-        const { error: countError } = await supabase.rpc('increment_minted_count', { release_id: releaseId }).maybeSingle();
-        if (countError) {
-            // Fallback: direct update if RPC not available
-            await supabase
-                .from('nft_releases')
-                .update({ minted_count: release.minted_count + 1 })
-                .eq('id', releaseId);
-        }
+        // NOTE: minted_count is auto-incremented by the DB trigger `trg_increment_minted`
+        // on nft_tokens INSERT. No explicit increment needed here — doing so would
+        // double-count. The trigger in 001_initial_schema.sql handles it atomically.
 
         // ── Record Primary Sale Revenue ──
         // ONLY record revenue when the buyer was ACTUALLY debited on-chain.

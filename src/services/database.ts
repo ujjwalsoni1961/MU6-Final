@@ -777,7 +777,15 @@ export async function logStream(
     listenerProfileId: string | null,
     durationSeconds: number,
 ): Promise<StreamEntry | null> {
-    const isQualified = durationSeconds >= 15;
+    let isQualified = durationSeconds >= 15;
+
+    // ── Anonymous listener protection ──
+    // Anonymous listeners (no profile) cannot generate qualified streams.
+    // This prevents royalty inflation from unauthenticated repeat plays.
+    if (isQualified && !listenerProfileId) {
+        console.log('[db] Stream from anonymous listener — marking as non-qualified (no revenue)');
+        isQualified = false;
+    }
 
     // ── Stream deduplication: 30-minute window ──
     // Same user can only generate 1 qualified stream per song per 30 minutes.
@@ -1649,7 +1657,7 @@ export async function getArtistBalance(profileId: string): Promise<{
             .from('payout_requests')
             .select('amount_eur')
             .eq('profile_id', profileId)
-            .eq('status', 'completed');
+            .in('status', ['completed', 'pending']);
         const totalPaidOut = (payouts || []).reduce((sum, p) => sum + (parseFloat(p.amount_eur) || 0), 0);
 
         return { totalEarned, totalPaidOut, availableBalance: totalEarned - totalPaidOut };
