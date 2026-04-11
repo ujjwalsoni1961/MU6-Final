@@ -107,7 +107,7 @@ export async function sendSplitInviteEmail(
     const subject = "🎵 You've been added to a royalty split on MU6";
     const body = `<p><strong>${inviterName}</strong> added you as a <strong>${role}</strong> on "<strong>${songTitle}</strong>" with a <strong>${sharePercent}%</strong> royalty share.</p>
 <p>Sign up on MU6 to claim your earnings.</p>`;
-    const html = wrapInTemplate('You've Been Added to a Split', body, 'Claim Your Royalty Share', 'https://mu6.app');
+    const html = wrapInTemplate("You've Been Added to a Split", body, 'Claim Your Royalty Share', 'https://mu6.app');
     return sendEmail(to, subject, html);
 }
 
@@ -195,7 +195,7 @@ export async function sendVerificationStatusEmail(
         : `<p>Your verification status on MU6 has been updated.</p>
 <p>Your verified badge has been removed. If you believe this was a mistake, please contact support.</p>`;
     const html = wrapInTemplate(
-        isVerified ? 'You're Verified!' : 'Verification Status Updated',
+        isVerified ? "You're Verified!" : 'Verification Status Updated',
         body,
         'View Profile',
         'https://mu6.app/settings',
