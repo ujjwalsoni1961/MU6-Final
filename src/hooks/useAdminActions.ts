@@ -8,6 +8,7 @@
 import { useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { showToast } from '../components/admin/AdminActionComponents';
+import { sendVerificationStatusEmail, sendRoyaltyPayoutEmail } from '../services/email';
 
 // ────────────────────────────────────────────
 // Audit log helper
@@ -79,6 +80,18 @@ export function useAdminUserActions(refresh: () => void) {
         }
         await logAuditAction(newValue ? 'verify_artist' : 'unverify_artist', 'profile', userId);
         showToast(`Artist ${newValue ? 'verified' : 'unverified'} successfully`);
+
+        // Fire-and-forget: email the artist about verification status change
+        try {
+            const { data: { users } } = await supabase.auth.admin.listUsers();
+            const artistUser = users?.find((u: any) => u.id === userId);
+            if (artistUser?.email) {
+                void sendVerificationStatusEmail(artistUser.email, newValue).catch(() => {});
+            }
+        } catch (emailErr) {
+            console.warn('[admin] Verification email failed (non-blocking):', emailErr);
+        }
+
         refresh();
     }, [refresh]);
 
@@ -336,6 +349,23 @@ export function useAdminPayoutActions(refresh: () => void) {
         }
         await logAuditAction('approve_payout', 'payout_request', payoutId, { txHash });
         showToast(txHash ? 'Payout sent on-chain' : 'Payout approved successfully');
+
+        // Fire-and-forget: email the artist about payout
+        try {
+            const { data: { users } } = await supabase.auth.admin.listUsers();
+            const artistUser = users?.find((u: any) => u.id === payout.profile_id);
+            if (artistUser?.email) {
+                void sendRoyaltyPayoutEmail(
+                    artistUser.email,
+                    (payout.amount_eur || 0).toFixed(4),
+                    'Your music',
+                    'N/A',
+                ).catch(() => {});
+            }
+        } catch (emailErr) {
+            console.warn('[admin] Payout email failed (non-blocking):', emailErr);
+        }
+
         refresh();
     }, [refresh]);
 

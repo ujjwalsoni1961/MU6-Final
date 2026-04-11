@@ -23,6 +23,7 @@ import {
     activeChain,
 } from '../lib/thirdweb';
 import { supabase } from '../lib/supabase';
+import { sendNftMintedEmail, sendNftPurchaseConfirmEmail } from './email';
 
 // ────────────────────────────────────────────
 // Types
@@ -1001,6 +1002,67 @@ export async function mintToken(
                 // Non-blocking: log but don't fail the mint
                 console.warn('[blockchain] Failed to record primary sale revenue (non-blocking):', revErr);
             }
+        }
+
+        // ── Fire-and-forget email notifications ──
+        try {
+            const { data: songData2 } = await supabase
+                .from('songs')
+                .select('title, creator_id')
+                .eq('id', release.song_id)
+                .maybeSingle();
+
+            if (songData2) {
+                const tierName = release.tier_name || 'Standard';
+                const price = release.price_eth?.toString() || '0';
+                const newMintedCount = (release.minted_count || 0) + 1;
+
+                // Notify song creator
+                const { data: creatorProfile2 } = await supabase
+                    .from('profiles')
+                    .select('display_name, id')
+                    .eq('id', songData2.creator_id)
+                    .maybeSingle();
+
+                // Look up creator's email from auth
+                const { data: { users: creatorUsers } } = await supabase.auth.admin.listUsers();
+                const creatorAuthUser = creatorUsers?.find((u: any) => u.id === songData2.creator_id);
+                const creatorEmail = creatorAuthUser?.email;
+
+                if (creatorEmail) {
+                    void sendNftMintedEmail(
+                        creatorEmail,
+                        songData2.title,
+                        tierName,
+                        price,
+                        newMintedCount,
+                        release.total_supply || 0,
+                    ).catch(() => {});
+                }
+
+                // Notify buyer — look up by wallet
+                const { data: buyerProfile } = await supabase
+                    .from('profiles')
+                    .select('id, display_name')
+                    .ilike('wallet_address', buyerWallet)
+                    .maybeSingle();
+
+                if (buyerProfile) {
+                    const buyerAuthUser = creatorUsers?.find((u: any) => u.id === buyerProfile.id);
+                    const buyerEmail = buyerAuthUser?.email;
+                    if (buyerEmail) {
+                        void sendNftPurchaseConfirmEmail(
+                            buyerEmail,
+                            songData2.title,
+                            creatorProfile2?.display_name || 'Unknown Artist',
+                            tierName,
+                            release.royalty_percent?.toString() || '0',
+                        ).catch(() => {});
+                    }
+                }
+            }
+        } catch (emailErr) {
+            console.warn('[blockchain] Email notification failed (non-blocking):', emailErr);
         }
 
         return { success: true, tokenId: tokenRecord?.id || tokenId };

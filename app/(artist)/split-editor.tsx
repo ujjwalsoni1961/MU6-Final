@@ -23,6 +23,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useSongSplitSheet, useUpsertSplitSheet, useCreatorSongs } from '../../src/hooks/useData';
 import { lookupProfileByEmail, createSplitInvitation } from '../../src/services/database';
+import { sendSplitInviteEmail } from '../../src/services/email';
 import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
@@ -420,6 +421,14 @@ export default function SplitEditorScreen() {
                     role: r.role,
                     sharePercent: parseFloat(r.sharePercent) || 0,
                 });
+                // Fire-and-forget email notification
+                void sendSplitInviteEmail(
+                    r.partyEmail.trim(),
+                    profile.displayName || 'An artist',
+                    selectedSong?.title || 'a song',
+                    r.role,
+                    parseFloat(r.sharePercent) || 0,
+                ).catch(() => {});
             }
             if (unregistered.length > 0) {
                 Alert.alert(

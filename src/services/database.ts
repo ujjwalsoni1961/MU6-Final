@@ -7,6 +7,7 @@
  */
 
 import { supabase } from '../lib/supabase';
+import { sendSongPublishedEmail, sendStreamMilestoneEmail } from './email';
 
 // ────────────────────────────────────────────
 // Types (mirrors DB schema)
@@ -326,6 +327,20 @@ export async function createSong(
         console.error('[db] createSong error:', error);
         return null;
     }
+
+    // Fire-and-forget: email the creator that their song is live
+    if (created.is_published) {
+        try {
+            const { data: { users } } = await supabase.auth.admin.listUsers();
+            const creatorUser = users?.find((u: any) => u.id === data.creatorId);
+            if (creatorUser?.email) {
+                void sendSongPublishedEmail(creatorUser.email, data.title).catch(() => {});
+            }
+        } catch (emailErr) {
+            console.warn('[db] Song published email failed (non-blocking):', emailErr);
+        }
+    }
+
     return mapSongRow(created);
 }
 
@@ -896,6 +911,33 @@ export async function logStream(
         console.error('[db] logStream error:', error);
         return null;
     }
+
+    // Fire-and-forget: check for stream milestones after a qualified stream
+    if (isQualified) {
+        const MILESTONES = [10, 100, 500, 1000, 5000, 10000];
+        try {
+            const { data: song } = await supabase
+                .from('songs')
+                .select('title, plays_count, creator_id')
+                .eq('id', songId)
+                .maybeSingle();
+
+            if (song && MILESTONES.includes(song.plays_count)) {
+                const { data: { users } } = await supabase.auth.admin.listUsers();
+                const creatorUser = users?.find((u: any) => u.id === song.creator_id);
+                if (creatorUser?.email) {
+                    void sendStreamMilestoneEmail(
+                        creatorUser.email,
+                        song.title,
+                        song.plays_count,
+                    ).catch(() => {});
+                }
+            }
+        } catch (milestoneErr) {
+            console.warn('[db] Stream milestone email failed (non-blocking):', milestoneErr);
+        }
+    }
+
     return mapStreamRow(data);
 }
 
