@@ -204,7 +204,8 @@ export async function getSongs(filters?: {
         query = query.eq('genre', filters.genre);
     }
     if (filters?.search) {
-        query = query.or(`title.ilike.%${filters.search}%,album.ilike.%${filters.search}%,genre.ilike.%${filters.search}%`);
+        const s = filters.search;
+        query = query.or(`title.ilike.%${s}%,album.ilike.%${s}%,genre.ilike.%${s}%`);
     }
     if (filters?.creatorId) {
         query = query.eq('creator_id', filters.creatorId);
@@ -422,7 +423,7 @@ export async function searchArtists(query: string, limit = 20): Promise<ArtistPr
         .from('profiles')
         .select('*')
         .eq('role', 'creator')
-        .or(`display_name.ilike.%${query}%`)
+        .ilike('display_name', `%${query}%`)
         .order('display_name')
         .limit(limit);
 
