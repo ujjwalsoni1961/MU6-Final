@@ -40,6 +40,7 @@ export interface ArtistProfile {
     creatorType: string | null;
     role: string;
     avatarPath: string | null;
+    coverPath: string | null;
     isVerified: boolean;
     country: string | null;
 }
@@ -186,7 +187,7 @@ export async function getSongs(filters?: {
         .select(`
             *,
             creator:profiles!creator_id (
-                id, wallet_address, display_name, bio, creator_type, role, avatar_path, is_verified, country
+                id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
             )
         `)
         .order('created_at', { ascending: false });
@@ -229,7 +230,7 @@ export async function getSongById(id: string): Promise<Song | null> {
         .select(`
             *,
             creator:profiles!creator_id (
-                id, wallet_address, display_name, bio, creator_type, role, avatar_path, is_verified, country
+                id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
             )
         `)
         .eq('id', id)
@@ -245,7 +246,7 @@ export async function getTrendingSongs(limit = 10): Promise<Song[]> {
         .select(`
             *,
             creator:profiles!creator_id (
-                id, wallet_address, display_name, bio, creator_type, role, avatar_path, is_verified, country
+                id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
             )
         `)
         .eq('is_published', true)
@@ -265,7 +266,7 @@ export async function getNewReleases(limit = 10): Promise<Song[]> {
         .select(`
             *,
             creator:profiles!creator_id (
-                id, wallet_address, display_name, bio, creator_type, role, avatar_path, is_verified, country
+                id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
             )
         `)
         .eq('is_published', true)
@@ -989,7 +990,7 @@ export async function getLikedSongs(profileId: string): Promise<Song[]> {
             song:songs!song_id (
                 *,
                 creator:profiles!creator_id (
-                    id, wallet_address, display_name, bio, creator_type, role, avatar_path, is_verified, country
+                    id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
                 )
             )
         `)
@@ -1577,6 +1578,7 @@ function mapArtistRow(row: any): ArtistProfile {
         creatorType: row.creator_type,
         role: row.role,
         avatarPath: row.avatar_path,
+        coverPath: row.cover_path ?? null,
         isVerified: row.is_verified,
         country: row.country,
     };

@@ -121,6 +121,7 @@ export function adaptArtist(a: DbArtist, stats?: { totalSongs?: number; follower
         id: a.id,
         name: a.displayName || 'Unnamed Artist',
         avatar: avatarUrl(a.avatarPath),
+        cover: a.coverPath ? coverUrl(a.coverPath) : null,
         bio: a.bio || '',
         followers: stats?.followers || 0,
         totalSongs: stats?.totalSongs || 0,

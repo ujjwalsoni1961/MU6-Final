@@ -56,20 +56,28 @@ export default function CreatorProfileScreen() {
 
     return (
         <ScreenScaffold dominantColor="#74e5ea" contentContainerStyle={{ paddingBottom: 40 }}>
-            {/* Gradient Banner */}
+            {/* Cover Banner */}
             <View style={{ marginHorizontal: 16, marginTop: 16 }}>
                 <View style={{ borderRadius: 36, overflow: 'hidden', height: 200 }}>
-                    <LinearGradient
-                        colors={['#74e5ea', '#8b5cf6'] as any}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={{ flex: 1 }}
-                    />
+                    {artist.cover ? (
+                        <Image
+                            source={{ uri: artist.cover }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                        />
+                    ) : (
+                        <LinearGradient
+                            colors={['#74e5ea', '#8b5cf6'] as any}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={{ flex: 1 }}
+                        />
+                    )}
                     <View
                         style={{
                             position: 'absolute',
                             top: 0, left: 0, right: 0, bottom: 0,
-                            backgroundColor: isDark ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.15)',
+                            backgroundColor: isDark ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)',
                         }}
                     />
                     {isDark && (

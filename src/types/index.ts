@@ -30,6 +30,7 @@ export interface Artist {
     id: string;
     name: string;
     avatar: string;
+    cover: string | null;
     bio: string;
     followers: number;
     totalSongs: number;
