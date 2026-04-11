@@ -8,7 +8,8 @@ import { usePlayer } from '../../context/PlayerContext';
 
 export default function MiniPlayer() {
     const { isDark, colors } = useTheme();
-    const { currentSong, isPlaying, isBuffering, togglePlay, openFullPlayer, dismissPlayer } = usePlayer();
+    const { currentSong, isPlaying, isBuffering, togglePlay, openFullPlayer, dismissPlayer, currentTime, duration } = usePlayer();
+    const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
     const slideAnim = useRef(new Animated.Value(100)).current; // Start off-screen (below)
     const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -51,8 +52,29 @@ export default function MiniPlayer() {
                 zIndex: 1000,
                 transform: [{ translateY: slideAnim }],
                 opacity: opacityAnim,
+                overflow: 'hidden',
             }}
         >
+            {/* Progress bar at bottom of mini player */}
+            <View
+                style={{
+                    position: 'absolute',
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 3,
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                }}
+            >
+                <View
+                    style={{
+                        height: '100%',
+                        width: `${progressPercent}%`,
+                        backgroundColor: colors.accent.cyan,
+                        borderRadius: 2,
+                    }}
+                />
+            </View>
             <AnimatedPressable preset="miniPlayer" style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} onPress={openFullPlayer}>
                 {/* Thumbnail */}
                 <Image

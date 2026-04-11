@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { View, Text, Platform, Dimensions, ScrollView, Animated, PanResponder, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { Image } from 'expo-image';
@@ -13,7 +13,10 @@ const isWeb = Platform.OS === 'web';
 
 export default function FullPlayer() {
     const { isDark, colors } = useTheme();
-    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious, volume, setVolume } = usePlayer();
+    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious, volume, setVolume, isRepeat, toggleRepeat } = usePlayer();
+
+    // Track whether a slider is being interacted with — blocks swipe-to-dismiss
+    const sliderActiveRef = useRef(false);
 
     // Animation for slide-in
     const slideAnim = useRef(new Animated.Value(height)).current;
@@ -45,6 +48,8 @@ export default function FullPlayer() {
 
         return PanResponder.create({
             onMoveShouldSetPanResponder: (_, gestureState) => {
+                // Don't capture when a slider is active (seek bar or volume)
+                if (sliderActiveRef.current) return false;
                 // Only respond to vertical down-swipes (not horizontal scroll)
                 return gestureState.dy > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.5;
             },
@@ -164,7 +169,9 @@ export default function FullPlayer() {
                 <View style={{ width: '100%', paddingHorizontal: 32, marginBottom: 30 }}>
                     <Slider 
                         value={duration > 0 ? currentTime / duration : 0}
+                        onSlidingStart={() => { sliderActiveRef.current = true; }}
                         onSlidingComplete={(val) => {
+                            sliderActiveRef.current = false;
                             if (duration > 0) {
                                 seekTo(val * duration);
                             }
@@ -181,7 +188,7 @@ export default function FullPlayer() {
 
                 {/* Main Controls */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 32, marginBottom: 40 }}>
-                    <AnimatedPressable preset="icon" hapticType="none">
+                    <AnimatedPressable preset="icon" hapticType="none" style={{ opacity: 0.5 }}>
                         <Shuffle size={24} color={colors.text.muted} />
                     </AnimatedPressable>
 
@@ -213,8 +220,8 @@ export default function FullPlayer() {
                         <SkipForward size={32} color={colors.text.primary} fill={isDark ? colors.text.primary : 'none'} />
                     </AnimatedPressable>
 
-                    <AnimatedPressable preset="icon" hapticType="none">
-                        <Repeat size={24} color={colors.text.muted} />
+                    <AnimatedPressable preset="icon" onPress={toggleRepeat}>
+                        <Repeat size={24} color={isRepeat ? (colors.accent.cyan) : colors.text.muted} />
                     </AnimatedPressable>
                 </View>
 
@@ -224,8 +231,12 @@ export default function FullPlayer() {
                     <View style={{ flex: 1, zIndex: 10 }}>
                         <Slider 
                             value={volume}
+                            onSlidingStart={() => { sliderActiveRef.current = true; }}
                             onValueChange={setVolume}
-                            onSlidingComplete={setVolume}
+                            onSlidingComplete={(val) => {
+                                sliderActiveRef.current = false;
+                                setVolume(val);
+                            }}
                             trackColor={colors.text.secondary}
                             thumbColor={colors.text.primary}
                             backgroundColor={isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'}

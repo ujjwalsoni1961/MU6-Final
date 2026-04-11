@@ -27,6 +27,7 @@ interface PlayerContextType {
     duration: number;
     volume: number;
     isBuffering: boolean;
+    isRepeat: boolean;
     playSong: (song: Song) => void;
     togglePlay: () => void;
     openFullPlayer: () => void;
@@ -36,6 +37,7 @@ interface PlayerContextType {
     skipNext: () => void;
     skipPrevious: () => void;
     setVolume: (vol: number) => void;
+    toggleRepeat: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
@@ -72,6 +74,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [duration, setDuration] = useState(0);
     const [volume, setVolumeState] = useState(1);
     const [isBuffering, setIsBuffering] = useState(false);
+    const [isRepeat, setIsRepeat] = useState(false);
+    const isRepeatRef = useRef(false);
 
     // Eagerly configure audio mode on mount (critical for iOS volume)
     useEffect(() => {
@@ -211,9 +215,21 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         // Song finished
         if (status.didJustFinish) {
-            setIsPlaying(false);
             // Log the completed stream
             logCurrentStream();
+            if (isRepeatRef.current) {
+                // Repeat: restart from beginning
+                if (soundRef.current) {
+                    soundRef.current.setPositionAsync(0).then(() => {
+                        soundRef.current?.playAsync();
+                    }).catch(() => {});
+                }
+                setCurrentTime(0);
+                listenStartRef.current = Date.now();
+                accumulatedRef.current = 0;
+            } else {
+                setIsPlaying(false);
+            }
         }
     }, [logCurrentStream]);
 
@@ -229,8 +245,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             timerRef.current = setInterval(() => {
                 setCurrentTime((prev) => {
                     if (prev >= duration) {
-                        setIsPlaying(false);
                         logCurrentStream();
+                        if (isRepeatRef.current) {
+                            // Repeat: restart from beginning
+                            accumulatedRef.current = 0;
+                            listenStartRef.current = Date.now();
+                            return 0;
+                        }
+                        setIsPlaying(false);
                         return duration;
                     }
                     return prev + 1;
@@ -344,6 +366,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const openFullPlayer = useCallback(() => setIsFullPlayerVisible(true), []);
     const closeFullPlayer = useCallback(() => setIsFullPlayerVisible(false), []);
 
+    const toggleRepeat = useCallback(() => {
+        setIsRepeat(prev => {
+            isRepeatRef.current = !prev;
+            return !prev;
+        });
+    }, []);
+
     const dismissPlayer = useCallback(async () => {
         setIsPlaying(false);
         setIsFullPlayerVisible(false);
@@ -393,6 +422,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 duration,
                 volume,
                 isBuffering,
+                isRepeat,
                 playSong,
                 togglePlay,
                 openFullPlayer,
@@ -402,6 +432,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 skipNext,
                 skipPrevious,
                 setVolume,
+                toggleRepeat,
             }}
         >
             {children}

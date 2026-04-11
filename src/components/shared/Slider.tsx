@@ -4,6 +4,7 @@ import { View, PanResponder } from 'react-native';
 interface SliderProps {
     value: number; // 0 to 1
     onValueChange?: (val: number) => void;
+    onSlidingStart?: () => void;
     onSlidingComplete?: (val: number) => void;
     trackColor?: string;
     thumbColor?: string;
@@ -13,6 +14,7 @@ interface SliderProps {
 export default function Slider({
     value,
     onValueChange,
+    onSlidingStart,
     onSlidingComplete,
     trackColor = '#fff',
     thumbColor = '#fff',
@@ -50,6 +52,7 @@ export default function Slider({
             onPanResponderGrant: (evt) => {
                 isSlidingRef.current = true;
                 startValueRef.current = displayValueRef.current;
+                if (onSlidingStart) onSlidingStart();
                 
                 // Track the exact location of the initial press (grant) to support tap-to-seek
                 const w = widthRef.current;
