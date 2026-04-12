@@ -746,15 +746,16 @@ export async function mintToken(
         // Parallelize: fetch release data + supply check + on-chain totalSupply simultaneously
         const [releaseResult, supplyCheckResult, onChainSupply] = await Promise.all([
             supabase.from('nft_releases').select('*').eq('id', releaseId).maybeSingle(),
-            supabase.rpc('check_nft_supply', { p_release_id: releaseId }).maybeSingle(),
+            supabase.rpc('check_nft_supply', { p_release_id: releaseId }),
             isContractReady() ? getTotalSupply().catch(() => null) : Promise.resolve(null),
         ]);
 
         const release = releaseResult.data;
         if (!release) return { success: false, error: 'Release not found' };
 
-        // Supply check
-        const { data: canMint, error: supplyCheckErr } = supplyCheckResult;
+        // Supply check — RPC may return a single object or an array
+        const { data: supplyData, error: supplyCheckErr } = supplyCheckResult;
+        const canMint = Array.isArray(supplyData) ? supplyData[0] : supplyData;
         if (supplyCheckErr || !canMint?.can_mint) {
             if (supplyCheckErr) {
                 console.warn('[blockchain] check_nft_supply RPC not available, using fallback:', supplyCheckErr.message);
@@ -854,7 +855,7 @@ export async function mintToken(
                 { onConflict: 'nft_release_id,token_id', ignoreDuplicates: true },
             )
             .select()
-            .single();
+            .maybeSingle();
 
         if (tokenErr && !tokenErr.message?.includes('duplicate')) {
             return { success: false, error: tokenErr.message };
@@ -907,7 +908,7 @@ export async function mintToken(
                             { onConflict: 'source_type,source_reference', ignoreDuplicates: true },
                         )
                         .select()
-                        .single();
+                        .maybeSingle();
 
                     if (royaltyEvent) {
                         // Look up split sheet for this song

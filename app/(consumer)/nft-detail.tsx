@@ -49,8 +49,10 @@ function friendlyError(raw: string): string {
         return 'Network error. Please check your connection and try again.';
     }
     if (lower.includes('execution reverted')) {
-        // Extract a meaningful portion if possible
         return 'Payment failed: Transaction was reverted by the blockchain. Your wallet was not charged.';
+    }
+    if (lower.includes('cannot coerce') || lower.includes('json object')) {
+        return 'Something went wrong. Please try again.';
     }
     // Fallback: truncate overly long errors
     if (raw.length > 120) {
