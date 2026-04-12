@@ -9,7 +9,7 @@
  * Chain: Polygon Amoy testnet (80002) → Polygon mainnet (137) for production.
  */
 
-import { prepareContractCall, prepareTransaction, readContract, sendTransaction } from 'thirdweb';
+import { prepareContractCall, prepareTransaction, readContract, sendTransaction, waitForReceipt } from 'thirdweb';
 import type { Account } from 'thirdweb/wallets';
 import {
     setClaimConditions as sdkSetClaimConditions,
@@ -775,41 +775,69 @@ export async function mintToken(
         let paymentTxHash: string | null = null;
 
         // ── PAYMENT-FIRST PURCHASE FLOW ──
-        const releasePriceWei = BigInt(Math.floor((release.price_eth || 0) * 1e18));
+        // Parse price safely (comes as string from Postgres numeric type)
+        const pricePol = parseFloat(String(release.price_eth || '0'));
+        const releasePriceWei = BigInt(Math.round(pricePol * 1e18));
 
-        if (releasePriceWei > BigInt(0) && !account) {
+        if (!account) {
             return {
                 success: false,
                 error: 'Wallet not connected. Please connect your wallet to purchase this NFT.',
             };
         }
 
-        // Buyer sends POL to the server wallet as payment
-        if (account && releasePriceWei > BigInt(0)) {
-            console.log('[blockchain] Buyer paying', release.price_eth, 'POL to server wallet');
-            try {
-                const paymentTx = prepareTransaction({
-                    to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
-                    chain: activeChain,
-                    client: thirdwebClient,
-                    value: releasePriceWei,
-                });
-                const paymentResult = await sendTransaction({ account, transaction: paymentTx });
-                console.log('[blockchain] Buyer payment confirmed, tx:', paymentResult.transactionHash);
-                paidOnChain = true;
-                confirmedPriceWei = releasePriceWei;
-                paymentTxHash = paymentResult.transactionHash;
-            } catch (payErr: any) {
-                console.error('[blockchain] Buyer payment failed:', payErr);
-                return {
-                    success: false,
-                    error: `Payment failed: ${payErr.message}. Your wallet was not charged.`,
-                };
-            }
+        if (releasePriceWei <= BigInt(0)) {
+            return {
+                success: false,
+                error: 'This NFT has no price set. Contact the artist.',
+            };
         }
 
-        // Use on-chain token ID if available, otherwise fall back to minted_count (0-based)
-        const tokenId = onChainTokenId || `${release.minted_count}`;
+        // Buyer sends POL to the server wallet as payment
+        console.log('[blockchain] Buyer paying', pricePol, 'POL to server wallet. Account:', account.address);
+        try {
+            const paymentTx = prepareTransaction({
+                to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
+                chain: activeChain,
+                client: thirdwebClient,
+                value: releasePriceWei,
+            });
+            const paymentResult = await sendTransaction({ account, transaction: paymentTx });
+            console.log('[blockchain] Payment tx sent:', paymentResult.transactionHash);
+
+            // Wait for on-chain confirmation before proceeding
+            // This ensures the payment actually succeeded (wasn't reverted)
+            try {
+                const receipt = await waitForReceipt({
+                    client: thirdwebClient,
+                    chain: activeChain,
+                    transactionHash: paymentResult.transactionHash,
+                });
+                if (receipt.status === 'reverted') {
+                    return {
+                        success: false,
+                        error: 'Payment transaction was reverted on-chain. Your wallet was not charged.',
+                    };
+                }
+                console.log('[blockchain] Payment confirmed on-chain, block:', receipt.blockNumber);
+            } catch (receiptErr: any) {
+                console.warn('[blockchain] Could not confirm receipt, proceeding:', receiptErr.message);
+            }
+
+            paidOnChain = true;
+            confirmedPriceWei = releasePriceWei;
+            paymentTxHash = paymentResult.transactionHash;
+        } catch (payErr: any) {
+            console.error('[blockchain] Buyer payment failed:', payErr);
+            return {
+                success: false,
+                error: `Payment failed: ${payErr.message}. Your wallet was not charged.`,
+            };
+        }
+
+        // Token ID: use the current minted_count as the next sequential ID.
+        // The DB trigger will increment minted_count after this insert.
+        const tokenId = `${release.minted_count}`;
         let mintTxHash: string | null = paymentTxHash;
 
         // ── On-chain minting via server wallet (fire-and-forget) ──
@@ -839,29 +867,29 @@ export async function mintToken(
             });
         }
 
-        // Create token record in Supabase (idempotent: ON CONFLICT DO NOTHING)
-        // If a previous attempt already created the row (e.g. on-chain succeeded,
-        // app crashed before DB write confirmation), we skip the duplicate.
+        // Create token record in Supabase
         const { data: token, error: tokenErr } = await supabase
             .from('nft_tokens')
-            .upsert(
-                {
-                    nft_release_id: releaseId,
-                    token_id: tokenId,
-                    owner_wallet_address: buyerWallet.toLowerCase(),
-                    mint_tx_hash: mintTxHash,
-                    price_paid_eth: paidOnChain ? Number(confirmedPriceWei) / 1e18 : null,
-                },
-                { onConflict: 'nft_release_id,token_id', ignoreDuplicates: true },
-            )
+            .insert({
+                nft_release_id: releaseId,
+                token_id: tokenId,
+                owner_wallet_address: buyerWallet.toLowerCase(),
+                mint_tx_hash: mintTxHash,
+                price_paid_eth: paidOnChain ? Number(confirmedPriceWei) / 1e18 : null,
+            })
             .select()
             .maybeSingle();
 
-        if (tokenErr && !tokenErr.message?.includes('duplicate')) {
-            return { success: false, error: tokenErr.message };
+        if (tokenErr) {
+            console.error('[blockchain] nft_tokens insert error:', tokenErr.message);
+            // If it's a duplicate, the purchase was already recorded — still treat as success
+            if (tokenErr.message?.includes('duplicate') || tokenErr.code === '23505') {
+                console.log('[blockchain] Token already exists, treating as success');
+            } else {
+                return { success: false, error: `Purchase recorded but failed to save: ${tokenErr.message}` };
+            }
         }
 
-        // If upsert skipped (duplicate), fetch the existing token
         const tokenRecord = token || (await supabase
             .from('nft_tokens')
             .select('id')
