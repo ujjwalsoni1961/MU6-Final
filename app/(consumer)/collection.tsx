@@ -15,6 +15,7 @@ import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { OwnedNFT } from '../../src/types';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
 import {
@@ -35,6 +36,7 @@ export default function CollectionScreen() {
     const router = useRouter();
     const { width } = useWindowDimensions();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
     const { walletAddress } = useAuth();
@@ -599,6 +601,7 @@ export default function CollectionScreen() {
                                                 editionNumber={item.editionNumber}
                                                 totalEditions={item.totalEditions}
                                                 rarity={item.rarity}
+                                                fiatCurrency={fiatCurrency}
                                                 variant="collection"
                                                 onPress={() => {
                                                     setGroupModalVisible(false);

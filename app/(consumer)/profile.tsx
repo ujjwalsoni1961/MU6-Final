@@ -10,6 +10,7 @@ import NFTCard from '../../src/components/shared/NFTCard';
 import { useAuth } from '../../src/context/AuthContext';
 import { useOwnedNFTs, useLikedSongs, useUserActivity } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import * as Clipboard from 'expo-clipboard';
 import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
 import { PRESET_AVATAR_IDS } from '../../src/hooks/useData';
@@ -51,6 +52,7 @@ export default function ProfileScreen() {
     const router = useRouter();
     const { profile, walletAddress, role } = useAuth();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
 
     // Real data hooks
     const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
@@ -268,6 +270,7 @@ export default function ProfileScreen() {
                                     editionNumber={nft.editionNumber}
                                     totalEditions={nft.totalEditions}
                                     rarity={nft.rarity}
+                                    fiatCurrency={fiatCurrency}
                                     onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: nft.id } })}
                                 />
                             </View>

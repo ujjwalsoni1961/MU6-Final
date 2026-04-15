@@ -23,6 +23,7 @@ const isWeb = Platform.OS === 'web';
 const tabs = ['Songs', 'Playlists', 'NFTs', 'Creators'];
 
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 
 /* ─── Creator Row ─── */
 function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
@@ -76,6 +77,7 @@ export default function LibraryScreen() {
     const router = useRouter();
     const { width } = useWindowDimensions();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
     const { playSong, playHistory } = usePlayer();
@@ -428,6 +430,7 @@ export default function LibraryScreen() {
                                             editionNumber={item.editionNumber}
                                             totalEditions={item.totalEditions}
                                             rarity={item.rarity}
+                                            fiatCurrency={fiatCurrency}
                                             variant="collection"
                                             onPress={() => {
                                                 setGroupModalVisible(false);

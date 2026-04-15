@@ -1689,6 +1689,72 @@ function mapRoyaltyShareRow(row: any): RoyaltyShare {
 }
 
 // ────────────────────────────────────────────
+// NFT SALES BY CREATOR
+// ────────────────────────────────────────────
+
+export interface NFTSaleRecord {
+    id: string;
+    songTitle: string;
+    buyerWallet: string;
+    pricePaidToken: number;
+    pricePaidEurAtSale: number;
+    txHash: string | null;
+    purchasedAt: string;
+    editionNumber: number;
+    saleType: 'primary' | 'secondary';
+}
+
+/** Get NFT primary sales for a creator's songs */
+export async function getCreatorNFTSales(profileId: string, limit = 50): Promise<NFTSaleRecord[]> {
+    // Get creator's song IDs
+    const { data: songs } = await supabase
+        .from('songs')
+        .select('id, title')
+        .eq('creator_id', profileId);
+
+    const songList = songs || [];
+    if (songList.length === 0) return [];
+
+    const songIds = songList.map((s) => s.id);
+    const songTitleMap = new Map(songList.map((s) => [s.id, s.title]));
+
+    // Get NFT releases for these songs
+    const { data: releases } = await supabase
+        .from('nft_releases')
+        .select('id, song_id')
+        .in('song_id', songIds);
+
+    const releaseList = releases || [];
+    if (releaseList.length === 0) return [];
+
+    const releaseIds = releaseList.map((r) => r.id);
+    const releaseSongMap = new Map(releaseList.map((r) => [r.id, r.song_id]));
+
+    // Get nft_tokens for these releases (primary sales)
+    const { data: tokens } = await supabase
+        .from('nft_tokens')
+        .select('id, release_id, owner_wallet, price_paid_token, price_paid_eur_at_sale, tx_hash, created_at, edition_number')
+        .in('release_id', releaseIds)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+    return (tokens || []).map((t: any) => {
+        const songId = releaseSongMap.get(t.release_id) || '';
+        return {
+            id: t.id,
+            songTitle: songTitleMap.get(songId) || 'Unknown',
+            buyerWallet: t.owner_wallet || '',
+            pricePaidToken: parseFloat(t.price_paid_token) || 0,
+            pricePaidEurAtSale: parseFloat(t.price_paid_eur_at_sale) || 0,
+            txHash: t.tx_hash || null,
+            purchasedAt: t.created_at,
+            editionNumber: t.edition_number || 0,
+            saleType: 'primary' as const,
+        };
+    });
+}
+
+// ────────────────────────────────────────────
 // BANK DETAILS & PAYOUT REQUESTS
 // ────────────────────────────────────────────
 

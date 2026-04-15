@@ -17,12 +17,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
     Settings as SettingsIcon, UserCog, CreditCard, LogOut,
-    ChevronRight, Wallet, Building, Globe, Shield, Save,
+    ChevronRight, Wallet, Building, Globe, Shield, Save, Coins,
 } from 'lucide-react-native';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { SelectField } from '../../src/components/form';
 import { COUNTRIES, PAYMENT_METHODS } from '../../src/types/creator';
+import { useCurrency } from '../../src/hooks/useCurrency';
+
+const CURRENCY_OPTIONS = [
+    { value: 'EUR', label: '€ EUR — Euro' },
+    { value: 'USD', label: '$ USD — US Dollar' },
+    { value: 'GBP', label: '£ GBP — British Pound' },
+];
 
 const isWeb = Platform.OS === 'web';
 
@@ -67,6 +74,7 @@ export default function SettingsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
     const { profile, signOut, refreshProfile, walletAddress } = useAuth();
+    const { displayCurrency, updateCurrency } = useCurrency();
 
     // Payout form state
     const [paymentMethod, setPaymentMethod] = useState('');
@@ -195,6 +203,24 @@ export default function SettingsScreen() {
                                 </View>
                             </View>
                         </View>
+                    </View>
+                </SectionCard>
+
+                {/* ─── Display Currency ─── */}
+                <SectionCard title="Display Currency" subtitle="Choose how prices are shown" icon={Coins} style={{ zIndex: 20 }}>
+                    <View style={{ zIndex: 20, position: 'relative' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
+                            Preferred Currency
+                        </Text>
+                        <SelectField
+                            options={CURRENCY_OPTIONS}
+                            value={displayCurrency}
+                            onChange={(val) => updateCurrency(val as any)}
+                            placeholder="Select currency"
+                        />
+                        <Text style={{ fontSize: 11, color: colors.text.muted, marginTop: 8 }}>
+                            All prices will be shown in this currency alongside POL amounts.
+                        </Text>
                     </View>
                 </SectionCard>
 

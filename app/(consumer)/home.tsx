@@ -8,6 +8,7 @@ import SongCard from '../../src/components/shared/SongCard';
 import NFTCard from '../../src/components/shared/NFTCard';
 import CreatorCard from '../../src/components/shared/ArtistCard';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useTrendingSongs, useNewReleases, useArtists, useNFTReleases } from '../../src/hooks/useData';
@@ -114,6 +115,7 @@ export default function HomeScreen() {
     const router = useRouter();
     const { width } = useWindowDimensions();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
     const { playSong } = usePlayer();
 
     // Real data hooks
@@ -295,6 +297,7 @@ export default function HomeScreen() {
                                         editionNumber={nft.editionNumber}
                                         totalEditions={nft.totalEditions}
                                         rarity={nft.rarity}
+                                        fiatCurrency={fiatCurrency}
                                         onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: nft.id } })}
                                     />
                                 </View>

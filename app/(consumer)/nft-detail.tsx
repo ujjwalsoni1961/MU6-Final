@@ -24,6 +24,7 @@ import {
 } from '../../src/hooks/useData';
 import { getNFTTradeHistory } from '../../src/services/database';
 import { convertTokenToFiat, formatFiat, formatToken } from '../../src/services/fxRate';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
@@ -75,6 +76,7 @@ export default function NFTDetailScreen() {
     const { isDark, colors } = useTheme();
     const { walletAddress, profile } = useAuth();
     const account = useActiveAccount();
+    const { fiatCurrency } = useCurrency();
 
     // Determine view mode: primary (release) or secondary (listing)
     const viewMode: ViewMode = modeParam === 'listing' ? 'listing' : 'release';
@@ -150,21 +152,21 @@ export default function NFTDetailScreen() {
         };
     }, [id]);
 
-    // Fetch fiat price equivalent for the NFT price
+    // Fetch fiat price equivalent for the NFT price in user's preferred currency
     useEffect(() => {
         let isMounted = true;
         const price = nft?.price ?? (listing as any)?.price;
         if (price != null && price > 0) {
-            convertTokenToFiat(price, 'eur')
-                .then((eurValue) => {
-                    if (isMounted) setFiatPrice(formatFiat(eurValue, 'eur'));
+            convertTokenToFiat(price, fiatCurrency)
+                .then((fiatValue) => {
+                    if (isMounted) setFiatPrice(formatFiat(fiatValue, fiatCurrency));
                 })
                 .catch(() => {
                     if (isMounted) setFiatPrice(null);
                 });
         }
         return () => { isMounted = false; };
-    }, [nft, listing]);
+    }, [nft, listing, fiatCurrency]);
 
     useEffect(() => {
         let isMounted = true;
@@ -591,6 +593,7 @@ export default function NFTDetailScreen() {
                                         editionNumber={n.editionNumber}
                                         totalEditions={n.totalEditions}
                                         rarity={n.rarity}
+                                        fiatCurrency={fiatCurrency}
                                         onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: n.id } })}
                                     />
                                 </View>

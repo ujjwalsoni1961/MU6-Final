@@ -52,7 +52,7 @@ export default function AdminMarketplaceScreen() {
                                     {l.sellerWallet ? `${l.sellerWallet.slice(0, 6)}...${l.sellerWallet.slice(-4)}` : '—'}
                                 </Text>
                                 <Text style={{ flex: 0.7, color: colors.accent.cyan, fontSize: 12, fontWeight: '600' }}>
-                                    {l.priceEth?.toFixed(4)} ETH
+                                    {l.priceEth?.toFixed(4)} POL
                                 </Text>
                                 <View style={{ flex: 1, flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
                                     <StatusBadge status={l.soldAt ? 'completed' : (l.isActive ? 'active' : 'delisted')} />
@@ -86,7 +86,7 @@ export default function AdminMarketplaceScreen() {
                                     <ShoppingBag size={18} color={l.isFlagged ? '#fb923c' : colors.status.error} style={{ marginRight: 10 }} />
                                     <View style={{ flex: 1 }}>
                                         <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{l.songTitle}</Text>
-                                        <Text style={{ color: colors.accent.cyan, fontSize: 12, fontWeight: '600' }}>{l.priceEth?.toFixed(4)} ETH</Text>
+                                        <Text style={{ color: colors.accent.cyan, fontSize: 12, fontWeight: '600' }}>{l.priceEth?.toFixed(4)} POL</Text>
                                     </View>
                                     <View style={{ flexDirection: 'row', gap: 4 }}>
                                         <StatusBadge status={l.soldAt ? 'completed' : (l.isActive ? 'active' : 'delisted')} />

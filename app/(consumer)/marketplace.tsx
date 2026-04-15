@@ -11,6 +11,7 @@ import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { NFT } from '../../src/types';
 import { useNFTReleases, useMarketplaceListings } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import ErrorState from '../../src/components/shared/ErrorState';
 
 const isWeb = Platform.OS === 'web';
@@ -30,6 +31,7 @@ export default function MarketplaceScreen() {
     const router = useRouter();
     const { width } = useWindowDimensions();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -269,6 +271,7 @@ export default function MarketplaceScreen() {
                                                 editionNumber={item.editionNumber}
                                                 totalEditions={item.totalEditions}
                                                 rarity={item.rarity}
+                                                fiatCurrency={fiatCurrency}
                                                 onPress={() => {
                                                     setGroupModalVisible(false);
                                                     setTimeout(() => handleItemPress(item), 300);

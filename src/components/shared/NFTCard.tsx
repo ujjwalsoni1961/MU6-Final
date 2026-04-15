@@ -9,6 +9,8 @@ import AnimatedPressable from './AnimatedPressable';
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
 
+import type { FiatCurrency } from '../../services/fxRate';
+
 interface NFTCardProps {
     cover: string;
     title: string;
@@ -19,13 +21,15 @@ interface NFTCardProps {
     rarity: 'common' | 'rare' | 'legendary';
     /** 'collect' (default) for consumer marketplace, 'manage' for artist NFT Manager, 'collection' for owned NFTs (no bottom button) */
     variant?: 'collect' | 'manage' | 'collection';
+    /** Optional: pass user's preferred fiat currency to show fiat prices on the tag */
+    fiatCurrency?: FiatCurrency;
     onPress?: () => void;
 }
 
 import { useTheme } from '../../context/ThemeContext';
 
 export default function NFTCard({
-    cover, title, artist, price, editionNumber, totalEditions, rarity, variant = 'collect', onPress,
+    cover, title, artist, price, editionNumber, totalEditions, rarity, variant = 'collect', fiatCurrency, onPress,
 }: NFTCardProps) {
     const { isDark, colors } = useTheme();
 
@@ -65,7 +69,7 @@ export default function NFTCard({
                 </View>
                 {/* Price tag — top RIGHT */}
                 <View style={{ position: 'absolute', top: 8, right: 8 }}>
-                    <PriceTag price={price} dark />
+                    <PriceTag price={price} dark fiatCurrency={fiatCurrency} />
                 </View>
                 <View style={{ position: 'absolute', bottom: variant === 'manage' ? 8 : 12, left: variant === 'manage' ? 8 : 12, right: variant === 'manage' ? 8 : 12 }}>
                     <Text style={{ color: '#fff', fontWeight: '700', fontSize: variant === 'manage' ? 12 : 13, lineHeight: variant === 'manage' ? 16 : 20, paddingBottom: 2 }} numberOfLines={1}>{title}</Text>

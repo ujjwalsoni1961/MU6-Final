@@ -5,6 +5,7 @@ import { ArrowLeft, Gem } from 'lucide-react-native';
 import NFTCard from '../../src/components/shared/NFTCard';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import { useNFTReleases } from '../../src/hooks/useData';
 import ErrorState from '../../src/components/shared/ErrorState';
 import EmptyState from '../../src/components/shared/EmptyState';
@@ -15,6 +16,7 @@ const isWeb = Platform.OS === 'web';
 export default function AllNFTsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
     const { data: nftDrops, loading, error, refresh } = useNFTReleases();
 
     const renderNFT = ({ item }: { item: NFT }) => (
@@ -27,6 +29,7 @@ export default function AllNFTsScreen() {
                 editionNumber={item.editionNumber}
                 totalEditions={item.totalEditions}
                 rarity={item.rarity}
+                fiatCurrency={fiatCurrency}
                 onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } })}
             />
         </View>

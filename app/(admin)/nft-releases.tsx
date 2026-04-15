@@ -58,7 +58,7 @@ export default function AdminNFTReleasesScreen() {
                                     {r.mintedCount}/{r.totalSupply}
                                 </Text>
                                 <Text style={{ flex: 0.7, color: colors.status.warning, fontSize: 12, fontWeight: '600' }}>
-                                    {r.priceEth ? `${r.priceEth} ETH` : 'Free'}
+                                    {r.priceEth ? `${r.priceEth} POL` : 'Free'}
                                 </Text>
                                 <View style={{ flex: 0.7 }}>
                                     <StatusBadge status={r.isActive ? 'active' : 'delisted'} />
@@ -86,7 +86,7 @@ export default function AdminNFTReleasesScreen() {
                                 </View>
                                 <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
                                     <Text style={{ color: colors.accent.cyan, fontSize: 12 }}>{r.mintedCount}/{r.totalSupply} minted</Text>
-                                    <Text style={{ color: colors.status.warning, fontSize: 12 }}>{r.priceEth ? `${r.priceEth} ETH` : 'Free'}</Text>
+                                    <Text style={{ color: colors.status.warning, fontSize: 12 }}>{r.priceEth ? `${r.priceEth} POL` : 'Free'}</Text>
                                     <StatusBadge status={r.isActive ? 'active' : 'delisted'} />
                                 </View>
                                 <RowActions>

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Platform } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Tabs, useRouter, usePathname } from 'expo-router';
-import { LayoutDashboard, Upload, Music, DollarSign, Gem, Settings, LogOut } from 'lucide-react-native';
+import { LayoutDashboard, Upload, Music, DollarSign, Gem, Settings, LogOut, Users } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
 
@@ -60,6 +60,7 @@ function CreatorSidebar() {
         { path: '/(artist)/songs', match: '/songs', label: 'My Songs', Icon: Music },
         { path: '/(artist)/earnings', match: '/earnings', label: 'Earnings', Icon: DollarSign },
         { path: '/(artist)/nft-manager', match: '/nft-manager', label: 'NFT Manager', Icon: Gem },
+        { path: '/(artist)/splits', match: '/splits', label: 'Splits', Icon: Users },
         { path: '/(artist)/settings', match: '/settings', label: 'Settings', Icon: Settings },
     ];
 
@@ -164,6 +165,7 @@ export default function CreatorLayout() {
             <Tabs.Screen name="songs" options={{ title: 'Songs', tabBarIcon: ({ color, size }) => <Music size={size} color={color} /> }} />
             <Tabs.Screen name="earnings" options={{ title: 'Earnings', tabBarIcon: ({ color, size }) => <DollarSign size={size} color={color} /> }} />
             <Tabs.Screen name="nft-manager" options={{ title: 'NFTs', tabBarIcon: ({ color, size }) => <Gem size={size} color={color} /> }} />
+            <Tabs.Screen name="splits" options={{ href: null }} />
             <Tabs.Screen name="settings" options={{ href: null }} />
             <Tabs.Screen name="split-editor" options={{ href: null }} />
             <Tabs.Screen name="edit-artist-profile" options={{ href: null }} />

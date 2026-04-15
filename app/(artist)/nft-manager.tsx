@@ -11,6 +11,7 @@ import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { NFT, Song } from '../../src/types';
 import { useCreatorNFTs, useCreatorSongs, useCreateNFTRelease } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
 import ErrorState from '../../src/components/shared/ErrorState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
@@ -29,6 +30,7 @@ const RARITY_OPTIONS: { label: string; value: Rarity; color: string }[] = [
 export default function NFTManagerScreen() {
     const { width } = useWindowDimensions();
     const { isDark, colors } = useTheme();
+    const { fiatCurrency } = useCurrency();
     const { profile } = useAuth();
     const account = useActiveAccount();
     const router = useRouter();
@@ -463,6 +465,7 @@ export default function NFTManagerScreen() {
                                             editionNumber={item.editionNumber}
                                             totalEditions={item.totalEditions}
                                             rarity={item.rarity}
+                                            fiatCurrency={fiatCurrency}
                                             variant="manage"
                                             onPress={() => {
                                                 setGroupModalVisible(false);

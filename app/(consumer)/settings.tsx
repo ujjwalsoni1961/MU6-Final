@@ -17,6 +17,14 @@ const isWeb = Platform.OS === 'web';
 
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
+import { useCurrency } from '../../src/hooks/useCurrency';
+import { SelectField } from '../../src/components/form';
+
+const CURRENCY_OPTIONS = [
+    { value: 'EUR', label: '€ EUR — Euro' },
+    { value: 'USD', label: '$ USD — US Dollar' },
+    { value: 'GBP', label: '£ GBP — British Pound' },
+];
 
 /* ─── Setting Row ─── */
 function SettingRow({ icon, label, subtitle, danger, onPress, isSwitch, switchValue, onSwitchChange }: {
@@ -159,6 +167,7 @@ export default function SettingsScreen() {
     const router = useRouter();
     const { isDark, colors, toggleTheme } = useTheme();
     const { signOut, role } = useAuth();
+    const { displayCurrency, updateCurrency } = useCurrency();
     const Container = isWeb ? View : SafeAreaView;
 
     // Modal states
@@ -281,6 +290,24 @@ export default function SettingsScreen() {
                         subtitle="Streaming & download quality"
                         onPress={() => setAudioModal(true)}
                     />
+                    <Divider />
+                    <View style={{ paddingVertical: 14, paddingHorizontal: 16, zIndex: 20 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                            <View style={[styles.settingIcon, { backgroundColor: isDark ? 'rgba(56,180,186,0.15)' : 'rgba(56,180,186,0.1)' }]}>
+                                <Wallet size={18} color="#38b4ba" />
+                            </View>
+                            <View style={styles.settingTextContainer}>
+                                <Text style={[styles.settingLabel, { color: colors.text.primary }]}>Display Currency</Text>
+                                <Text style={[styles.settingSubtitle, { color: colors.text.secondary }]}>How prices are shown</Text>
+                            </View>
+                        </View>
+                        <SelectField
+                            options={CURRENCY_OPTIONS}
+                            value={displayCurrency}
+                            onChange={(val) => updateCurrency(val as any)}
+                            placeholder="Select currency"
+                        />
+                    </View>
                     <Divider />
                     <SettingRow
                         icon={isDark ? <Moon size={18} color="#38b4ba" /> : <Sun size={18} color="#38b4ba" />}
