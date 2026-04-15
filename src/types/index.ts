@@ -24,6 +24,8 @@ export interface Song {
     _audioPath?: string | null;
     _coverPath?: string | null;
     _durationSeconds?: number | null;
+    /** Deployed thirdweb Split contract address for revenue distribution */
+    splitContractAddress?: string | null;
 }
 
 export interface Artist {
@@ -48,6 +50,10 @@ export interface NFT {
     artistName: string;
     coverImage: string;
     price: number;
+    /** Price in native token (POL) */
+    priceToken?: number | null;
+    /** EUR snapshot at listing/mint time */
+    priceEurAtList?: number | null;
     editionNumber: number;
     totalEditions: number;
     owner: string;
@@ -112,7 +118,24 @@ export interface TradeEvent {
     id: string;      // Unique identifier for the event
     type: 'mint' | 'sale';
     date: string;    // ISO string timestamp
-    price: number;   // Price in ETH
+    price: number;   // Price in ETH/POL
+    priceEur?: number; // EUR price at time of trade
     fromWallet: string;
     toWallet: string;
+}
+
+/** User's display currency preference */
+export type DisplayCurrency = 'EUR' | 'USD' | 'GBP';
+
+/** Profile with display currency */
+export interface ProfileSettings {
+    displayCurrency: DisplayCurrency;
+}
+
+/** NFT token with on-chain price data */
+export interface NFTTokenPriceData {
+    pricePaidToken?: number | null;
+    pricePaidEurAtSale?: number | null;
+    lastSalePriceToken?: number | null;
+    lastSalePriceEur?: number | null;
 }

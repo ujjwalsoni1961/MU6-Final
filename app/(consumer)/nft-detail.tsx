@@ -11,7 +11,9 @@ import NFTCard from '../../src/components/shared/NFTCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
-import { useActiveAccount } from 'thirdweb/react';
+import { useActiveAccount, PayEmbed } from 'thirdweb/react';
+import { prepareTransaction } from 'thirdweb';
+import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 import {
     useNFTReleases,
     useNFTReleaseById,
@@ -21,6 +23,7 @@ import {
     useBuyListing,
 } from '../../src/hooks/useData';
 import { getNFTTradeHistory } from '../../src/services/database';
+import { convertTokenToFiat, formatFiat, formatToken } from '../../src/services/fxRate';
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
@@ -91,6 +94,9 @@ export default function NFTDetailScreen() {
     const [tradeHistory, setTradeHistory] = useState<TradeEvent[]>([]);
     const [historyLoading, setHistoryLoading] = useState(false);
 
+    // FX Price Display
+    const [fiatPrice, setFiatPrice] = useState<string | null>(null);
+
     // Find the relevant NFT (try release ID first, then token ID as fallback from collection)
     const nft = viewMode === 'listing'
         ? allListings.find((l) => l.listingId === listingParam || l.id === id)
@@ -143,6 +149,22 @@ export default function NFTDetailScreen() {
             buyHook.reset();
         };
     }, [id]);
+
+    // Fetch fiat price equivalent for the NFT price
+    useEffect(() => {
+        let isMounted = true;
+        const price = nft?.price ?? (listing as any)?.price;
+        if (price != null && price > 0) {
+            convertTokenToFiat(price, 'eur')
+                .then((eurValue) => {
+                    if (isMounted) setFiatPrice(formatFiat(eurValue, 'eur'));
+                })
+                .catch(() => {
+                    if (isMounted) setFiatPrice(null);
+                });
+        }
+        return () => { isMounted = false; };
+    }, [nft, listing]);
 
     useEffect(() => {
         let isMounted = true;
@@ -387,9 +409,22 @@ export default function NFTDetailScreen() {
                             <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
                                 {isPrimary ? 'Mint Price' : 'Listing Price'}
                             </Text>
-                            <Text style={{ fontSize: 40, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, marginTop: 4 }}>
-                                {nft.price} POL
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
+                                {fiatPrice ? (
+                                    <>
+                                        <Text style={{ fontSize: 40, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1 }}>
+                                            {fiatPrice}
+                                        </Text>
+                                        <Text style={{ fontSize: 16, fontWeight: '600', color: colors.text.secondary }}>
+                                            ({formatToken(nft.price)})
+                                        </Text>
+                                    </>
+                                ) : (
+                                    <Text style={{ fontSize: 40, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1 }}>
+                                        {nft.price} POL
+                                    </Text>
+                                )}
+                            </View>
                             <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4 }}>
                                 {isPrimary
                                     ? `${nft.editionNumber - 1} of ${nft.totalEditions} minted`
@@ -443,6 +478,36 @@ export default function NFTDetailScreen() {
                                     </>
                                 )}
                             </AnimatedPressable>
+
+                            {/* PayEmbed — fiat card payment option (web only) */}
+                            {isWeb && isPrimary && canMint && !isSoldOut && !actionSuccess && walletAddress && (
+                                <View style={{ marginTop: 16 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                                        <View style={{ flex: 1, height: 1, backgroundColor: colors.text.secondary + '30' }} />
+                                        <Text style={{ color: colors.text.secondary, fontSize: 11, fontWeight: '600', marginHorizontal: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
+                                            or pay with card
+                                        </Text>
+                                        <View style={{ flex: 1, height: 1, backgroundColor: colors.text.secondary + '30' }} />
+                                    </View>
+                                    <PayEmbed
+                                        client={thirdwebClient}
+                                        payOptions={{
+                                            mode: 'transaction',
+                                            transaction: prepareTransaction({
+                                                to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39',
+                                                chain: activeChain,
+                                                client: thirdwebClient,
+                                                value: BigInt(Math.round((nft.price || 0) * 1e18)),
+                                            }),
+                                            metadata: {
+                                                name: nft.songTitle,
+                                                image: nft.coverImage,
+                                            },
+                                        }}
+                                        theme="dark"
+                                    />
+                                </View>
+                            )}
                         </GlassCard>
 
                         {/* Owner / Seller info */}

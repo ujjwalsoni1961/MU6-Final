@@ -24,6 +24,7 @@ import {
 } from '../lib/thirdweb';
 import { supabase } from '../lib/supabase';
 import { sendNftMintedEmail, sendNftPurchaseConfirmEmail } from './email';
+import { getTokenToEurRate } from './fxRate';
 
 // ────────────────────────────────────────────
 // Types
@@ -867,7 +868,19 @@ export async function mintToken(
             });
         }
 
-        // Create token record in Supabase
+        // Snapshot the EUR rate at time of sale (best-effort, non-blocking)
+        let eurRateAtSale = 0;
+        try {
+            eurRateAtSale = await getTokenToEurRate();
+        } catch (fxErr) {
+            console.warn('[blockchain] FX rate unavailable at sale time:', fxErr);
+        }
+        const pricePaidToken = paidOnChain ? Number(confirmedPriceWei) / 1e18 : null;
+        const pricePaidEurAtSale = pricePaidToken != null && eurRateAtSale > 0
+            ? pricePaidToken * eurRateAtSale
+            : null;
+
+        // Create token record in Supabase (with token + EUR price snapshots)
         const { data: token, error: tokenErr } = await supabase
             .from('nft_tokens')
             .insert({
@@ -875,7 +888,9 @@ export async function mintToken(
                 token_id: tokenId,
                 owner_wallet_address: buyerWallet.toLowerCase(),
                 mint_tx_hash: mintTxHash,
-                price_paid_eth: paidOnChain ? Number(confirmedPriceWei) / 1e18 : null,
+                price_paid_eth: pricePaidToken,
+                price_paid_token: pricePaidToken,
+                price_paid_eur_at_sale: pricePaidEurAtSale,
             })
             .select()
             .maybeSingle();
@@ -901,112 +916,53 @@ export async function mintToken(
         // on nft_tokens INSERT. No explicit increment needed here — doing so would
         // double-count. The trigger in 001_initial_schema.sql handles it atomically.
 
-        // ── Record Primary Sale Revenue ──
-        // ONLY record revenue when the buyer was ACTUALLY debited on-chain.
-        // confirmedPriceWei is set above only after a successful claim with a non-zero price.
+        // ── Distribute Primary Sale Revenue (On-Chain) ──
+        // NFT sale revenue is distributed on-chain, NOT via royalty_events/royalty_shares.
+        // - 5% platform fee stays in server wallet
+        // - 95% artist pool → sent to Split contract (if deployed) or creator wallet (fallback)
         if (paidOnChain && confirmedPriceWei > BigInt(0)) {
-            const salePriceEth = Number(confirmedPriceWei) / 1e18;
+            const salePricePol = Number(confirmedPriceWei) / 1e18;
             try {
-                // Look up the song's creator and their wallet
                 const { data: songData } = await supabase
                     .from('songs')
-                    .select('id, creator_id')
+                    .select('id, creator_id, split_contract_address')
                     .eq('id', release.song_id)
                     .maybeSingle();
 
-                const creatorId = songData?.creator_id;
-                const sourceRef = `primary_sale:${releaseId}:${tokenId}`;
-                // Primary sale split: 5% platform fee (server keeps), 95% distributed per split sheet
-                const salePricePol = salePriceEth;
-                const platformFeePol = salePricePol * 0.05;
                 const artistPoolPol = salePricePol * 0.95;
 
-                if (creatorId && salePricePol > 0) {
-                    // Create a royalty_event for the primary sale (idempotent)
-                    const { data: royaltyEvent } = await supabase
-                        .from('royalty_events')
-                        .upsert(
-                            {
-                                song_id: songData.id,
-                                source_type: 'primary_sale' as const,
-                                source_reference: sourceRef,
-                                gross_amount_eur: salePricePol,
-                                tx_hash: paymentTxHash,
-                            },
-                            { onConflict: 'source_type,source_reference', ignoreDuplicates: true },
-                        )
-                        .select()
-                        .maybeSingle();
+                if (songData && artistPoolPol > 0) {
+                    const artistPoolWei = BigInt(Math.floor(artistPoolPol * 1e18)).toString();
 
-                    if (royaltyEvent) {
-                        // Look up split sheet for this song
-                        const { data: splits } = await supabase
-                            .from('song_rights_splits')
-                            .select('*, linked_profile_id, linked_wallet_address, share_percent, party_email')
-                            .eq('song_id', songData.id);
+                    if (songData.split_contract_address) {
+                        // Send 95% to the deployed Split contract — it distributes on-chain per shares
+                        console.log('[blockchain] Primary sale: sending', artistPoolPol, 'POL to Split contract:', songData.split_contract_address);
+                        try {
+                            await transferToArtistWallet(songData.split_contract_address, artistPoolWei);
+                        } catch (err) {
+                            console.error('[blockchain] Split contract payment failed (non-blocking):', err);
+                        }
+                    } else {
+                        // Fallback: no Split contract → send 95% directly to creator wallet
+                        const { data: creatorProfile } = await supabase
+                            .from('profiles')
+                            .select('wallet_address')
+                            .eq('id', songData.creator_id)
+                            .maybeSingle();
 
-                        if (splits && splits.length > 0) {
-                            // Distribute per split sheet
-                            console.log('[blockchain] Primary sale: distributing', artistPoolPol, 'POL across', splits.length, 'split parties');
-                            for (const split of splits) {
-                                const partyAmount = artistPoolPol * (parseFloat(split.share_percent) / 100);
-                                await supabase
-                                    .from('royalty_shares')
-                                    .insert({
-                                        royalty_event_id: royaltyEvent.id,
-                                        party_email: split.party_email,
-                                        linked_profile_id: split.linked_profile_id || null,
-                                        wallet_address: split.linked_wallet_address || null,
-                                        share_type: 'split',
-                                        share_percent: parseFloat(split.share_percent),
-                                        amount_eur: partyAmount,
-                                    });
-
-                                // Transfer to party's wallet if they have one
-                                if (split.linked_wallet_address && partyAmount > 0) {
-                                    const partyWei = BigInt(Math.floor(partyAmount * 1e18)).toString();
-                                    try {
-                                        await transferToArtistWallet(split.linked_wallet_address, partyWei);
-                                    } catch (err) {
-                                        console.error('[blockchain] Split party payment failed (non-blocking):', err);
-                                    }
-                                }
-                            }
-                        } else {
-                            // No split sheet → 100% of artist pool to creator (backward compatible)
-                            const { data: creatorProfile } = await supabase
-                                .from('profiles')
-                                .select('wallet_address')
-                                .eq('id', creatorId)
-                                .maybeSingle();
-
-                            await supabase
-                                .from('royalty_shares')
-                                .insert({
-                                    royalty_event_id: royaltyEvent.id,
-                                    linked_profile_id: creatorId,
-                                    wallet_address: creatorProfile?.wallet_address || null,
-                                    share_type: 'direct',
-                                    share_percent: 95,
-                                    amount_eur: artistPoolPol,
-                                });
-
-                            console.log('[blockchain] Primary sale: no splits, 95% (' + artistPoolPol + ' POL) to creator');
-                            if (creatorProfile?.wallet_address) {
-                                const artistAmountWei = BigInt(Math.floor(artistPoolPol * 1e18)).toString();
-                                try {
-                                    await transferToArtistWallet(creatorProfile.wallet_address, artistAmountWei);
-                                } catch (err) {
-                                    console.error('[blockchain] Artist payment failed (non-blocking):', err);
-                                }
+                        if (creatorProfile?.wallet_address) {
+                            console.log('[blockchain] Primary sale: no split contract, sending', artistPoolPol, 'POL to creator:', creatorProfile.wallet_address);
+                            try {
+                                await transferToArtistWallet(creatorProfile.wallet_address, artistPoolWei);
+                            } catch (err) {
+                                console.error('[blockchain] Creator payment failed (non-blocking):', err);
                             }
                         }
-                        console.log('[blockchain] Primary sale revenue recorded for release:', releaseId);
                     }
+                    console.log('[blockchain] Primary sale on-chain distribution complete for release:', releaseId);
                 }
             } catch (revErr) {
-                // Non-blocking: log but don't fail the mint
-                console.warn('[blockchain] Failed to record primary sale revenue (non-blocking):', revErr);
+                console.warn('[blockchain] Failed to distribute primary sale revenue (non-blocking):', revErr);
             }
         }
 

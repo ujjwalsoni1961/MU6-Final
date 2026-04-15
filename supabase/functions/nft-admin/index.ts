@@ -231,6 +231,155 @@ Deno.serve(async (req: Request) => {
             return jsonResponse({ success: true, transactionId: txId, result });
         }
 
+        // ── Deploy Split Contract ──
+        if (action === "deploySplit") {
+            const { songId } = body;
+            if (!songId) return jsonResponse({ error: "Missing songId" }, 400);
+
+            // Create an authenticated Supabase client using the caller's token
+            const authHeader = req.headers.get("Authorization") || "";
+            const userToken = authHeader.replace("Bearer ", "");
+            const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                global: { headers: { Authorization: `Bearer ${userToken}` } },
+            });
+
+            // Fetch song details
+            const { data: song, error: songErr } = await supabaseAdmin
+                .from("songs")
+                .select("id, title, split_contract_address")
+                .eq("id", songId)
+                .maybeSingle();
+
+            if (songErr || !song) {
+                return jsonResponse({ error: songErr?.message || "Song not found" }, 404);
+            }
+
+            // If already deployed, return existing address
+            if (song.split_contract_address) {
+                return jsonResponse({
+                    success: true,
+                    contractAddress: song.split_contract_address,
+                    alreadyDeployed: true,
+                });
+            }
+
+            // Fetch split sheet
+            const { data: splits, error: splitsErr } = await supabaseAdmin
+                .from("song_rights_splits")
+                .select("party_name, party_email, share_percent, linked_wallet_address")
+                .eq("song_id", songId);
+
+            if (splitsErr || !splits || splits.length === 0) {
+                return jsonResponse({ error: "No split sheet found for this song" }, 400);
+            }
+
+            // Ensure all parties have wallet addresses
+            const partiesWithWallets = splits.filter((s: any) => !!s.linked_wallet_address);
+            if (partiesWithWallets.length === 0) {
+                return jsonResponse({ error: "No split parties have linked wallet addresses" }, 400);
+            }
+
+            // Build recipients array: sharesBps = share_percent * 100
+            // Only include parties with wallets; re-normalize shares to sum to 10000 bps
+            const totalSharePercent = partiesWithWallets.reduce(
+                (sum: number, s: any) => sum + parseFloat(s.share_percent), 0
+            );
+            const recipients = partiesWithWallets.map((s: any) => ({
+                address: s.linked_wallet_address,
+                sharesBps: Math.round((parseFloat(s.share_percent) / totalSharePercent) * 10000),
+            }));
+
+            // Ensure shares sum to exactly 10000
+            const bpsSum = recipients.reduce((sum: number, r: any) => sum + r.sharesBps, 0);
+            if (bpsSum !== 10000 && recipients.length > 0) {
+                recipients[0].sharesBps += 10000 - bpsSum;
+            }
+
+            console.log("[nft-admin] deploySplit for song:", song.title, "recipients:", JSON.stringify(recipients));
+
+            // Deploy Split contract via Thirdweb Engine
+            const deployUrl = "https://engine.thirdweb.com/v1/deploy/prebuilt/split";
+            const deployBody = {
+                chain: CHAIN_ID.toString(),
+                contractMetadata: {
+                    name: `MU6 Split - ${song.title}`,
+                    recipients,
+                },
+            };
+
+            const deployResponse = await fetch(deployUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-secret-key": THIRDWEB_SECRET_KEY,
+                    "x-backend-wallet-address": SERVER_WALLET,
+                },
+                body: JSON.stringify(deployBody),
+            });
+
+            const deployText = await deployResponse.text();
+            console.log("[nft-admin] deploySplit response:", deployResponse.status, deployText);
+            let deployResult;
+            try { deployResult = JSON.parse(deployText); } catch { deployResult = { raw: deployText }; }
+
+            if (!deployResponse.ok) {
+                return jsonResponse({ success: false, error: deployResult }, deployResponse.status);
+            }
+
+            // Extract the deployed contract address or transaction ID
+            const deployedAddress = deployResult?.result?.contractAddress
+                || deployResult?.result?.deployedAddress;
+            const deployTxId = deployResult?.result?.transactions?.[0]?.id
+                || deployResult?.result?.queueId;
+
+            // If we got a transaction ID but no address yet, wait for confirmation
+            let finalAddress = deployedAddress;
+            if (!finalAddress && deployTxId) {
+                console.log("[nft-admin] Waiting for deploy tx:", deployTxId);
+                const txResult = await waitForTx(deployTxId, 60000);
+                if (txResult.confirmed) {
+                    // Fetch the deployed address from the transaction result
+                    const txStatusUrl = `https://engine.thirdweb.com/v1/transactions/${deployTxId}`;
+                    const statusResp = await fetch(txStatusUrl, {
+                        headers: { "x-secret-key": THIRDWEB_SECRET_KEY },
+                    });
+                    const statusData = await statusResp.json();
+                    finalAddress = statusData?.result?.contractAddress
+                        || statusData?.result?.deployedAddress;
+                } else {
+                    return jsonResponse({
+                        success: false,
+                        error: txResult.error || "Deploy transaction did not confirm",
+                    }, 500);
+                }
+            }
+
+            if (finalAddress) {
+                // Write the address back to the songs table
+                const { error: updateErr } = await supabaseAdmin
+                    .from("songs")
+                    .update({ split_contract_address: finalAddress })
+                    .eq("id", songId);
+
+                if (updateErr) {
+                    console.error("[nft-admin] Failed to update song with split address:", updateErr.message);
+                }
+
+                return jsonResponse({
+                    success: true,
+                    contractAddress: finalAddress,
+                });
+            }
+
+            // If we still don't have an address, return the raw result for debugging
+            return jsonResponse({
+                success: true,
+                contractAddress: null,
+                deployResult,
+                note: "Deploy submitted but address not yet available. Check transaction status.",
+            });
+        }
+
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     } catch (err: any) {
         console.error("[nft-admin] Error:", err);
