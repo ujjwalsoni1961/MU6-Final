@@ -5,6 +5,7 @@ import { Tabs, useRouter, usePathname } from 'expo-router';
 import { LayoutDashboard, Upload, Music, DollarSign, Gem, Settings, LogOut, Users } from 'lucide-react-native';
 import { useAuth } from '../../src/context/AuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useCreatorRole } from '../../src/hooks/useCreatorRole';
 
 const isWeb = Platform.OS === 'web';
 
@@ -53,16 +54,25 @@ function CreatorSidebar() {
     const pathname = usePathname();
     const { signOut } = useAuth();
     const { isDark, colors } = useTheme();
+    const { isCollaborator } = useCreatorRole();
 
-    const navItems = [
-        { path: '/(artist)/dashboard', match: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-        { path: '/(artist)/upload', match: '/upload', label: 'Upload', Icon: Upload },
-        { path: '/(artist)/songs', match: '/songs', label: 'My Songs', Icon: Music },
-        { path: '/(artist)/earnings', match: '/earnings', label: 'Earnings', Icon: DollarSign },
-        { path: '/(artist)/nft-manager', match: '/nft-manager', label: 'NFT Manager', Icon: Gem },
-        { path: '/(artist)/splits', match: '/splits', label: 'Splits', Icon: Users },
-        { path: '/(artist)/settings', match: '/settings', label: 'Settings', Icon: Settings },
+    const allNavItems = [
+        { path: '/(artist)/dashboard', match: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard, showFor: 'all' },
+        { path: '/(artist)/upload', match: '/upload', label: 'Upload', Icon: Upload, showFor: 'artist' },
+        { path: '/(artist)/songs', match: '/songs', label: 'My Songs', Icon: Music, showFor: 'artist' },
+        { path: '/(artist)/earnings', match: '/earnings', label: 'Earnings', Icon: DollarSign, showFor: 'all' },
+        { path: '/(artist)/nft-manager', match: '/nft-manager', label: 'NFT Manager', Icon: Gem, showFor: 'artist' },
+        { path: '/(artist)/my-splits', match: '/my-splits', label: 'My Splits', Icon: Users, showFor: 'collaborator' },
+        { path: '/(artist)/splits', match: '/splits', label: 'Splits', Icon: Users, showFor: 'artist' },
+        { path: '/(artist)/settings', match: '/settings', label: 'Settings', Icon: Settings, showFor: 'all' },
     ];
+
+    const navItems = allNavItems.filter(item => {
+        if (item.showFor === 'all') return true;
+        if (item.showFor === 'artist') return !isCollaborator;
+        if (item.showFor === 'collaborator') return isCollaborator;
+        return true;
+    });
 
     const handleLogout = async () => {
         await signOut();
@@ -90,9 +100,11 @@ function CreatorSidebar() {
                     </Text>
                     <View style={{
                         marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2,
-                        borderRadius: 4, backgroundColor: 'rgba(139,92,246,0.1)',
+                        borderRadius: 4, backgroundColor: isCollaborator ? 'rgba(56,180,186,0.1)' : 'rgba(139,92,246,0.1)',
                     }}>
-                        <Text style={{ fontSize: 9, fontWeight: '700', color: '#8b5cf6', letterSpacing: 1 }}>CREATOR</Text>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: isCollaborator ? '#38b4ba' : '#8b5cf6', letterSpacing: 1 }}>
+                            {isCollaborator ? 'COLLABORATOR' : 'CREATOR'}
+                        </Text>
                     </View>
                 </View>
 
@@ -166,6 +178,7 @@ export default function CreatorLayout() {
             <Tabs.Screen name="earnings" options={{ title: 'Earnings', tabBarIcon: ({ color, size }) => <DollarSign size={size} color={color} /> }} />
             <Tabs.Screen name="nft-manager" options={{ title: 'NFTs', tabBarIcon: ({ color, size }) => <Gem size={size} color={color} /> }} />
             <Tabs.Screen name="splits" options={{ href: null }} />
+            <Tabs.Screen name="my-splits" options={{ href: null }} />
             <Tabs.Screen name="settings" options={{ href: null }} />
             <Tabs.Screen name="split-editor" options={{ href: null }} />
             <Tabs.Screen name="edit-artist-profile" options={{ href: null }} />

@@ -1,20 +1,14 @@
 /**
  * MU6 Email Notification Service
  *
- * Email delivery via Resend REST API.
- * On native (iOS/Android): calls Resend directly with the API key.
- * On web: proxies through a Supabase Edge Function to avoid CORS.
+ * Email delivery via Supabase Edge Function (Gmail SMTP backend).
+ * Both web and native go through the edge function.
  *
  * All functions are fire-and-forget: they never throw, never block the UI,
  * and log success/failure to console.
  */
 
-import { Platform } from 'react-native';
-
-const RESEND_API_KEY = process.env.EXPO_PUBLIC_RESEND_API_KEY ?? '';
-const FROM_ADDRESS = 'MU6 <onboarding@resend.dev>';
-
-// Supabase Edge Function URL — used on web to avoid CORS (browser blocks direct Resend calls)
+// Supabase Edge Function URL — handles email sending via Gmail SMTP
 const SUPABASE_EMAIL_URL = 'https://ukavmvxelsfdfktiiyvg.supabase.co/functions/v1/send-email';
 
 // ────────────────────────────────────────────
@@ -24,32 +18,12 @@ const SUPABASE_EMAIL_URL = 'https://ukavmvxelsfdfktiiyvg.supabase.co/functions/v
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
     console.log('[email] Sending to:', to, '| Subject:', subject);
     try {
-        let data: any;
-
-        if (Platform.OS === 'web') {
-            // Web: proxy through Supabase Edge Function to avoid CORS
-            const res = await fetch(SUPABASE_EMAIL_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ to, subject, html }),
-            });
-            data = await res.json();
-        } else {
-            // Native: call Resend directly (no CORS restriction)
-            if (!RESEND_API_KEY) {
-                console.warn('[email] EXPO_PUBLIC_RESEND_API_KEY not set — skipping');
-                return false;
-            }
-            const res = await fetch('https://api.resend.com/emails', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${RESEND_API_KEY}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ from: FROM_ADDRESS, to, subject, html }),
-            });
-            data = await res.json();
-        }
+        const res = await fetch(SUPABASE_EMAIL_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to, subject, html }),
+        });
+        const data = await res.json();
 
         if (data.success || data.id) {
             console.log('[email] ✅ Sent:', data.id);
