@@ -479,8 +479,10 @@ export default function NFTDetailScreen() {
                                 )}
                             </AnimatedPressable>
 
-                            {/* PayEmbed — fiat card payment option (web only) */}
-                            {isWeb && isPrimary && canMint && !isSoldOut && !actionSuccess && walletAddress && (
+                            {/* PayEmbed — fiat card payment option (web only, primary + secondary sales) */}
+                            {isWeb && !actionSuccess && walletAddress && (
+                                (isPrimary && canMint && !isSoldOut) || (!isPrimary && listing && !isOwnListing)
+                            ) && (
                                 <View style={{ marginTop: 16 }}>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                                         <View style={{ flex: 1, height: 1, backgroundColor: colors.text.secondary + '30' }} />

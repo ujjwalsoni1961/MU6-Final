@@ -87,6 +87,8 @@ export interface MarketplaceListing {
     nftTokenId: string;
     sellerWallet: string;
     priceEth: number;
+    priceToken: number | null;
+    priceEurAtList: number | null;
     isActive: boolean;
     chainListingId: string | null;
     listedAt: string;
@@ -1621,6 +1623,8 @@ function mapListingRow(row: any): MarketplaceListing {
         nftTokenId: row.nft_token_id,
         sellerWallet: row.seller_wallet,
         priceEth: parseFloat(row.price_eth),
+        priceToken: row.price_token != null ? parseFloat(row.price_token) : null,
+        priceEurAtList: row.price_eur_at_list != null ? parseFloat(row.price_eur_at_list) : null,
         isActive: row.is_active,
         chainListingId: row.chain_listing_id || null,
         listedAt: row.listed_at,
@@ -1748,12 +1752,25 @@ export async function getArtistBalance(profileId: string): Promise<{
 
     if (error || !data) {
         console.warn('[db] getArtistBalance rpc error, falling back to manual calc:', error);
-        // Fallback: manual calculation
+        // Fallback: manual calculation — only count streaming royalties
         const { data: shares } = await supabase
             .from('royalty_shares')
-            .select('amount_eur')
+            .select('amount_eur, royalty_event_id')
             .eq('linked_profile_id', profileId);
-        const totalEarned = (shares || []).reduce((sum, s) => sum + (parseFloat(s.amount_eur) || 0), 0);
+
+        // Filter to streaming-only: fetch royalty_events with source_type='stream'
+        let streamShares = shares || [];
+        if (streamShares.length > 0) {
+            const eventIds = [...new Set(streamShares.map(s => s.royalty_event_id))];
+            const { data: events } = await supabase
+                .from('royalty_events')
+                .select('id')
+                .in('id', eventIds)
+                .eq('source_type', 'stream');
+            const streamEventIds = new Set((events || []).map(e => e.id));
+            streamShares = streamShares.filter(s => streamEventIds.has(s.royalty_event_id));
+        }
+        const totalEarned = streamShares.reduce((sum, s) => sum + (parseFloat(s.amount_eur) || 0), 0);
 
         const { data: payouts } = await supabase
             .from('payout_requests')

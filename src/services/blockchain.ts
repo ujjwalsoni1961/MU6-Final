@@ -1035,9 +1035,8 @@ export async function mintToken(
 
 /**
  * List an NFT for sale on the marketplace.
- * Since our payment-first architecture stores NFTs in the DB only (not minted on-chain),
- * we create a DB-only marketplace listing. Secondary sales are mediated by the server:
- * buyer pays server wallet → server transfers to seller (minus royalty) + artist royalty.
+ * Delegates to the on-chain marketplace service (MarketplaceV3).
+ * If no wallet account is available, falls back to DB-only listing for backward compatibility.
  */
 export async function listForSale(
     config: {
@@ -1047,8 +1046,21 @@ export async function listForSale(
     },
     account?: Account,
 ): Promise<{ success: boolean; listingId?: string; error?: string }> {
+    // On-chain listing via MarketplaceV3 when account is available
+    if (account && isMarketplaceReady()) {
+        const { createMarketplaceListing } = await import('./marketplace');
+        return createMarketplaceListing(
+            {
+                nftTokenId: config.nftTokenId,
+                pricePol: config.priceEth,
+                sellerWallet: config.sellerWallet,
+            },
+            account,
+        );
+    }
+
+    // Fallback: DB-only listing (no wallet connected)
     try {
-        // Verify ownership
         const { data: token } = await supabase
             .from('nft_tokens')
             .select('id, owner_wallet_address, token_id')
@@ -1060,7 +1072,6 @@ export async function listForSale(
             return { success: false, error: 'Not the token owner' };
         }
 
-        // Prevent duplicate active listings
         const { data: existingListing } = await supabase
             .from('marketplace_listings')
             .select('id')
@@ -1069,11 +1080,11 @@ export async function listForSale(
             .maybeSingle();
 
         if (existingListing) {
-            return { success: false, error: 'This NFT already has an active listing. Cancel or update the existing listing first.' };
+            return { success: false, error: 'This NFT already has an active listing.' };
         }
 
-        // DB-only listing (no on-chain listing needed since NFTs are DB-only in payment-first arch)
-        console.log('[blockchain] Creating DB-only marketplace listing for token:', token.token_id, 'price:', config.priceEth, 'POL');
+        let eurRate = 0;
+        try { eurRate = await getTokenToEurRate(); } catch { /* non-blocking */ }
 
         const { data: listing, error } = await supabase
             .from('marketplace_listings')
@@ -1081,14 +1092,15 @@ export async function listForSale(
                 nft_token_id: config.nftTokenId,
                 seller_wallet: config.sellerWallet.toLowerCase(),
                 price_eth: config.priceEth,
+                price_token: config.priceEth,
+                price_eur_at_list: eurRate > 0 ? config.priceEth * eurRate : null,
                 is_active: true,
-                chain_listing_id: null, // DB-only listing
+                chain_listing_id: null,
             })
             .select()
             .single();
 
         if (error) return { success: false, error: error.message };
-        console.log('[blockchain] Marketplace listing created:', listing.id);
         return { success: true, listingId: listing.id };
     } catch (err: any) {
         return { success: false, error: err.message };
@@ -1097,67 +1109,66 @@ export async function listForSale(
 
 /**
  * Buy an NFT from a marketplace listing (secondary sale).
- * Payment-first flow for DB-only listings:
- *   1. Buyer sends listing price (POL) to server wallet
- *   2. Server distributes: 95% to seller, 5% royalty to artist
- *   3. DB records updated (ownership transfer, royalty tracking)
+ *
+ * On-chain flow via MarketplaceV3:
+ *   - MarketplaceV3 handles payment distribution:
+ *     90% to seller, 5% platform fee, 5% artist royalty (EIP-2981)
+ *   - NO royalty_events/royalty_shares created for NFT sales
+ *     (the Split contract handles artist royalties on-chain)
+ *
+ * Falls back to payment-first server-mediated flow for legacy DB-only listings.
  */
 export async function buyListingFlow(
     config: { listingId: string; buyerWallet: string },
     account?: Account,
 ): Promise<{ success: boolean; error?: string }> {
+    if (!account) {
+        return { success: false, error: 'Wallet not connected. Please connect your wallet to purchase.' };
+    }
+
     try {
+        // Check if listing has an on-chain ID → use on-chain marketplace flow
         const { data: listing } = await supabase
             .from('marketplace_listings')
-            .select(`
-                *,
-                nft_token:nft_tokens!nft_token_id (
-                    *,
-                    release:nft_releases!nft_release_id (
-                        *,
-                        song:songs!song_id (id, creator_id)
-                    )
-                )
-            `)
+            .select('chain_listing_id, price_token, price_eth')
             .eq('id', config.listingId)
             .eq('is_active', true)
             .maybeSingle();
 
         if (!listing) return { success: false, error: 'Listing not found or inactive' };
 
-        const salePricePol = parseFloat(listing.price_eth);
-        const priceWei = BigInt(Math.floor(salePricePol * 1e18));
-
-        // ─── Step 1: Buyer pays server wallet ───
-        if (!account) {
-            return { success: false, error: 'Wallet not connected. Please connect your wallet to purchase.' };
+        // On-chain flow: listing has a valid chain_listing_id
+        if (listing.chain_listing_id && /^\d+$/.test(listing.chain_listing_id)) {
+            const { buyMarketplaceListing } = await import('./marketplace');
+            return buyMarketplaceListing(config, account);
         }
+
+        // Legacy fallback: DB-only listing (no on-chain listing)
+        // Buyer pays server wallet, server distributes to seller
+        const salePricePol = parseFloat(listing.price_token || listing.price_eth);
+        const priceWei = BigInt(Math.floor(salePricePol * 1e18));
 
         let saleTxHash: string | null = null;
         if (priceWei > BigInt(0)) {
-            console.log('[blockchain] Secondary sale: buyer paying', salePricePol, 'POL to server wallet');
-            try {
-                const paymentTx = prepareTransaction({
-                    to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
-                    chain: activeChain,
-                    client: thirdwebClient,
-                    value: priceWei,
-                });
-                const paymentResult = await sendTransaction({ account, transaction: paymentTx });
-                console.log('[blockchain] Buyer payment confirmed, tx:', paymentResult.transactionHash);
-                saleTxHash = paymentResult.transactionHash;
-            } catch (payErr: any) {
-                console.error('[blockchain] Secondary sale payment failed:', payErr);
-                return {
-                    success: false,
-                    error: `Payment failed: ${payErr.message}. Your wallet was not charged.`,
-                };
-            }
+            console.log('[blockchain] Secondary sale (legacy): buyer paying', salePricePol, 'POL to server wallet');
+            const paymentTx = prepareTransaction({
+                to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
+                chain: activeChain,
+                client: thirdwebClient,
+                value: priceWei,
+            });
+            const paymentResult = await sendTransaction({ account, transaction: paymentTx });
+            saleTxHash = paymentResult.transactionHash;
         }
+
+        // Snapshot EUR rate
+        let eurRate = 0;
+        try { eurRate = await getTokenToEurRate(); } catch { /* non-blocking */ }
+        const salePriceEur = eurRate > 0 ? salePricePol * eurRate : null;
 
         const now = new Date().toISOString();
 
-        // ─── Step 2: Mark listing as sold ───
+        // Mark listing as sold
         await supabase
             .from('marketplace_listings')
             .update({
@@ -1167,127 +1178,39 @@ export async function buyListingFlow(
             })
             .eq('id', config.listingId);
 
-        // ─── Step 3: Transfer token ownership in DB ───
+        // Transfer token ownership in DB
         await supabase
             .from('nft_tokens')
             .update({
                 owner_wallet_address: config.buyerWallet.toLowerCase(),
                 last_transferred_at: now,
-                last_sale_price_eth: listing.price_eth,
+                last_sale_price_token: salePricePol,
+                last_sale_price_eur: salePriceEur,
                 last_sale_tx_hash: saleTxHash,
             })
-            .eq('id', listing.nft_token_id);
+            .eq('id', (await supabase
+                .from('marketplace_listings')
+                .select('nft_token_id')
+                .eq('id', config.listingId)
+                .maybeSingle()).data?.nft_token_id);
 
-        // ─── Step 4: Distribute funds from server wallet ───
-        // Secondary sale split: 5% platform fee (server keeps), 5% artist royalty, 90% to seller
-        const platformPercent = 0.05; // 5% stays in server wallet
-        const royaltyPercent = 0.05;  // 5% to artist
-        const sellerPercent = 0.90;   // 90% to seller
-        const platformFeePol = salePricePol * platformPercent;
-        const royaltyAmountPol = salePricePol * royaltyPercent;
-        const sellerAmountPol = salePricePol * sellerPercent;
-        const creatorId = listing.nft_token?.release?.song?.creator_id;
+        // Transfer 90% to seller via server wallet (legacy flow)
+        const sellerAmountPol = salePricePol * 0.90;
+        if (sellerAmountPol > 0) {
+            const { data: listingFull } = await supabase
+                .from('marketplace_listings')
+                .select('seller_wallet')
+                .eq('id', config.listingId)
+                .maybeSingle();
 
-        console.log('[blockchain] Secondary sale split:', salePricePol, 'POL →', sellerAmountPol, 'seller (90%) +', royaltyAmountPol, 'artist (5%) +', platformFeePol, 'platform (5%)');
-
-        // Transfer 90% to seller
-        const sellerWallet = listing.seller_wallet;
-        if (sellerWallet && sellerAmountPol > 0) {
-            const sellerAmountWei = BigInt(Math.floor(sellerAmountPol * 1e18)).toString();
-            console.log('[blockchain] Transferring', sellerAmountPol, 'POL (90%) to seller:', sellerWallet);
-            try {
-                await transferToArtistWallet(sellerWallet, sellerAmountWei);
-            } catch (err) {
-                console.error('[blockchain] Seller payment failed (non-blocking):', err);
+            if (listingFull?.seller_wallet) {
+                const sellerAmountWei = BigInt(Math.floor(sellerAmountPol * 1e18)).toString();
+                transferToArtistWallet(listingFull.seller_wallet, sellerAmountWei).catch(() => {});
             }
         }
 
-        // Transfer 5% royalty distributed per split sheet
-        const sourceRef = `sale:${config.listingId}`;
-        if (creatorId && royaltyAmountPol > 0) {
-            const songId = listing.nft_token.release.song.id;
-            // Record royalty event
-            const { data: royaltyEvent } = await supabase
-                .from('royalty_events')
-                .upsert(
-                    {
-                        song_id: songId,
-                        source_type: 'secondary_sale' as const,
-                        source_reference: sourceRef,
-                        gross_amount_eur: royaltyAmountPol,
-                        tx_hash: saleTxHash,
-                    },
-                    { onConflict: 'source_type,source_reference', ignoreDuplicates: true },
-                )
-                .select()
-                .single();
-
-            if (royaltyEvent) {
-                // Look up split sheet for this song
-                const { data: splits } = await supabase
-                    .from('song_rights_splits')
-                    .select('*, linked_profile_id, linked_wallet_address, share_percent, party_email')
-                    .eq('song_id', songId);
-
-                if (splits && splits.length > 0) {
-                    // Distribute royalty per split sheet
-                    console.log('[blockchain] Secondary sale royalty: distributing', royaltyAmountPol, 'POL across', splits.length, 'split parties');
-                    for (const split of splits) {
-                        const partyAmount = royaltyAmountPol * (parseFloat(split.share_percent) / 100);
-                        await supabase
-                            .from('royalty_shares')
-                            .insert({
-                                royalty_event_id: royaltyEvent.id,
-                                party_email: split.party_email,
-                                linked_profile_id: split.linked_profile_id || null,
-                                wallet_address: split.linked_wallet_address || null,
-                                share_type: 'split',
-                                share_percent: parseFloat(split.share_percent),
-                                amount_eur: partyAmount,
-                            });
-
-                        // Transfer to party's wallet if available
-                        if (split.linked_wallet_address && partyAmount > 0) {
-                            const partyWei = BigInt(Math.floor(partyAmount * 1e18)).toString();
-                            try {
-                                await transferToArtistWallet(split.linked_wallet_address, partyWei);
-                            } catch (err) {
-                                console.error('[blockchain] Split party royalty transfer failed (non-blocking):', err);
-                            }
-                        }
-                    }
-                } else {
-                    // No split sheet → 100% to creator (backward compatible)
-                    const { data: creatorProfile } = await supabase
-                        .from('profiles')
-                        .select('wallet_address')
-                        .eq('id', creatorId)
-                        .maybeSingle();
-
-                    await supabase
-                        .from('royalty_shares')
-                        .insert({
-                            royalty_event_id: royaltyEvent.id,
-                            linked_profile_id: creatorId,
-                            wallet_address: creatorProfile?.wallet_address || null,
-                            share_type: 'direct',
-                            share_percent: 100,
-                            amount_eur: royaltyAmountPol,
-                        });
-
-                    // Transfer royalty to creator's wallet
-                    if (creatorProfile?.wallet_address) {
-                        const royaltyWei = BigInt(Math.floor(royaltyAmountPol * 1e18)).toString();
-                        console.log('[blockchain] Transferring', royaltyAmountPol, 'POL (5% royalty) to artist:', creatorProfile.wallet_address);
-                        try {
-                            await transferToArtistWallet(creatorProfile.wallet_address, royaltyWei);
-                        } catch (err) {
-                            console.error('[blockchain] Artist royalty transfer failed (non-blocking):', err);
-                        }
-                    }
-                }
-            }
-        }
+        // NOTE: No royalty_events/royalty_shares for secondary sales.
+        // Artist royalties are handled on-chain via EIP-2981 + Split contract.
 
         return { success: true };
     } catch (err: any) {
@@ -1297,12 +1220,20 @@ export async function buyListingFlow(
 
 /**
  * Cancel a marketplace listing.
+ * Delegates to on-chain marketplace service when account is available.
  */
 export async function cancelListingFlow(
     listingId: string,
     sellerWallet: string,
     account?: Account,
 ): Promise<{ success: boolean; error?: string }> {
+    // On-chain cancel via MarketplaceV3
+    if (account && isMarketplaceReady()) {
+        const { cancelMarketplaceListing } = await import('./marketplace');
+        return cancelMarketplaceListing(listingId, sellerWallet, account);
+    }
+
+    // Fallback: DB-only cancel
     const { data: listing } = await supabase
         .from('marketplace_listings')
         .select('chain_listing_id')
@@ -1313,19 +1244,6 @@ export async function cancelListingFlow(
 
     if (!listing) return { success: false, error: 'Listing not found' };
 
-    // Cancel on-chain if exists and is a valid numeric listing ID
-    if (account && isMarketplaceReady() && listing.chain_listing_id) {
-        if (!isValidChainListingId(listing.chain_listing_id)) {
-            console.warn('[blockchain] cancelListingFlow: chain_listing_id is a legacy tx hash, skipping on-chain cancel:', listing.chain_listing_id);
-        } else {
-            const result = await cancelListingOnChain(account, BigInt(listing.chain_listing_id));
-            if (!result.success) {
-                return { success: false, error: `On-chain cancel failed: ${result.error}` };
-            }
-        }
-    }
-
-    // Cancel in Supabase
     const { error } = await supabase
         .from('marketplace_listings')
         .update({ is_active: false })

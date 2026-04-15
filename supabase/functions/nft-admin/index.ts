@@ -380,6 +380,119 @@ Deno.serve(async (req: Request) => {
             });
         }
 
+        // ── Deploy MarketplaceV3 ──
+        if (action === "deployMarketplace") {
+            const deployUrl = "https://engine.thirdweb.com/v1/deploy/prebuilt/marketplace-v3";
+            const deployBody = {
+                chain: CHAIN_ID.toString(),
+                contractMetadata: {
+                    name: "MU6 Marketplace",
+                    platform_fee_recipient: SERVER_WALLET,
+                    platform_fee_basis_points: 500,
+                },
+            };
+
+            console.log("[nft-admin] deployMarketplace: deploying MarketplaceV3");
+            const deployResponse = await fetch(deployUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-secret-key": THIRDWEB_SECRET_KEY,
+                    "x-backend-wallet-address": SERVER_WALLET,
+                },
+                body: JSON.stringify(deployBody),
+            });
+
+            const deployText = await deployResponse.text();
+            console.log("[nft-admin] deployMarketplace response:", deployResponse.status, deployText);
+            let deployResult;
+            try { deployResult = JSON.parse(deployText); } catch { deployResult = { raw: deployText }; }
+
+            if (!deployResponse.ok) {
+                return jsonResponse({ success: false, error: deployResult }, deployResponse.status);
+            }
+
+            const deployedAddress = deployResult?.result?.contractAddress
+                || deployResult?.result?.deployedAddress;
+            const deployTxId = deployResult?.result?.transactions?.[0]?.id
+                || deployResult?.result?.queueId;
+
+            let finalAddress = deployedAddress;
+            if (!finalAddress && deployTxId) {
+                console.log("[nft-admin] Waiting for marketplace deploy tx:", deployTxId);
+                const txResult = await waitForTx(deployTxId, 60000);
+                if (txResult.confirmed) {
+                    const txStatusUrl = `https://engine.thirdweb.com/v1/transactions/${deployTxId}`;
+                    const statusResp = await fetch(txStatusUrl, {
+                        headers: { "x-secret-key": THIRDWEB_SECRET_KEY },
+                    });
+                    const statusData = await statusResp.json();
+                    finalAddress = statusData?.result?.contractAddress
+                        || statusData?.result?.deployedAddress;
+                } else {
+                    return jsonResponse({
+                        success: false,
+                        error: txResult.error || "Marketplace deploy tx did not confirm",
+                    }, 500);
+                }
+            }
+
+            if (finalAddress) {
+                // Store in platform_settings
+                const authHeader = req.headers.get("Authorization") || "";
+                const userToken = authHeader.replace("Bearer ", "");
+                const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                    global: { headers: { Authorization: `Bearer ${userToken}` } },
+                });
+
+                await supabaseClient
+                    .from("platform_settings")
+                    .upsert(
+                        { key: "marketplace_contract_address", value: JSON.stringify(finalAddress) },
+                        { onConflict: "key" },
+                    );
+
+                return jsonResponse({ success: true, contractAddress: finalAddress });
+            }
+
+            return jsonResponse({
+                success: true,
+                contractAddress: null,
+                deployResult,
+                note: "Deploy submitted but address not yet available.",
+            });
+        }
+
+        // ── Set Default Royalty Info (EIP-2981) ──
+        if (action === "setRoyalty") {
+            const { royaltyRecipient, royaltyBps, contractAddress } = body;
+            if (!royaltyRecipient) return jsonResponse({ error: "Missing royaltyRecipient" }, 400);
+
+            const bps = royaltyBps || "500"; // default 5%
+
+            const requestBody = {
+                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: contractAddress || DEFAULT_CONTRACT,
+                    method: "function setDefaultRoyaltyInfo(address _royaltyRecipient, uint256 _royaltyBps)",
+                    params: [royaltyRecipient, bps.toString()],
+                }],
+            };
+
+            console.log("[nft-admin] setRoyalty:", royaltyRecipient, bps, "bps");
+            const { ok, status, result } = await callEngine(requestBody);
+            console.log("[nft-admin] setRoyalty response:", status, JSON.stringify(result));
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (txId) {
+                const { confirmed, hash, error } = await waitForTx(txId);
+                if (!confirmed) return jsonResponse({ success: false, error: error || "setRoyalty tx did not confirm" }, 500);
+                return jsonResponse({ success: true, transactionId: txId, txHash: hash });
+            }
+            return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     } catch (err: any) {
         console.error("[nft-admin] Error:", err);
