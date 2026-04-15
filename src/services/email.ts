@@ -11,6 +11,9 @@
 // Supabase Edge Function URL — handles email sending via Gmail SMTP
 const SUPABASE_EMAIL_URL = 'https://ukavmvxelsfdfktiiyvg.supabase.co/functions/v1/send-email';
 
+// Base app URL — configurable via env, defaults to localhost in dev
+const APP_URL = (process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081').replace(/\/$/, '');
+
 // ────────────────────────────────────────────
 // Core send function
 // ────────────────────────────────────────────
@@ -106,7 +109,7 @@ export async function sendSplitInviteEmail(
     const subject = "🎵 You've been added to a royalty split on MU6";
     const body = `<p><strong>${inviterName}</strong> added you as a <strong>${role}</strong> on "<strong>${songTitle}</strong>" with a <strong>${sharePercent}%</strong> royalty share.</p>
 <p>Sign up on MU6 to claim your earnings.</p>`;
-    const html = wrapInTemplate("You've Been Added to a Split", body, 'Claim Your Royalty Share', 'https://mu6.app');
+    const html = wrapInTemplate("You've Been Added to a Split", body, 'Claim Your Royalty Share', `${APP_URL}/my-splits`);
     return sendEmail(to, subject, html);
 }
 
@@ -120,7 +123,7 @@ export async function sendRoyaltyPayoutEmail(
     const subject = `💰 Royalty payment received — ${amount} POL`;
     const body = `<p>You earned <strong>${amount} POL</strong> from streams of "<strong>${songTitle}</strong>".</p>
 <p>Your total balance is now <strong>${balance} POL</strong>.</p>`;
-    const html = wrapInTemplate('Royalty Payment Received', body, 'View Earnings', 'https://mu6.app/earnings');
+    const html = wrapInTemplate('Royalty Payment Received', body, 'View Earnings', `${APP_URL}/earnings`);
     return sendEmail(to, subject, html);
 }
 
@@ -136,7 +139,7 @@ export async function sendNftMintedEmail(
     const subject = '🎉 Your NFT was purchased!';
     const body = `<p>Someone just minted a <strong>${tierName}</strong> NFT of "<strong>${songTitle}</strong>" for <strong>${price} POL</strong>.</p>
 <p>${mintedCount}/${totalSupply} minted.</p>`;
-    const html = wrapInTemplate('Your NFT Was Purchased!', body, 'View NFT Manager', 'https://mu6.app/nft-manager');
+    const html = wrapInTemplate('Your NFT Was Purchased!', body, 'View NFT Manager', `${APP_URL}/nft-manager`);
     return sendEmail(to, subject, html);
 }
 
@@ -151,7 +154,7 @@ export async function sendNftPurchaseConfirmEmail(
     const subject = '🎵 NFT Purchase Confirmed';
     const body = `<p>You now own a <strong>${tierName}</strong> NFT of "<strong>${songTitle}</strong>" by <strong>${artistName}</strong>.</p>
 <p>This entitles you to a <strong>${royaltyPercent}%</strong> royalty share.</p>`;
-    const html = wrapInTemplate('NFT Purchase Confirmed', body, 'View My NFTs', 'https://mu6.app/library');
+    const html = wrapInTemplate('NFT Purchase Confirmed', body, 'View My NFTs', `${APP_URL}/library`);
     return sendEmail(to, subject, html);
 }
 
@@ -163,7 +166,7 @@ export async function sendSongPublishedEmail(
     const subject = '✅ Your song is live on MU6!';
     const body = `<p>"<strong>${songTitle}</strong>" is now available for streaming on MU6.</p>
 <p>Share it with your fans!</p>`;
-    const html = wrapInTemplate('Your Song Is Live!', body, 'View Your Song', 'https://mu6.app');
+    const html = wrapInTemplate('Your Song Is Live!', body, 'View Your Song', `${APP_URL}/dashboard`);
     return sendEmail(to, subject, html);
 }
 
@@ -176,7 +179,7 @@ export async function sendStreamMilestoneEmail(
     const subject = `🔥 ${songTitle} just hit ${milestone.toLocaleString()} streams!`;
     const body = `<p>Congratulations! "<strong>${songTitle}</strong>" has reached <strong>${milestone.toLocaleString()}</strong> streams on MU6.</p>
 <p>Keep the momentum going!</p>`;
-    const html = wrapInTemplate(`${milestone.toLocaleString()} Streams!`, body, 'View Stats', 'https://mu6.app/dashboard');
+    const html = wrapInTemplate(`${milestone.toLocaleString()} Streams!`, body, 'View Stats', `${APP_URL}/dashboard`);
     return sendEmail(to, subject, html);
 }
 
@@ -197,7 +200,7 @@ export async function sendVerificationStatusEmail(
         isVerified ? "You're Verified!" : 'Verification Status Updated',
         body,
         'View Profile',
-        'https://mu6.app/settings',
+        `${APP_URL}/settings`,
     );
     return sendEmail(to, subject, html);
 }
@@ -212,6 +215,6 @@ export async function sendSplitAutoLinkedEmail(
     const subject = '🎵 Your royalty split has been activated!';
     const body = `<p>Your account has been linked to a royalty split on "<strong>${songTitle}</strong>".</p>
 <p>You are listed as <strong>${role}</strong> with a <strong>${sharePercent}%</strong> share. Earnings will now be credited to your account.</p>`;
-    const html = wrapInTemplate('Split Activated!', body, 'View Earnings', 'https://mu6.app/earnings');
+    const html = wrapInTemplate('Split Activated!', body, 'View Earnings', `${APP_URL}/earnings`);
     return sendEmail(to, subject, html);
 }

@@ -133,7 +133,7 @@ export default function MySplitsScreen() {
                             creator:profiles!creator_id ( display_name )
                         )
                     `)
-                    .or(`linked_profile_id.eq.${profile.id},party_email.eq.${profile.email}`)
+                    .or(`linked_profile_id.eq.${profile.id},party_email.ilike.${profile.email}`)
                     .order('share_percent', { ascending: false });
 
                 if (cancelled) return;

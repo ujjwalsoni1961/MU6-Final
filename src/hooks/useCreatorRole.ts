@@ -47,8 +47,8 @@ export function useCreatorRole(): CreatorRole {
 
                 const createdCount = songsCreated || 0;
 
-                // If they have created songs or their creator_type is 'artist', they're an artist
-                if (createdCount > 0 || profile.creatorType === 'artist') {
+                // If they have actually created songs, they're an artist
+                if (createdCount > 0) {
                     setState({
                         isArtist: true,
                         isCollaborator: false,
@@ -63,7 +63,7 @@ export function useCreatorRole(): CreatorRole {
                 const { count: splitCount } = await supabase
                     .from('song_rights_splits')
                     .select('*', { count: 'exact', head: true })
-                    .or(`linked_profile_id.eq.${profile.id},party_email.eq.${profile.email}`);
+                    .or(`linked_profile_id.eq.${profile.id},party_email.ilike.${profile.email}`);
 
                 if (cancelled) return;
 
@@ -78,6 +78,15 @@ export function useCreatorRole(): CreatorRole {
                         isArtist: false,
                         isCollaborator: true,
                         role: 'collaborator',
+                        songsCreated: 0,
+                        loading: false,
+                    });
+                } else if (profile.creatorType === 'artist') {
+                    // creator_type is 'artist' but no songs yet — treat as artist
+                    setState({
+                        isArtist: true,
+                        isCollaborator: false,
+                        role: 'artist',
                         songsCreated: 0,
                         loading: false,
                     });
