@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Dimensions, ScrollView } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { ChevronDown, ListMusic, Mic2 } from 'lucide-react-native';
@@ -13,7 +13,7 @@ interface WebPlayerExpandedProps {
 
 export default function WebPlayerExpanded({ onCollapse }: WebPlayerExpandedProps) {
     const { isDark, colors } = useTheme();
-    const { currentSong, currentTime, duration } = usePlayer();
+    const { currentSong, currentTime, duration, queue, queueIndex, jumpToQueueIndex } = usePlayer();
 
     if (!currentSong) return null;
 
@@ -27,6 +27,8 @@ export default function WebPlayerExpanded({ onCollapse }: WebPlayerExpandedProps
 
     // Dynamic primary color from song (fallback to accent)
     const primaryColor = (currentSong as any).dominantColor || colors.accent.cyan;
+
+    const upNext = queue.slice(queueIndex + 1);
 
     return (
         <View
@@ -164,28 +166,68 @@ export default function WebPlayerExpanded({ onCollapse }: WebPlayerExpandedProps
                     </View>
                     <ScrollView showsVerticalScrollIndicator={false}>
                         <Text style={{ fontSize: 15, color: colors.text.secondary, lineHeight: 24 }}>
-                            {currentSong.lyrics || 'Lyrics not available for this track.\n\nEnjoy the music! 🎵'}
+                            {currentSong.lyrics || 'Lyrics not available for this track.'}
                         </Text>
                     </ScrollView>
                 </View>
 
-                {/* Queue Preview */}
+                {/* Queue / Up Next */}
                 <View style={{
                     backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
                     borderRadius: 12,
                     borderWidth: 1,
                     borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
                     padding: 16,
+                    maxHeight: 200,
                 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                         <ListMusic size={14} color={colors.text.muted} style={{ marginRight: 6 }} />
                         <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
-                            Up Next
+                            Up Next {upNext.length > 0 ? `(${upNext.length})` : ''}
                         </Text>
                     </View>
-                    <Text style={{ fontSize: 13, color: colors.text.secondary }}>
-                        Queue is empty — add songs to play next
-                    </Text>
+                    {upNext.length === 0 ? (
+                        <Text style={{ fontSize: 13, color: colors.text.secondary }}>
+                            Queue is empty — add songs to play next
+                        </Text>
+                    ) : (
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            {upNext.slice(0, 10).map((song, i) => {
+                                const actualIndex = queueIndex + 1 + i;
+                                return (
+                                    <AnimatedPressable
+                                        key={`${song.id}-${actualIndex}`}
+                                        preset="row"
+                                        onPress={() => jumpToQueueIndex(actualIndex)}
+                                        style={{
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            paddingVertical: 6,
+                                        }}
+                                    >
+                                        <Image
+                                            source={{ uri: song.coverImage }}
+                                            style={{ width: 32, height: 32, borderRadius: 4, backgroundColor: isDark ? '#1e293b' : '#e2e8f0' }}
+                                            contentFit="cover"
+                                        />
+                                        <View style={{ flex: 1, marginLeft: 10 }}>
+                                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary }} numberOfLines={1}>
+                                                {song.title}
+                                            </Text>
+                                            <Text style={{ fontSize: 11, color: colors.text.secondary }} numberOfLines={1}>
+                                                {song.artistName}
+                                            </Text>
+                                        </View>
+                                    </AnimatedPressable>
+                                );
+                            })}
+                            {upNext.length > 10 && (
+                                <Text style={{ fontSize: 12, color: colors.text.muted, marginTop: 4 }}>
+                                    +{upNext.length - 10} more
+                                </Text>
+                            )}
+                        </ScrollView>
+                    )}
                 </View>
             </View>
         </View>

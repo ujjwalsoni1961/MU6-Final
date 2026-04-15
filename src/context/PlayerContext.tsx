@@ -1,7 +1,9 @@
 /**
- * MU6 Player Context — Phase 4
+ * MU6 Player Context — Production-ready
  *
  * Real audio playback via expo-av Audio.Sound.
+ * - Queue system with shuffle (Fisher-Yates), skip next/prev, auto-advance
+ * - Play history tracking (last 50 songs)
  * - Fetches signed URLs from Supabase Storage (private 'audio' bucket)
  * - Falls back to a silent placeholder when no audio_path exists
  * - Tracks playback duration and logs streams to Supabase
@@ -19,6 +21,11 @@ import { useAuth } from './AuthContext';
 
 // ── Types ──
 
+export interface QueueContext {
+    songs: Song[];
+    startIndex?: number;
+}
+
 interface PlayerContextType {
     currentSong: Song | null;
     isPlaying: boolean;
@@ -28,7 +35,13 @@ interface PlayerContextType {
     volume: number;
     isBuffering: boolean;
     isRepeat: boolean;
-    playSong: (song: Song) => void;
+    // Queue
+    queue: Song[];
+    queueIndex: number;
+    isShuffled: boolean;
+    playHistory: Song[];
+    // Methods
+    playSong: (song: Song, context?: QueueContext) => void;
     togglePlay: () => void;
     openFullPlayer: () => void;
     closeFullPlayer: () => void;
@@ -38,6 +51,13 @@ interface PlayerContextType {
     skipPrevious: () => void;
     setVolume: (vol: number) => void;
     toggleRepeat: () => void;
+    toggleShuffle: () => void;
+    addToQueue: (song: Song) => void;
+    playNext: (song: Song) => void;
+    removeFromQueue: (index: number) => void;
+    clearQueue: () => void;
+    playQueue: (songs: Song[], startIndex: number) => void;
+    jumpToQueueIndex: (index: number) => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
@@ -64,6 +84,23 @@ async function ensureAudioMode() {
     }
 }
 
+// ── Fisher-Yates Shuffle ──
+
+function shuffleArray<T>(arr: T[], keepFirstIndex?: number): T[] {
+    const result = [...arr];
+    // If keepFirstIndex provided, move that item to position 0 first
+    if (keepFirstIndex !== undefined && keepFirstIndex >= 0 && keepFirstIndex < result.length) {
+        const [item] = result.splice(keepFirstIndex, 1);
+        result.unshift(item);
+    }
+    // Shuffle everything after position 0 (keep current song at front)
+    for (let i = result.length - 1; i > 1; i--) {
+        const j = 1 + Math.floor(Math.random() * i); // j in [1, i]
+        [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+}
+
 // ── Provider ──
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
@@ -76,6 +113,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const [isBuffering, setIsBuffering] = useState(false);
     const [isRepeat, setIsRepeat] = useState(false);
     const isRepeatRef = useRef(false);
+
+    // Queue state
+    const [queue, setQueue] = useState<Song[]>([]);
+    const [queueIndex, setQueueIndex] = useState(-1);
+    const [isShuffled, setIsShuffled] = useState(false);
+    const [originalQueue, setOriginalQueue] = useState<Song[]>([]);
+    const [playHistory, setPlayHistory] = useState<Song[]>([]);
+
+    // Refs for queue state in callbacks
+    const queueRef = useRef<Song[]>([]);
+    const queueIndexRef = useRef(-1);
+    useEffect(() => { queueRef.current = queue; }, [queue]);
+    useEffect(() => { queueIndexRef.current = queueIndex; }, [queueIndex]);
 
     // Eagerly configure audio mode on mount (critical for iOS volume)
     useEffect(() => {
@@ -91,14 +141,25 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     // Refs for the Sound instance and stream tracking
     const soundRef = useRef<Audio.Sound | null>(null);
-    const listenStartRef = useRef<number>(0); // timestamp when current listen session started
-    const accumulatedRef = useRef<number>(0); // seconds accumulated so far for this song
-    const currentSongRef = useRef<Song | null>(null); // for cleanup closures
+    const listenStartRef = useRef<number>(0);
+    const accumulatedRef = useRef<number>(0);
+    const currentSongRef = useRef<Song | null>(null);
 
     // Keep currentSongRef in sync
     useEffect(() => {
         currentSongRef.current = currentSong;
     }, [currentSong]);
+
+    // ── Play history tracking ──
+
+    const addToPlayHistory = useCallback((song: Song) => {
+        setPlayHistory(prev => {
+            // No consecutive dupes
+            if (prev.length > 0 && prev[0].id === song.id) return prev;
+            const next = [song, ...prev.filter(s => s.id !== song.id)];
+            return next.slice(0, 50);
+        });
+    }, []);
 
     // ── Stream logging ──
 
@@ -106,7 +167,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         const song = currentSongRef.current;
         if (!song) return;
 
-        // Calculate total listen time for this song
         let totalSeconds = accumulatedRef.current;
         if (listenStartRef.current > 0) {
             totalSeconds += (Date.now() - listenStartRef.current) / 1000;
@@ -114,9 +174,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         }
 
         const rounded = Math.round(totalSeconds);
-        if (rounded < 1) return; // don't log sub-second listens
+        if (rounded < 1) return;
 
-        // Reset accumulator
         accumulatedRef.current = 0;
 
         try {
@@ -129,7 +188,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     // ── Unload sound + log stream ──
 
     const unloadSound = useCallback(async () => {
-        // Log the stream before unloading
         await logCurrentStream();
 
         if (soundRef.current) {
@@ -147,25 +205,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const loadAndPlay = useCallback(async (song: Song) => {
         await ensureAudioMode();
 
-        // Unload previous (this also logs the previous stream)
         await unloadSound();
 
         setIsBuffering(true);
 
         try {
-            // Resolve audio URL
             let audioUri: string | null = null;
 
             if (song._audioPath) {
-                // Fetch signed URL from Supabase private 'audio' bucket
                 audioUri = await db.getAudioUrl(song._audioPath);
             }
 
             if (!audioUri) {
-                // No audio file — use a short silent placeholder so the UI still works.
-                // This lets the player open and show metadata even without an actual track.
                 console.warn(`[Player] No audio file for "${song.title}", using silent playback`);
-                // We'll still run the mock timer approach if no real audio
                 setIsBuffering(false);
                 return false;
             }
@@ -182,7 +234,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
             soundRef.current = sound;
 
-            // Explicitly force volume to max after creation (iOS workaround)
             try {
                 await sound.setVolumeAsync(1.0);
             } catch (e) {
@@ -197,6 +248,42 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             return false;
         }
     }, [unloadSound]);
+
+    // ── Auto-advance to next song ──
+
+    const autoAdvance = useCallback(async () => {
+        const q = queueRef.current;
+        const idx = queueIndexRef.current;
+
+        if (q.length === 0 || idx < 0) {
+            setIsPlaying(false);
+            return;
+        }
+
+        if (idx < q.length - 1) {
+            // Play next song
+            const nextIdx = idx + 1;
+            const nextSong = q[nextIdx];
+            setQueueIndex(nextIdx);
+            setCurrentSong(nextSong);
+            setCurrentTime(0);
+            listenStartRef.current = Date.now();
+            accumulatedRef.current = 0;
+            addToPlayHistory(nextSong);
+
+            useMockTimerRef.current = false;
+            const loaded = await loadAndPlay(nextSong);
+            if (!loaded) {
+                useMockTimerRef.current = true;
+                const dur = nextSong._durationSeconds || parseDuration(nextSong.duration);
+                setDuration(dur);
+                setIsPlaying(true);
+            }
+        } else {
+            // End of queue
+            setIsPlaying(false);
+        }
+    }, [loadAndPlay, addToPlayHistory]);
 
     // ── Playback status callback ──
 
@@ -215,10 +302,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
         // Song finished
         if (status.didJustFinish) {
-            // Log the completed stream
             logCurrentStream();
             if (isRepeatRef.current) {
-                // Repeat: restart from beginning
                 if (soundRef.current) {
                     soundRef.current.setPositionAsync(0).then(() => {
                         soundRef.current?.playAsync();
@@ -228,18 +313,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 listenStartRef.current = Date.now();
                 accumulatedRef.current = 0;
             } else {
-                setIsPlaying(false);
+                // Auto-advance to next song in queue
+                autoAdvance();
             }
         }
-    }, [logCurrentStream]);
+    }, [logCurrentStream, autoAdvance]);
 
     // ── Mock timer fallback (for songs without audio files) ──
 
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    const useMockTimer = useRef(false);
+    const useMockTimerRef = useRef(false);
 
     useEffect(() => {
-        if (!useMockTimer.current) return;
+        if (!useMockTimerRef.current) return;
 
         if (isPlaying) {
             timerRef.current = setInterval(() => {
@@ -247,12 +333,12 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                     if (prev >= duration) {
                         logCurrentStream();
                         if (isRepeatRef.current) {
-                            // Repeat: restart from beginning
                             accumulatedRef.current = 0;
                             listenStartRef.current = Date.now();
                             return 0;
                         }
-                        setIsPlaying(false);
+                        // Auto-advance
+                        autoAdvance();
                         return duration;
                     }
                     return prev + 1;
@@ -264,7 +350,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         return () => {
             if (timerRef.current) clearInterval(timerRef.current);
         };
-    }, [isPlaying, duration, logCurrentStream]);
+    }, [isPlaying, duration, logCurrentStream, autoAdvance]);
 
     // Parse duration string "3:45" to seconds
     const parseDuration = (durationStr: string) => {
@@ -276,17 +362,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 
     // ── Public API ──
 
-    const playSong = useCallback(async (song: Song) => {
-        if (currentSong?.id === song.id) {
+    const playSong = useCallback(async (song: Song, context?: QueueContext) => {
+        if (currentSong?.id === song.id && !context) {
             // Same song — just resume / open full player
             if (soundRef.current) {
                 await soundRef.current.playAsync();
             }
             setIsPlaying(true);
             setIsFullPlayerVisible(true);
-            // Restart listen timer
             listenStartRef.current = Date.now();
             return;
+        }
+
+        // Set up queue from context
+        if (context?.songs && context.songs.length > 0) {
+            const songList = context.songs;
+            const startIdx = context.startIndex ?? songList.findIndex(s => s.id === song.id);
+            setQueue(songList);
+            setOriginalQueue(songList);
+            setQueueIndex(startIdx >= 0 ? startIdx : 0);
+            setIsShuffled(false);
+        } else {
+            // Single song play — set minimal queue
+            setQueue([song]);
+            setOriginalQueue([song]);
+            setQueueIndex(0);
+            setIsShuffled(false);
         }
 
         // New song
@@ -295,18 +396,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setIsFullPlayerVisible(true);
         listenStartRef.current = Date.now();
         accumulatedRef.current = 0;
-        useMockTimer.current = false;
+        useMockTimerRef.current = false;
+
+        addToPlayHistory(song);
 
         const loaded = await loadAndPlay(song);
 
         if (!loaded) {
-            // No real audio — fall back to mock timer
-            useMockTimer.current = true;
+            useMockTimerRef.current = true;
             const dur = song._durationSeconds || parseDuration(song.duration);
             setDuration(dur);
             setIsPlaying(true);
         }
-    }, [currentSong, loadAndPlay]);
+    }, [currentSong, loadAndPlay, addToPlayHistory]);
 
     const togglePlay = useCallback(async () => {
         if (soundRef.current) {
@@ -314,7 +416,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
             if (status.isLoaded) {
                 if (status.isPlaying) {
                     await soundRef.current.pauseAsync();
-                    // Accumulate listen time
                     if (listenStartRef.current > 0) {
                         accumulatedRef.current += (Date.now() - listenStartRef.current) / 1000;
                         listenStartRef.current = 0;
@@ -380,28 +481,246 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setCurrentSong(null);
         setCurrentTime(0);
         setDuration(0);
-        useMockTimer.current = false;
+        setQueue([]);
+        setQueueIndex(-1);
+        setOriginalQueue([]);
+        setIsShuffled(false);
+        useMockTimerRef.current = false;
     }, [unloadSound]);
 
-    // Mock skip behavior (restart — real queue would be Phase 7+)
+    // ── Skip next ──
     const skipNext = useCallback(async () => {
         await logCurrentStream();
         accumulatedRef.current = 0;
-        listenStartRef.current = Date.now();
-        setCurrentTime(0);
-        if (soundRef.current) {
-            try { await soundRef.current.setPositionAsync(0); } catch (e) {}
-        }
-    }, [logCurrentStream]);
 
+        const q = queueRef.current;
+        const idx = queueIndexRef.current;
+
+        if (q.length === 0 || idx < 0) {
+            // No queue — restart current song
+            listenStartRef.current = Date.now();
+            setCurrentTime(0);
+            if (soundRef.current) {
+                try { await soundRef.current.setPositionAsync(0); } catch (e) {}
+            }
+            return;
+        }
+
+        if (idx < q.length - 1) {
+            const nextIdx = idx + 1;
+            const nextSong = q[nextIdx];
+            setQueueIndex(nextIdx);
+            setCurrentSong(nextSong);
+            setCurrentTime(0);
+            listenStartRef.current = Date.now();
+            addToPlayHistory(nextSong);
+
+            useMockTimerRef.current = false;
+            const loaded = await loadAndPlay(nextSong);
+            if (!loaded) {
+                useMockTimerRef.current = true;
+                const dur = nextSong._durationSeconds || parseDuration(nextSong.duration);
+                setDuration(dur);
+                setIsPlaying(true);
+            }
+        } else if (isRepeatRef.current) {
+            // Wrap to beginning
+            const nextSong = q[0];
+            setQueueIndex(0);
+            setCurrentSong(nextSong);
+            setCurrentTime(0);
+            listenStartRef.current = Date.now();
+            addToPlayHistory(nextSong);
+
+            useMockTimerRef.current = false;
+            const loaded = await loadAndPlay(nextSong);
+            if (!loaded) {
+                useMockTimerRef.current = true;
+                const dur = nextSong._durationSeconds || parseDuration(nextSong.duration);
+                setDuration(dur);
+                setIsPlaying(true);
+            }
+        } else {
+            // At end of queue, no repeat — restart current
+            listenStartRef.current = Date.now();
+            setCurrentTime(0);
+            if (soundRef.current) {
+                try { await soundRef.current.setPositionAsync(0); } catch (e) {}
+            }
+        }
+    }, [logCurrentStream, loadAndPlay, addToPlayHistory]);
+
+    // ── Skip previous ──
     const skipPrevious = useCallback(async () => {
+        // If more than 3 seconds in, restart current song
+        if (currentTime > 3) {
+            accumulatedRef.current = 0;
+            listenStartRef.current = Date.now();
+            setCurrentTime(0);
+            if (soundRef.current) {
+                try { await soundRef.current.setPositionAsync(0); } catch (e) {}
+            }
+            return;
+        }
+
+        await logCurrentStream();
         accumulatedRef.current = 0;
-        listenStartRef.current = Date.now();
+
+        const q = queueRef.current;
+        const idx = queueIndexRef.current;
+
+        if (q.length === 0 || idx <= 0) {
+            // No previous — restart current
+            listenStartRef.current = Date.now();
+            setCurrentTime(0);
+            if (soundRef.current) {
+                try { await soundRef.current.setPositionAsync(0); } catch (e) {}
+            }
+            return;
+        }
+
+        const prevIdx = idx - 1;
+        const prevSong = q[prevIdx];
+        setQueueIndex(prevIdx);
+        setCurrentSong(prevSong);
         setCurrentTime(0);
-        if (soundRef.current) {
-            try { await soundRef.current.setPositionAsync(0); } catch (e) {}
+        listenStartRef.current = Date.now();
+        addToPlayHistory(prevSong);
+
+        useMockTimerRef.current = false;
+        const loaded = await loadAndPlay(prevSong);
+        if (!loaded) {
+            useMockTimerRef.current = true;
+            const dur = prevSong._durationSeconds || parseDuration(prevSong.duration);
+            setDuration(dur);
+            setIsPlaying(true);
+        }
+    }, [currentTime, logCurrentStream, loadAndPlay, addToPlayHistory]);
+
+    // ── Shuffle toggle ──
+    const toggleShuffle = useCallback(() => {
+        setIsShuffled(prev => {
+            if (!prev) {
+                // Enable shuffle: shuffle queue keeping current song at front
+                setQueue(current => {
+                    const idx = queueIndexRef.current;
+                    const shuffled = shuffleArray(current, idx);
+                    setQueueIndex(0); // current song is now at index 0
+                    return shuffled;
+                });
+            } else {
+                // Disable shuffle: restore original queue
+                setQueue(orig => {
+                    const currentSongNow = currentSongRef.current;
+                    const origQ = originalQueue;
+                    if (currentSongNow) {
+                        const origIdx = origQ.findIndex(s => s.id === currentSongNow.id);
+                        setQueueIndex(origIdx >= 0 ? origIdx : 0);
+                    }
+                    return origQ;
+                });
+            }
+            return !prev;
+        });
+    }, [originalQueue]);
+
+    // ── Queue manipulation ──
+    const addToQueue = useCallback((song: Song) => {
+        setQueue(prev => [...prev, song]);
+        setOriginalQueue(prev => [...prev, song]);
+    }, []);
+
+    const playNext = useCallback((song: Song) => {
+        setQueue(prev => {
+            const idx = queueIndexRef.current;
+            const next = [...prev];
+            next.splice(idx + 1, 0, song);
+            return next;
+        });
+        setOriginalQueue(prev => {
+            const idx = queueIndexRef.current;
+            const next = [...prev];
+            next.splice(idx + 1, 0, song);
+            return next;
+        });
+    }, []);
+
+    const removeFromQueue = useCallback((index: number) => {
+        setQueue(prev => {
+            const next = [...prev];
+            next.splice(index, 1);
+            return next;
+        });
+        // Adjust queueIndex if needed
+        setQueueIndex(prev => {
+            if (index < prev) return prev - 1;
+            return prev;
+        });
+    }, []);
+
+    const clearQueue = useCallback(() => {
+        const song = currentSongRef.current;
+        if (song) {
+            setQueue([song]);
+            setOriginalQueue([song]);
+            setQueueIndex(0);
+        } else {
+            setQueue([]);
+            setOriginalQueue([]);
+            setQueueIndex(-1);
         }
     }, []);
+
+    const playQueue = useCallback(async (songs: Song[], startIndex: number) => {
+        if (songs.length === 0) return;
+        const idx = Math.max(0, Math.min(startIndex, songs.length - 1));
+        const song = songs[idx];
+
+        setQueue(songs);
+        setOriginalQueue(songs);
+        setQueueIndex(idx);
+        setIsShuffled(false);
+        setCurrentSong(song);
+        setCurrentTime(0);
+        setIsFullPlayerVisible(true);
+        listenStartRef.current = Date.now();
+        accumulatedRef.current = 0;
+        useMockTimerRef.current = false;
+
+        addToPlayHistory(song);
+
+        const loaded = await loadAndPlay(song);
+        if (!loaded) {
+            useMockTimerRef.current = true;
+            const dur = song._durationSeconds || parseDuration(song.duration);
+            setDuration(dur);
+            setIsPlaying(true);
+        }
+    }, [loadAndPlay, addToPlayHistory]);
+
+    const jumpToQueueIndex = useCallback(async (index: number) => {
+        const q = queueRef.current;
+        if (index < 0 || index >= q.length) return;
+
+        await logCurrentStream();
+        accumulatedRef.current = 0;
+
+        const song = q[index];
+        setQueueIndex(index);
+        setCurrentSong(song);
+        setCurrentTime(0);
+        listenStartRef.current = Date.now();
+        addToPlayHistory(song);
+
+        useMockTimerRef.current = false;
+        const loaded = await loadAndPlay(song);
+        if (!loaded) {
+            useMockTimerRef.current = true;
+            const dur = song._durationSeconds || parseDuration(song.duration);
+            setDuration(dur);
+            setIsPlaying(true);
+        }
+    }, [logCurrentStream, loadAndPlay, addToPlayHistory]);
 
     // Cleanup on unmount
     useEffect(() => {
@@ -423,6 +742,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 volume,
                 isBuffering,
                 isRepeat,
+                queue,
+                queueIndex,
+                isShuffled,
+                playHistory,
                 playSong,
                 togglePlay,
                 openFullPlayer,
@@ -433,6 +756,13 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
                 skipPrevious,
                 setVolume,
                 toggleRepeat,
+                toggleShuffle,
+                addToQueue,
+                playNext,
+                removeFromQueue,
+                clearQueue,
+                playQueue,
+                jumpToQueueIndex,
             }}
         >
             {children}

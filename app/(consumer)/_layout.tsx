@@ -78,6 +78,7 @@ export default function ConsumerLayout() {
                     <Tabs.Screen name="all-songs" options={{ href: null }} />
                     <Tabs.Screen name="all-creators" options={{ href: null }} />
                     <Tabs.Screen name="all-nfts" options={{ href: null }} />
+                    <Tabs.Screen name="playlist-detail" options={{ href: null }} />
                     <Tabs.Screen name="notifications" options={{ href: null }} />
                 </Tabs>
 

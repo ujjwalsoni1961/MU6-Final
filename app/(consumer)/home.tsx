@@ -176,7 +176,7 @@ export default function HomeScreen() {
                                                 cover={song.coverImage}
                                                 title={song.title}
                                                 artist={song.artistName}
-                                                onPress={() => playSong(song)}
+                                                onPress={() => playSong(song, { songs: trendingSongs, startIndex: trendingSongs.indexOf(song) })}
                                             />
                                         ))}
                                     </View>
@@ -194,7 +194,7 @@ export default function HomeScreen() {
                             <SectionEmpty message="No new releases yet" />
                         ) : (
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -hPad, paddingHorizontal: hPad }}>
-                                {newReleases.map((song) => (
+                                {newReleases.map((song, idx) => (
                                     <SongCard
                                         key={song.id}
                                         cover={song.coverImage}
@@ -202,8 +202,9 @@ export default function HomeScreen() {
                                         artist={song.artistName}
                                         isNFT={song.isNFT}
                                         price={song.price}
+                                        song={song}
                                         onPress={() => router.push({ pathname: '/(consumer)/song-detail', params: { id: song.id } })}
-                                        onPlay={() => playSong(song)}
+                                        onPlay={() => playSong(song, { songs: newReleases, startIndex: idx })}
                                     />
                                 ))}
                             </ScrollView>
@@ -225,7 +226,7 @@ export default function HomeScreen() {
                             contentContainerStyle={{ paddingHorizontal: hPad }}
                             style={{ marginBottom: 40 }}
                         >
-                            {trendingSongs.slice(6, 12).map((song) => (
+                            {trendingSongs.slice(6, 12).map((song, idx) => (
                                 <SongCard
                                     key={song.id}
                                     cover={song.coverImage}
@@ -233,7 +234,9 @@ export default function HomeScreen() {
                                     artist={song.artistName}
                                     isNFT={song.isNFT}
                                     price={song.price}
+                                    song={song}
                                     onPress={() => router.push({ pathname: '/(consumer)/song-detail', params: { id: song.id } })}
+                                    onPlay={() => playSong(song, { songs: trendingSongs.slice(6, 12), startIndex: idx })}
                                 />
                             ))}
                         </Animated.ScrollView>

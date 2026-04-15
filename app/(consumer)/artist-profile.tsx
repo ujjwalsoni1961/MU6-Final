@@ -11,6 +11,7 @@ import GlassCard from '../../src/components/shared/GlassCard';
 import SongCard from '../../src/components/shared/SongCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { useTheme } from '../../src/context/ThemeContext';
+import { usePlayer } from '../../src/context/PlayerContext';
 import { useArtistById, useArtistSongs, useIsFollowing } from '../../src/hooks/useData';
 
 function formatFollowers(count: number): string {
@@ -23,6 +24,8 @@ export default function CreatorProfileScreen() {
     const router = useRouter();
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
+
+    const { playSong } = usePlayer();
 
     // Real data hooks
     const { data: artist, loading: loadingArtist, error: artistError } = useArtistById(id);
@@ -188,7 +191,7 @@ export default function CreatorProfileScreen() {
             ) : (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingLeft: 16, marginBottom: 32 }}>
                     {artistSongs.length > 0 ? (
-                        artistSongs.map((song) => (
+                        artistSongs.map((song, idx) => (
                             <SongCard
                                 key={song.id}
                                 cover={song.coverImage}
@@ -196,7 +199,9 @@ export default function CreatorProfileScreen() {
                                 artist={song.artistName}
                                 isNFT={song.isNFT}
                                 price={song.price}
+                                song={song}
                                 onPress={() => router.push({ pathname: '/(consumer)/song-detail', params: { id: song.id } })}
+                                onPlay={() => playSong(song, { songs: artistSongs, startIndex: idx })}
                             />
                         ))
                     ) : (

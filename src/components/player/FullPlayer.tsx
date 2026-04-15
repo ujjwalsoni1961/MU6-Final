@@ -6,17 +6,25 @@ import { Play, Pause, SkipBack, SkipForward, ChevronDown, Shuffle, Repeat, MoreH
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../context/ThemeContext';
 import { usePlayer } from '../../context/PlayerContext';
+import { useRouter } from 'expo-router';
 import Slider from '../shared/Slider';
+import SongOptionsMenu from '../shared/SongOptionsMenu';
+import QueueSheet from '../shared/QueueSheet';
 
 const { width, height } = Dimensions.get('window');
 const isWeb = Platform.OS === 'web';
 
 export default function FullPlayer() {
     const { isDark, colors } = useTheme();
-    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious, volume, setVolume, isRepeat, toggleRepeat } = usePlayer();
+    const { currentSong, isPlaying, isBuffering, togglePlay, closeFullPlayer, currentTime, duration, seekTo, skipNext, skipPrevious, volume, setVolume, isRepeat, toggleRepeat, toggleShuffle, isShuffled } = usePlayer();
+    const router = useRouter();
 
     // Track whether a slider is being interacted with — blocks swipe-to-dismiss
     const sliderActiveRef = useRef(false);
+
+    // Menu states
+    const [showOptions, setShowOptions] = useState(false);
+    const [showQueue, setShowQueue] = useState(false);
 
     // Animation for slide-in
     const slideAnim = useRef(new Animated.Value(height)).current;
@@ -98,6 +106,13 @@ export default function FullPlayer() {
         });
     };
 
+    const handleArtistTap = () => {
+        if (currentSong._creatorId) {
+            closeFullPlayer();
+            router.push({ pathname: '/(consumer)/artist-profile', params: { id: currentSong._creatorId } });
+        }
+    };
+
     return (
         <Animated.View
             {...(panResponder ? panResponder.panHandlers : {})}
@@ -127,7 +142,7 @@ export default function FullPlayer() {
                 <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
                     Now Playing
                 </Text>
-                <AnimatedPressable preset="icon" style={{ padding: 8 }}>
+                <AnimatedPressable preset="icon" onPress={() => setShowOptions(true)} style={{ padding: 8 }}>
                     <MoreHorizontal size={24} color={colors.text.primary} />
                 </AnimatedPressable>
             </View>
@@ -160,14 +175,16 @@ export default function FullPlayer() {
                     <Text style={{ fontSize: 24, fontWeight: '800', color: colors.text.primary, textAlign: 'center', marginBottom: 8 }} numberOfLines={1}>
                         {currentSong.title}
                     </Text>
-                    <Text style={{ fontSize: 18, color: colors.text.secondary, fontWeight: '500', textAlign: 'center' }}>
-                        {currentSong.artistName}
-                    </Text>
+                    <AnimatedPressable preset="icon" hapticType="none" onPress={handleArtistTap}>
+                        <Text style={{ fontSize: 18, color: currentSong._creatorId ? colors.accent.cyan : colors.text.secondary, fontWeight: '500', textAlign: 'center' }}>
+                            {currentSong.artistName}
+                        </Text>
+                    </AnimatedPressable>
                 </View>
 
                 {/* Progress Bar */}
                 <View style={{ width: '100%', paddingHorizontal: 32, marginBottom: 30 }}>
-                    <Slider 
+                    <Slider
                         value={duration > 0 ? currentTime / duration : 0}
                         onSlidingStart={() => { sliderActiveRef.current = true; }}
                         onSlidingComplete={(val) => {
@@ -188,8 +205,8 @@ export default function FullPlayer() {
 
                 {/* Main Controls */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 32, marginBottom: 40 }}>
-                    <AnimatedPressable preset="icon" hapticType="none" style={{ opacity: 0.5 }}>
-                        <Shuffle size={24} color={colors.text.muted} />
+                    <AnimatedPressable preset="icon" onPress={toggleShuffle}>
+                        <Shuffle size={24} color={isShuffled ? colors.accent.cyan : colors.text.muted} />
                     </AnimatedPressable>
 
                     <AnimatedPressable preset="icon" onPress={skipPrevious}>
@@ -229,7 +246,7 @@ export default function FullPlayer() {
                 <View style={{ width: '100%', paddingHorizontal: 32, flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                     <Volume2 size={20} color={colors.text.secondary} />
                     <View style={{ flex: 1, zIndex: 10 }}>
-                        <Slider 
+                        <Slider
                             value={volume}
                             onSlidingStart={() => { sliderActiveRef.current = true; }}
                             onValueChange={setVolume}
@@ -250,7 +267,7 @@ export default function FullPlayer() {
                     <AnimatedPressable preset="icon" hapticType="none" style={{ alignItems: 'center', opacity: 0.7 }}>
                         <Mic2 size={24} color={colors.text.primary} />
                     </AnimatedPressable>
-                    <AnimatedPressable preset="icon" hapticType="none" style={{ alignItems: 'center', opacity: 0.7 }}>
+                    <AnimatedPressable preset="icon" onPress={() => setShowQueue(true)} style={{ alignItems: 'center' }}>
                         <ListMusic size={24} color={colors.text.primary} />
                     </AnimatedPressable>
                     <AnimatedPressable preset="icon" hapticType="none" style={{ alignItems: 'center', opacity: 0.7 }}>
@@ -259,6 +276,19 @@ export default function FullPlayer() {
                 </View>
 
             </ScrollView>
+
+            {/* 3-dot menu */}
+            <SongOptionsMenu
+                visible={showOptions}
+                song={currentSong}
+                onClose={() => setShowOptions(false)}
+            />
+
+            {/* Queue sheet */}
+            <QueueSheet
+                visible={showQueue}
+                onClose={() => setShowQueue(false)}
+            />
         </Animated.View>
     );
 }

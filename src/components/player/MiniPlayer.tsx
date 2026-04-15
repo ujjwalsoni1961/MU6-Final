@@ -5,10 +5,14 @@ import { Image } from 'expo-image';
 import { Play, Pause, X, Heart } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
 import { usePlayer } from '../../context/PlayerContext';
+import { useIsLiked } from '../../hooks/useData';
+import { useRouter } from 'expo-router';
 
 export default function MiniPlayer() {
     const { isDark, colors } = useTheme();
     const { currentSong, isPlaying, isBuffering, togglePlay, openFullPlayer, dismissPlayer, currentTime, duration } = usePlayer();
+    const { liked, toggle: toggleLike } = useIsLiked(currentSong?.id);
+    const router = useRouter();
     const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
     const slideAnim = useRef(new Animated.Value(100)).current; // Start off-screen (below)
     const opacityAnim = useRef(new Animated.Value(0)).current;
@@ -28,6 +32,13 @@ export default function MiniPlayer() {
     }, [currentSong]);
 
     if (!currentSong) return null;
+
+    const handleArtistTap = (e: any) => {
+        e.stopPropagation();
+        if (currentSong._creatorId) {
+            router.push({ pathname: '/(consumer)/artist-profile', params: { id: currentSong._creatorId } });
+        }
+    };
 
     return (
         <Animated.View
@@ -88,16 +99,22 @@ export default function MiniPlayer() {
                     <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text.primary }} numberOfLines={1}>
                         {currentSong.title}
                     </Text>
-                    <Text style={{ fontSize: 12, color: colors.text.secondary }} numberOfLines={1}>
-                        {currentSong.artistName}
-                    </Text>
+                    <AnimatedPressable preset="icon" hapticType="none" onPress={handleArtistTap} style={{ alignSelf: 'flex-start' }}>
+                        <Text style={{ fontSize: 12, color: currentSong._creatorId ? colors.accent.cyan : colors.text.secondary }} numberOfLines={1}>
+                            {currentSong.artistName}
+                        </Text>
+                    </AnimatedPressable>
                 </View>
             </AnimatedPressable>
 
             {/* Controls */}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                <AnimatedPressable preset="icon" hapticType="none" onPress={() => { }}>
-                    <Heart size={20} color={colors.text.secondary} />
+                <AnimatedPressable preset="icon" hapticType="none" onPress={(e) => { e.stopPropagation(); toggleLike(); }}>
+                    <Heart
+                        size={20}
+                        color={liked ? '#ef4444' : colors.text.secondary}
+                        fill={liked ? '#ef4444' : 'none'}
+                    />
                 </AnimatedPressable>
 
                 <AnimatedPressable

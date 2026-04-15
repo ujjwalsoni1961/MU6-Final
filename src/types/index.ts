@@ -94,6 +94,20 @@ export interface OwnedNFT extends NFT {
     chainListingId?: string;
 }
 
+export interface Playlist {
+    id: string;
+    ownerId: string;
+    name: string;
+    description?: string;
+    coverPath?: string;
+    coverImage?: string;
+    isPublic: boolean;
+    createdAt: string;
+    updatedAt: string;
+    songCount?: number;
+    songs?: Song[];
+}
+
 export interface TradeEvent {
     id: string;      // Unique identifier for the event
     type: 'mint' | 'sale';

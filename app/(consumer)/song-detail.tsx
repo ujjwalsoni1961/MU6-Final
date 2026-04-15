@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, ScrollView, Platform, ActivityIndicator, Share as RNShare, Alert, ActionSheetIOS } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { useTheme } from '../../src/context/ThemeContext';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useSongById, useArtistSongs, useNFTReleases, useIsLiked } from '../../src/hooks/useData';
+import PlaylistSelectionSheet from '../../src/components/shared/PlaylistSelectionSheet';
 
 function formatPlays(count: number): string {
     if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
@@ -26,6 +27,7 @@ export default function SongDetailScreen() {
     const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
     const { playSong } = usePlayer();
+    const [showPlaylistSheet, setShowPlaylistSheet] = useState(false);
 
     // Real data hooks
     const { data: song, loading: loadingSong, error: songError } = useSongById(id);
@@ -62,6 +64,7 @@ export default function SongDetailScreen() {
     }
 
     return (
+    <>
         <ScreenScaffold dominantColor="#38b4ba" contentContainerStyle={{ paddingBottom: 120 }}>
             <View style={[
                 isWeb ? { maxWidth: 1200, width: '100%', alignSelf: 'center' } : { flex: 1 },
@@ -177,14 +180,14 @@ export default function SongDetailScreen() {
                                         ActionSheetIOS.showActionSheetWithOptions(
                                             { options, cancelButtonIndex: cancelIdx, destructiveButtonIndex: 2 },
                                             (idx) => {
-                                                if (idx === 0) Alert.alert('Coming Soon', 'Playlists will be available in a future update.');
+                                                if (idx === 0) setShowPlaylistSheet(true);
                                                 if (idx === 1) router.push({ pathname: '/(consumer)/artist-profile', params: { id: song._creatorId || '' } });
                                                 if (idx === 2) Alert.alert('Report Submitted', 'Thank you. We\'ll review this content.');
                                             }
                                         );
                                     } else {
                                         Alert.alert('Options', undefined, [
-                                            { text: 'Add to Playlist', onPress: () => Alert.alert('Coming Soon', 'Playlists will be available in a future update.') },
+                                            { text: 'Add to Playlist', onPress: () => setShowPlaylistSheet(true) },
                                             { text: 'View Artist', onPress: () => router.push({ pathname: '/(consumer)/artist-profile', params: { id: song._creatorId || '' } }) },
                                             { text: 'Report', style: 'destructive', onPress: () => Alert.alert('Report Submitted', 'Thank you. We\'ll review this content.') },
                                             { text: 'Cancel', style: 'cancel' },
@@ -304,5 +307,12 @@ export default function SongDetailScreen() {
                 <View style={{ height: 32 }} />
             </View>
         </ScreenScaffold>
+
+        <PlaylistSelectionSheet
+            visible={showPlaylistSheet}
+            songId={id}
+            onClose={() => setShowPlaylistSheet(false)}
+        />
+    </>
     );
 }

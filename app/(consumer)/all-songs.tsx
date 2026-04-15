@@ -30,7 +30,9 @@ export default function AllSongsScreen() {
     const refresh = isNew ? refreshNew : refreshTrending;
     const title = isNew ? 'New Releases' : 'Made For You';
 
-    const renderSong = ({ item }: { item: Song }) => (
+    const songList = isNew ? newReleases : trending;
+
+    const renderSong = ({ item, index }: { item: Song; index: number }) => (
         <SongRow
             cover={item.coverImage}
             title={item.title}
@@ -38,7 +40,8 @@ export default function AllSongsScreen() {
             plays={item.plays}
             likes={item.likes}
             isNFT={item.isNFT}
-            onPress={() => router.push({ pathname: '/(consumer)/song-detail', params: { id: item.id } })}
+            song={item}
+            onPress={() => playSong(item, { songs: songList, startIndex: index })}
         />
     );
 

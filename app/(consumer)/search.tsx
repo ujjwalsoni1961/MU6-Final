@@ -11,6 +11,7 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Song, Artist } from '../../src/types';
 import { useSongs, useSearchArtists } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
+import { usePlayer } from '../../src/context/PlayerContext';
 
 const isWeb = Platform.OS === 'web';
 const genres = ['Electronic', 'Hip-Hop', 'Ambient', 'Synthwave', 'Pop', 'Dubstep', 'Rock', 'Lo-fi', 'R&B'];
@@ -85,6 +86,7 @@ export default function SearchScreen() {
     const [debouncedQuery, setDebouncedQuery] = useState('');
     const router = useRouter();
     const { isDark, colors } = useTheme();
+    const { playSong } = usePlayer();
 
     // Debounce search query
     useEffect(() => {
@@ -159,7 +161,7 @@ export default function SearchScreen() {
                                 <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text.secondary, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
                                     Songs
                                 </Text>
-                                {songResults.map((song) => (
+                                {songResults.map((song, idx) => (
                                     <SongRow
                                         key={song.id}
                                         cover={song.coverImage}
@@ -168,7 +170,8 @@ export default function SearchScreen() {
                                         plays={song.plays}
                                         likes={song.likes}
                                         isNFT={song.isNFT}
-                                        onPress={() => router.push({ pathname: '/(consumer)/song-detail', params: { id: song.id } })}
+                                        song={song}
+                                        onPress={() => playSong(song, { songs: songResults, startIndex: idx })}
                                     />
                                 ))}
                             </View>

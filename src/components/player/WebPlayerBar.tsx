@@ -8,6 +8,8 @@ import {
 } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
 import { usePlayer } from '../../context/PlayerContext';
+import { useIsLiked } from '../../hooks/useData';
+import { useRouter } from 'expo-router';
 import WebPlayerExpanded from './WebPlayerExpanded';
 
 export default function WebPlayerBar() {
@@ -15,7 +17,10 @@ export default function WebPlayerBar() {
     const {
         currentSong, isPlaying, isBuffering, togglePlay, currentTime, duration,
         seekTo, skipNext, skipPrevious, volume, setVolume,
+        isRepeat, toggleRepeat, isShuffled, toggleShuffle,
     } = usePlayer();
+    const { liked, toggle: toggleLike } = useIsLiked(currentSong?.id);
+    const router = useRouter();
 
     const [isExpanded, setIsExpanded] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
@@ -75,6 +80,12 @@ export default function WebPlayerBar() {
         }
     };
 
+    const handleArtistTap = () => {
+        if (currentSong._creatorId) {
+            router.push({ pathname: '/(consumer)/artist-profile', params: { id: currentSong._creatorId } });
+        }
+    };
+
     const barBg = isDark ? 'rgba(10,15,20,0.95)' : 'rgba(255,255,255,0.95)';
     const borderColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)';
 
@@ -121,22 +132,29 @@ export default function WebPlayerBar() {
                         >
                             {currentSong.title}
                         </Text>
-                        <Text
-                            style={{ fontSize: 12, color: colors.text.secondary, marginTop: 1 }}
-                            numberOfLines={1}
-                        >
-                            {currentSong.artistName}
-                        </Text>
+                        <AnimatedPressable preset="icon" hapticType="none" onPress={handleArtistTap} style={{ alignSelf: 'flex-start' }}>
+                            <Text
+                                style={{ fontSize: 12, color: currentSong._creatorId ? colors.accent.cyan : colors.text.secondary, marginTop: 1 }}
+                                numberOfLines={1}
+                            >
+                                {currentSong.artistName}
+                            </Text>
+                        </AnimatedPressable>
                     </View>
                     <AnimatedPressable
                         preset="icon"
                         hapticType="none"
+                        onPress={toggleLike}
                         style={{
                             padding: 8,
                             borderRadius: 20,
                         }}
                     >
-                        <Heart size={18} color={colors.text.secondary} />
+                        <Heart
+                            size={18}
+                            color={liked ? '#ef4444' : colors.text.secondary}
+                            fill={liked ? '#ef4444' : 'none'}
+                        />
                     </AnimatedPressable>
                 </View>
 
@@ -147,12 +165,13 @@ export default function WebPlayerBar() {
                         <AnimatedPressable
                             preset="icon"
                             hapticType="none"
+                            onPress={toggleShuffle}
                             style={{
                                 padding: 4,
                                 borderRadius: 12,
                             }}
                         >
-                            <Shuffle size={16} color={colors.text.muted} />
+                            <Shuffle size={16} color={isShuffled ? colors.accent.cyan : colors.text.muted} />
                         </AnimatedPressable>
 
                         <AnimatedPressable
@@ -201,12 +220,13 @@ export default function WebPlayerBar() {
                         <AnimatedPressable
                             preset="icon"
                             hapticType="none"
+                            onPress={toggleRepeat}
                             style={{
                                 padding: 4,
                                 borderRadius: 12,
                             }}
                         >
-                            <Repeat size={16} color={colors.text.muted} />
+                            <Repeat size={16} color={isRepeat ? colors.accent.cyan : colors.text.muted} />
                         </AnimatedPressable>
                     </View>
 
@@ -319,12 +339,13 @@ export default function WebPlayerBar() {
                     <AnimatedPressable
                         preset="icon"
                         hapticType="none"
+                        onPress={() => setIsExpanded(!isExpanded)}
                         style={{
                             padding: 6,
                             borderRadius: 12,
                         }}
                     >
-                        <ListMusic size={18} color={colors.text.secondary} />
+                        <ListMusic size={18} color={isExpanded ? colors.accent.cyan : colors.text.secondary} />
                     </AnimatedPressable>
 
                     {/* Expand / Collapse */}

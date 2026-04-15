@@ -1839,3 +1839,220 @@ export async function getPayoutRequests(profileId: string): Promise<PayoutReques
 function camelToSnake(str: string): string {
     return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
+
+// ────────────────────────────────────────────
+// PLAYLISTS
+// ────────────────────────────────────────────
+
+export interface PlaylistRow {
+    id: string;
+    ownerId: string;
+    name: string;
+    description: string | null;
+    coverPath: string | null;
+    isPublic: boolean;
+    createdAt: string;
+    updatedAt: string;
+    songCount?: number;
+    songs?: Song[];
+}
+
+/** Get all playlists for a user with song counts */
+export async function getPlaylists(ownerId: string): Promise<PlaylistRow[]> {
+    const { data, error } = await supabase
+        .from('playlists')
+        .select('*')
+        .eq('owner_id', ownerId)
+        .order('updated_at', { ascending: false });
+
+    if (error || !data) {
+        console.error('[db] getPlaylists error:', error);
+        return [];
+    }
+
+    // Get song counts
+    const playlistIds = data.map((p: any) => p.id);
+    const { data: songCounts } = await supabase
+        .from('playlist_songs')
+        .select('playlist_id')
+        .in('playlist_id', playlistIds);
+
+    const countMap = new Map<string, number>();
+    (songCounts || []).forEach((row: any) => {
+        countMap.set(row.playlist_id, (countMap.get(row.playlist_id) || 0) + 1);
+    });
+
+    return data.map((row: any) => ({
+        id: row.id,
+        ownerId: row.owner_id,
+        name: row.name,
+        description: row.description,
+        coverPath: row.cover_path,
+        isPublic: row.is_public,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        songCount: countMap.get(row.id) || 0,
+    }));
+}
+
+/** Get a single playlist with its songs */
+export async function getPlaylistById(playlistId: string): Promise<PlaylistRow | null> {
+    const { data, error } = await supabase
+        .from('playlists')
+        .select('*')
+        .eq('id', playlistId)
+        .maybeSingle();
+
+    if (error || !data) return null;
+
+    // Get songs in order
+    const { data: songRows } = await supabase
+        .from('playlist_songs')
+        .select(`
+            position,
+            song:songs!song_id (
+                *,
+                creator:profiles!creator_id (
+                    id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
+                )
+            )
+        `)
+        .eq('playlist_id', playlistId)
+        .order('position', { ascending: true });
+
+    const songs = (songRows || [])
+        .map((row: any) => row.song ? mapSongRow(row.song) : null)
+        .filter(Boolean) as Song[];
+
+    return {
+        id: data.id,
+        ownerId: data.owner_id,
+        name: data.name,
+        description: data.description,
+        coverPath: data.cover_path,
+        isPublic: data.is_public,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+        songCount: songs.length,
+        songs,
+    };
+}
+
+/** Create a new playlist */
+export async function createPlaylist(
+    ownerId: string,
+    name: string,
+    description?: string,
+): Promise<PlaylistRow | null> {
+    const { data, error } = await supabase
+        .from('playlists')
+        .insert({
+            owner_id: ownerId,
+            name,
+            description: description || null,
+            is_public: false,
+        })
+        .select()
+        .single();
+
+    if (error || !data) {
+        console.error('[db] createPlaylist error:', error);
+        return null;
+    }
+
+    return {
+        id: data.id,
+        ownerId: data.owner_id,
+        name: data.name,
+        description: data.description,
+        coverPath: data.cover_path,
+        isPublic: data.is_public,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+        songCount: 0,
+    };
+}
+
+/** Update a playlist */
+export async function updatePlaylist(
+    playlistId: string,
+    updates: { name?: string; description?: string; isPublic?: boolean },
+): Promise<boolean> {
+    const updateObj: any = { updated_at: new Date().toISOString() };
+    if (updates.name !== undefined) updateObj.name = updates.name;
+    if (updates.description !== undefined) updateObj.description = updates.description;
+    if (updates.isPublic !== undefined) updateObj.is_public = updates.isPublic;
+
+    const { error } = await supabase
+        .from('playlists')
+        .update(updateObj)
+        .eq('id', playlistId);
+
+    if (error) {
+        console.error('[db] updatePlaylist error:', error);
+        return false;
+    }
+    return true;
+}
+
+/** Delete a playlist */
+export async function deletePlaylist(playlistId: string): Promise<boolean> {
+    const { error } = await supabase
+        .from('playlists')
+        .delete()
+        .eq('id', playlistId);
+
+    if (error) {
+        console.error('[db] deletePlaylist error:', error);
+        return false;
+    }
+    return true;
+}
+
+/** Add a song to a playlist */
+export async function addSongToPlaylist(playlistId: string, songId: string): Promise<boolean> {
+    // Get max position
+    const { data: existing } = await supabase
+        .from('playlist_songs')
+        .select('position')
+        .eq('playlist_id', playlistId)
+        .order('position', { ascending: false })
+        .limit(1);
+
+    const nextPosition = (existing?.[0]?.position ?? -1) + 1;
+
+    const { error } = await supabase
+        .from('playlist_songs')
+        .upsert(
+            { playlist_id: playlistId, song_id: songId, position: nextPosition },
+            { onConflict: 'playlist_id,song_id' },
+        );
+
+    if (error) {
+        console.error('[db] addSongToPlaylist error:', error);
+        return false;
+    }
+
+    // Update playlist timestamp
+    await supabase
+        .from('playlists')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', playlistId);
+
+    return true;
+}
+
+/** Remove a song from a playlist */
+export async function removeSongFromPlaylist(playlistId: string, songId: string): Promise<boolean> {
+    const { error } = await supabase
+        .from('playlist_songs')
+        .delete()
+        .eq('playlist_id', playlistId)
+        .eq('song_id', songId);
+
+    if (error) {
+        console.error('[db] removeSongFromPlaylist error:', error);
+        return false;
+    }
+    return true;
+}
