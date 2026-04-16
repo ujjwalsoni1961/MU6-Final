@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Gem, Plus, X, ChevronDown } from 'lucide-react-native';
+import { Gem, Plus, X, ChevronDown, ImagePlus, Trash2, AlertTriangle, Info } from 'lucide-react-native';
 import NFTCard from '../../src/components/shared/NFTCard';
 import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { NFT, Song } from '../../src/types';
@@ -16,6 +16,9 @@ import ErrorState from '../../src/components/shared/ErrorState';
 import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount } from 'thirdweb/react';
 import { useRouter, useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
+import { supabase } from '../../src/lib/supabase';
 
 const isWeb = Platform.OS === 'web';
 
@@ -69,6 +72,12 @@ export default function NFTManagerScreen() {
     const [totalSupply, setTotalSupply] = useState('10');
     const [priceEth, setPriceEth] = useState('0.01');
     const [royaltyPercent, setRoyaltyPercent] = useState('10');
+    const [description, setDescription] = useState('');
+    const [coverImageUri, setCoverImageUri] = useState<string | null>(null);
+    const [coverImageUploading, setCoverImageUploading] = useState(false);
+    const [benefits, setBenefits] = useState<{ title: string; description: string }[]>([]);
+    const [newBenefitTitle, setNewBenefitTitle] = useState('');
+    const [newBenefitDesc, setNewBenefitDesc] = useState('');
 
     const resetForm = () => {
         setSelectedSong(null);
@@ -77,7 +86,57 @@ export default function NFTManagerScreen() {
         setTotalSupply('10');
         setPriceEth('0.01');
         setRoyaltyPercent('10');
+        setDescription('');
+        setCoverImageUri(null);
+        setBenefits([]);
+        setNewBenefitTitle('');
+        setNewBenefitDesc('');
         createRelease.reset();
+    };
+
+    const pickCoverImage = async () => {
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+        });
+        if (!result.canceled && result.assets[0]) {
+            setCoverImageUri(result.assets[0].uri);
+        }
+    };
+
+    const uploadCoverImage = async (): Promise<string | null> => {
+        if (!coverImageUri) return null;
+        setCoverImageUploading(true);
+        try {
+            const ext = coverImageUri.split('.').pop() || 'jpg';
+            const fileName = `nft-cover-${Date.now()}.${ext}`;
+            const response = await fetch(coverImageUri);
+            const blob = await response.blob();
+            const { error } = await supabase.storage.from('covers').upload(`nft-covers/${fileName}`, blob, {
+                contentType: `image/${ext}`,
+                upsert: true,
+            });
+            if (error) throw error;
+            return `nft-covers/${fileName}`;
+        } catch (err: any) {
+            console.error('[nft-manager] cover upload error:', err);
+            return null;
+        } finally {
+            setCoverImageUploading(false);
+        }
+    };
+
+    const addBenefit = () => {
+        if (!newBenefitTitle.trim()) return;
+        setBenefits([...benefits, { title: newBenefitTitle.trim(), description: newBenefitDesc.trim() }]);
+        setNewBenefitTitle('');
+        setNewBenefitDesc('');
+    };
+
+    const removeBenefit = (idx: number) => {
+        setBenefits(benefits.filter((_, i) => i !== idx));
     };
 
     const handleCreate = async () => {
@@ -103,6 +162,12 @@ export default function NFTManagerScreen() {
             return;
         }
 
+        // Upload custom cover image if selected
+        let uploadedCoverPath: string | null = null;
+        if (coverImageUri) {
+            uploadedCoverPath = await uploadCoverImage();
+        }
+
         const releaseId = await createRelease.execute(
             {
                 songId: selectedSong.id,
@@ -112,6 +177,9 @@ export default function NFTManagerScreen() {
                 allocatedRoyaltyPercent: royalty,
                 priceEth: price,
                 metadataUri: selectedSong.coverImage || 'ipfs://QmWYNy1tmd2UvBQNE9mT1TfQCu85GzD9x237wDdf5ahcWk/', // Default IFPS fallback
+                description: description.trim() || undefined,
+                coverImagePath: uploadedCoverPath || undefined,
+                benefits: benefits.length > 0 ? benefits : undefined,
             },
             account || undefined,
         );
@@ -312,6 +380,116 @@ export default function NFTManagerScreen() {
                                 style={inputStyle}
                             />
 
+                            {/* Description */}
+                            <Text style={labelStyle}>Description</Text>
+                            <TextInput
+                                value={description}
+                                onChangeText={setDescription}
+                                placeholder="Describe this NFT release..."
+                                placeholderTextColor={colors.text.muted}
+                                multiline
+                                numberOfLines={3}
+                                style={{
+                                    ...inputStyle,
+                                    minHeight: 80,
+                                    textAlignVertical: 'top',
+                                }}
+                            />
+
+                            {/* Custom Cover Image */}
+                            <Text style={labelStyle}>Custom Cover Image</Text>
+                            <Text style={{ color: colors.text.muted, fontSize: 11, marginBottom: 8 }}>
+                                Optional. Falls back to the song's cover art if not set.
+                            </Text>
+                            <AnimatedPressable
+                                preset="button"
+                                onPress={pickCoverImage}
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8,
+                                    ...inputStyle,
+                                    paddingVertical: coverImageUri ? 8 : 14,
+                                }}
+                            >
+                                {coverImageUri ? (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                                        <Image source={{ uri: coverImageUri }} style={{ width: 48, height: 48, borderRadius: 8 }} />
+                                        <Text style={{ color: colors.text.primary, fontSize: 13, flex: 1 }} numberOfLines={1}>Cover selected</Text>
+                                        <AnimatedPressable preset="icon" onPress={() => setCoverImageUri(null)}>
+                                            <X size={16} color={colors.text.secondary} />
+                                        </AnimatedPressable>
+                                    </View>
+                                ) : (
+                                    <>
+                                        <ImagePlus size={18} color={colors.text.secondary} />
+                                        <Text style={{ color: colors.text.secondary, fontSize: 14 }}>Choose Image</Text>
+                                    </>
+                                )}
+                            </AnimatedPressable>
+
+                            {/* Benefits / Perks */}
+                            <Text style={labelStyle}>Benefits / Perks</Text>
+                            <Text style={{ color: colors.text.muted, fontSize: 11, marginBottom: 8 }}>
+                                Add perks that NFT holders receive (e.g. royalty share, VIP access).
+                            </Text>
+                            {benefits.map((b, idx) => (
+                                <View key={idx} style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                    marginBottom: 6,
+                                    backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.05)',
+                                    borderRadius: 10,
+                                    padding: 10,
+                                    borderWidth: 1,
+                                    borderColor: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.1)',
+                                }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ color: colors.text.primary, fontSize: 13, fontWeight: '600' }}>{b.title}</Text>
+                                        {b.description ? <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>{b.description}</Text> : null}
+                                    </View>
+                                    <AnimatedPressable preset="icon" onPress={() => removeBenefit(idx)}>
+                                        <Trash2 size={14} color="#ef4444" />
+                                    </AnimatedPressable>
+                                </View>
+                            ))}
+                            <View style={{ gap: 6 }}>
+                                <TextInput
+                                    value={newBenefitTitle}
+                                    onChangeText={setNewBenefitTitle}
+                                    placeholder="Benefit title (e.g. VIP Concert Access)"
+                                    placeholderTextColor={colors.text.muted}
+                                    style={inputStyle}
+                                />
+                                <TextInput
+                                    value={newBenefitDesc}
+                                    onChangeText={setNewBenefitDesc}
+                                    placeholder="Description (optional)"
+                                    placeholderTextColor={colors.text.muted}
+                                    style={inputStyle}
+                                />
+                                <AnimatedPressable
+                                    preset="button"
+                                    onPress={addBenefit}
+                                    style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 6,
+                                        paddingVertical: 10,
+                                        borderRadius: 10,
+                                        backgroundColor: isDark ? 'rgba(139,92,246,0.12)' : 'rgba(139,92,246,0.08)',
+                                        borderWidth: 1,
+                                        borderColor: isDark ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.15)',
+                                    }}
+                                >
+                                    <Plus size={14} color="#8b5cf6" />
+                                    <Text style={{ color: '#8b5cf6', fontWeight: '600', fontSize: 13 }}>Add Benefit</Text>
+                                </AnimatedPressable>
+                            </View>
+
                             {/* Rarity */}
                             <Text style={labelStyle}>Rarity</Text>
                             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -382,6 +560,20 @@ export default function NFTManagerScreen() {
                             <Text style={{ color: colors.text.muted, fontSize: 11, marginTop: 4 }}>
                                 Max 50% total across all tiers per song. NFT holders share this royalty pool.
                             </Text>
+                            {parseFloat(royaltyPercent) > 0 && parseInt(totalSupply) > 0 && (
+                                <View style={{
+                                    flexDirection: 'row', alignItems: 'center', gap: 8,
+                                    marginTop: 8, padding: 10, borderRadius: 10,
+                                    backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : 'rgba(245,158,11,0.06)',
+                                    borderWidth: 1,
+                                    borderColor: isDark ? 'rgba(245,158,11,0.2)' : 'rgba(245,158,11,0.15)',
+                                }}>
+                                    <Info size={14} color="#f59e0b" />
+                                    <Text style={{ color: '#f59e0b', fontSize: 11, flex: 1 }}>
+                                        {`${royaltyPercent}% of streaming revenue will be shared across ${totalSupply} NFT holders (${(parseFloat(royaltyPercent) / parseInt(totalSupply)).toFixed(2)}% per NFT).`}
+                                    </Text>
+                                </View>
+                            )}
 
                             {/* Error */}
                             {createRelease.error && (

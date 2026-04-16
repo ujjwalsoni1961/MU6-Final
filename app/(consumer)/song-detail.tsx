@@ -265,7 +265,7 @@ export default function SongDetailScreen() {
                             <GlassCard intensity="heavy" style={{ marginBottom: 20, width: '100%' }}>
                                 <Text style={{ fontSize: 36, fontWeight: '800', color: '#8b5cf6', letterSpacing: -1, textAlign: 'center' }}>{nftRelease.price} POL</Text>
                                 <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4, textAlign: 'center' }}>
-                                    {nftRelease.editionNumber - 1} of {nftRelease.totalEditions} editions minted
+                                    {nftRelease.mintedCount ?? nftRelease.editionNumber} of {nftRelease.totalEditions} editions minted
                                 </Text>
                                 <AnimatedPressable
                                     preset="button"

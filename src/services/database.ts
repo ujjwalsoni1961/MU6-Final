@@ -58,6 +58,9 @@ export interface NFTRelease {
     mintedCount: number;
     isActive: boolean;
     createdAt: string;
+    description: string | null;
+    coverImagePath: string | null;
+    benefits: { title: string; description: string }[];
     // Joined
     song?: Song;
 }
@@ -577,6 +580,44 @@ export async function getNFTTokensForRelease(releaseId: string): Promise<NFTToke
         return [];
     }
     return (data || []).map(mapNFTTokenRow);
+}
+
+/**
+ * Compute per-release edition numbers for a set of tokens.
+ * Returns a map of token_id → edition_number (1-based sequential within each release).
+ */
+export async function getEditionNumbers(tokenIds: string[]): Promise<Record<string, number>> {
+    if (tokenIds.length === 0) return {};
+
+    // Get the release IDs for the given tokens
+    const { data: tokenData, error } = await supabase
+        .from('nft_tokens')
+        .select('id, nft_release_id')
+        .in('id', tokenIds);
+
+    if (error || !tokenData) return {};
+
+    // Collect unique release IDs
+    const releaseIds = [...new Set(tokenData.map((t: any) => t.nft_release_id))];
+
+    // For each release, get all tokens ordered by minted_at to compute sequential edition numbers
+    const editionMap: Record<string, number> = {};
+
+    for (const releaseId of releaseIds) {
+        const { data: relTokens, error: relErr } = await supabase
+            .from('nft_tokens')
+            .select('id')
+            .eq('nft_release_id', releaseId)
+            .order('minted_at', { ascending: true });
+
+        if (relErr || !relTokens) continue;
+
+        relTokens.forEach((t: any, idx: number) => {
+            editionMap[t.id] = idx + 1; // 1-based edition number
+        });
+    }
+
+    return editionMap;
 }
 
 export async function getNFTTradeHistory(params: { tokenId?: string; releaseId?: string }): Promise<TradeEvent[]> {
@@ -1601,6 +1642,9 @@ function mapNFTReleaseRow(row: any): NFTRelease {
         mintedCount: row.minted_count,
         isActive: row.is_active,
         createdAt: row.created_at,
+        description: row.description || null,
+        coverImagePath: row.cover_image_path || null,
+        benefits: row.benefits || [],
         song: row.song ? mapSongRow(row.song) : undefined,
     };
 }

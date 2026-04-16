@@ -3,7 +3,7 @@ import { View, Text, ScrollView, Platform, ActivityIndicator, Alert } from 'reac
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, ExternalLink, ShoppingCart, Zap, Tag } from 'lucide-react-native';
+import { ChevronLeft, ExternalLink, ShoppingCart, Zap, Tag, Copy, Check, Shield, Clock, Music, ChevronRight } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import GlassCard from '../../src/components/shared/GlassCard';
 import RarityBadge from '../../src/components/shared/RarityBadge';
@@ -28,6 +28,10 @@ import { useCurrency } from '../../src/hooks/useCurrency';
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
+import * as Clipboard from 'expo-clipboard';
+
+const NFT_CONTRACT = '0xACF1145AdE250D356e1B2869E392e6c748c14C0E';
+const POLYGONSCAN_BASE = 'https://amoy.polygonscan.com';
 
 type ViewMode = 'release' | 'listing';
 
@@ -58,11 +62,35 @@ function friendlyError(raw: string): string {
     if (lower.includes('cannot coerce') || lower.includes('json object')) {
         return 'Something went wrong. Please try again.';
     }
-    // Fallback: truncate overly long errors
     if (raw.length > 120) {
         return raw.substring(0, 117) + '...';
     }
     return raw;
+}
+
+function truncateAddress(addr: string): string {
+    if (!addr || addr.length < 10) return addr || '';
+    return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+function CopyButton({ text, colors, isDark }: { text: string; colors: any; isDark: boolean }) {
+    const [copied, setCopied] = useState(false);
+    const handleCopy = async () => {
+        try {
+            await Clipboard.setStringAsync(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch { /* ignore */ }
+    };
+    return (
+        <AnimatedPressable preset="icon" onPress={handleCopy} style={{
+            width: 28, height: 28, borderRadius: 8,
+            alignItems: 'center' as const, justifyContent: 'center' as const,
+            backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+        }}>
+            {copied ? <Check size={13} color="#10b981" /> : <Copy size={13} color={colors.text.secondary} />}
+        </AnimatedPressable>
+    );
 }
 
 export default function NFTDetailScreen() {
@@ -252,12 +280,9 @@ export default function NFTDetailScreen() {
         );
     }
 
-    const truncatedOwner = nft.owner
-        ? `${nft.owner.slice(0, 6)}...${nft.owner.slice(-4)}`
-        : 'Not yet minted';
-
     const isPrimary = viewMode === 'release';
-    const isSoldOut = isPrimary && nft.editionNumber > nft.totalEditions;
+    const mintedCount = nft.mintedCount ?? nft.editionNumber ?? 0;
+    const isSoldOut = isPrimary && mintedCount >= nft.totalEditions;
     const isOwnRelease = isPrimary && profile?.id === nft.creatorId;
     const isOwnListing = listing && walletAddress
         ? listing.sellerWallet.toLowerCase() === walletAddress.toLowerCase()
@@ -266,21 +291,17 @@ export default function NFTDetailScreen() {
     const actionLoading = mintHook.loading || buyHook.loading;
     const rawActionError = mintHook.error || buyHook.error;
     const actionSuccess = mintHook.success || buyHook.success;
-
-    // Parse raw blockchain errors into user-friendly messages
     const actionError = rawActionError ? friendlyError(rawActionError) : null;
 
-    // Determine button state
-    // Consumers can collect primary NFTs; creators see stats for their own releases
     const canMint = isPrimary && !isOwnRelease;
     const canBuy = !isPrimary && !isOwnListing;
 
-    let buttonLabel = canMint ? 'Buy Now' : 'Buy Now';
+    let buttonLabel = 'Buy Now';
     let buttonDisabled = false;
     let buttonColor = '#8b5cf6';
 
     if (actionLoading) {
-        buttonLabel = canMint ? 'Purchasing...' : 'Purchasing...';
+        buttonLabel = 'Purchasing...';
         buttonDisabled = true;
     } else if (actionSuccess) {
         buttonLabel = 'Success!';
@@ -291,8 +312,7 @@ export default function NFTDetailScreen() {
         buttonDisabled = true;
         buttonColor = '#64748b';
     } else if (isOwnRelease) {
-        // Artist viewing their own release — no collect button
-        buttonLabel = `${nft.editionNumber - 1} of ${nft.totalEditions} Collected`;
+        buttonLabel = `${mintedCount} of ${nft.totalEditions} Collected`;
         buttonDisabled = true;
         buttonColor = '#64748b';
     } else if (isOwnListing) {
@@ -310,6 +330,14 @@ export default function NFTDetailScreen() {
             router.push({ pathname: '/(consumer)/artist-profile', params: { id: nft.creatorId } });
         }
     };
+
+    // Determine owner wallet for display
+    const ownerWallet = nft.ownerWallet || nft.owner || '';
+    const onChainTokenId = nft.onChainTokenId || '';
+
+    // Get the first trade event as mint price reference
+    const mintEvent = tradeHistory.find(t => t.type === 'mint');
+    const lastSaleEvent = [...tradeHistory].reverse().find(t => t.type === 'sale');
 
     return (
         <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
@@ -359,8 +387,10 @@ export default function NFTDetailScreen() {
                         )}
                         {!isWeb && (
                             <View style={{ position: 'absolute', bottom: 20, left: 20, right: 20 }}>
-                                <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', letterSpacing: -1 }}>{nft.songTitle}</Text>
-                                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, marginTop: 2 }}>{nft.artistName}</Text>
+                                <AnimatedPressable preset="row" onPress={handleCreatorPress}>
+                                    <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', letterSpacing: -1 }}>{nft.songTitle}</Text>
+                                    <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, marginTop: 2 }}>by {nft.artistName}</Text>
+                                </AnimatedPressable>
                             </View>
                         )}
                     </View>
@@ -373,37 +403,50 @@ export default function NFTDetailScreen() {
                                     <Text style={{ fontSize: 40, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>{nft.songTitle}</Text>
                                     <RarityBadge rarity={nft.rarity} />
                                 </View>
-                                <Text style={{ fontSize: 20, color: colors.text.secondary }}>{nft.artistName}</Text>
+                                <AnimatedPressable preset="row" onPress={handleCreatorPress}>
+                                    <Text style={{ fontSize: 20, color: colors.text.secondary }}>by {nft.artistName}</Text>
+                                </AnimatedPressable>
                             </View>
                         )}
 
-                        {/* Sale Type Badge */}
-                        <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+                        {/* Edition & Release Info */}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                            {/* Sale Type Badge */}
                             <View style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                backgroundColor: isPrimary
-                                    ? 'rgba(139,92,246,0.15)'
-                                    : 'rgba(245,158,11,0.15)',
-                                paddingHorizontal: 12,
-                                paddingVertical: 6,
-                                borderRadius: 20,
-                                gap: 6,
+                                flexDirection: 'row', alignItems: 'center',
+                                backgroundColor: isPrimary ? 'rgba(139,92,246,0.15)' : 'rgba(245,158,11,0.15)',
+                                paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, gap: 6,
                             }}>
-                                {isPrimary
-                                    ? <Zap size={14} color="#8b5cf6" />
-                                    : <Tag size={14} color="#f59e0b" />
-                                }
-                                <Text style={{
-                                    fontSize: 12,
-                                    fontWeight: '700',
-                                    color: isPrimary ? '#8b5cf6' : '#f59e0b',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: 0.5,
-                                }}>
+                                {isPrimary ? <Zap size={14} color="#8b5cf6" /> : <Tag size={14} color="#f59e0b" />}
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: isPrimary ? '#8b5cf6' : '#f59e0b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                                     {isPrimary ? 'Primary Sale' : 'Secondary Sale'}
                                 </Text>
                             </View>
+                            {/* Edition Badge */}
+                            <View style={{
+                                flexDirection: 'row', alignItems: 'center',
+                                backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                                paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+                            }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary }}>
+                                    {isPrimary
+                                        ? `${mintedCount} of ${nft.totalEditions} minted`
+                                        : nft.editionNumber > 0
+                                            ? `Edition ${nft.editionNumber} of ${nft.totalEditions}`
+                                            : `${nft.totalEditions} Editions`}
+                                </Text>
+                            </View>
+                            {/* Tier Name */}
+                            {nft.tierName && (
+                                <View style={{
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+                                }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary }}>
+                                        {nft.tierName}
+                                    </Text>
+                                </View>
+                            )}
                         </View>
 
                         {/* Price Card */}
@@ -427,11 +470,6 @@ export default function NFTDetailScreen() {
                                     </Text>
                                 )}
                             </View>
-                            <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 4 }}>
-                                {isPrimary
-                                    ? `${nft.editionNumber - 1} of ${nft.totalEditions} minted`
-                                    : `Edition #${nft.editionNumber} of ${nft.totalEditions}`}
-                            </Text>
 
                             {/* Error message */}
                             {actionError && (
@@ -481,7 +519,7 @@ export default function NFTDetailScreen() {
                                 )}
                             </AnimatedPressable>
 
-                            {/* PayEmbed — fiat card payment option (web only, primary + secondary sales) */}
+                            {/* PayEmbed — fiat card payment option (web only) */}
                             {isWeb && !actionSuccess && walletAddress && (
                                 (isPrimary && canMint && !isSoldOut) || (!isPrimary && listing && !isOwnListing)
                             ) && (
@@ -514,7 +552,183 @@ export default function NFTDetailScreen() {
                             )}
                         </GlassCard>
 
-                        {/* Owner / Seller info */}
+                        {/* Benefits / Perks Section */}
+                        {nft.benefits && nft.benefits.length > 0 && (
+                            <GlassCard intensity="light" style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>
+                                    This NFT includes
+                                </Text>
+                                {nft.benefits.map((benefit, idx) => (
+                                    <View key={idx} style={{ flexDirection: 'row', gap: 10, marginBottom: idx < nft.benefits!.length - 1 ? 10 : 0 }}>
+                                        <View style={{
+                                            width: 22, height: 22, borderRadius: 11,
+                                            backgroundColor: 'rgba(16,185,129,0.15)',
+                                            alignItems: 'center' as const, justifyContent: 'center' as const,
+                                            marginTop: 1,
+                                        }}>
+                                            <Check size={12} color="#10b981" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={{ color: colors.text.primary, fontSize: 14, fontWeight: '600' }}>
+                                                {benefit.title}
+                                            </Text>
+                                            {benefit.description ? (
+                                                <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 2 }}>
+                                                    {benefit.description}
+                                                </Text>
+                                            ) : null}
+                                        </View>
+                                    </View>
+                                ))}
+                            </GlassCard>
+                        )}
+
+                        {/* Streaming Royalty Info */}
+                        {nft.allocatedRoyaltyPercent != null && nft.allocatedRoyaltyPercent > 0 && (
+                            <GlassCard intensity="light" style={{ marginBottom: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                    <View style={{
+                                        width: 36, height: 36, borderRadius: 18,
+                                        backgroundColor: 'rgba(139,92,246,0.15)',
+                                        alignItems: 'center' as const, justifyContent: 'center' as const,
+                                    }}>
+                                        <Music size={18} color="#8b5cf6" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ color: colors.text.primary, fontSize: 14, fontWeight: '700' }}>
+                                            Streaming Royalty Share
+                                        </Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 2 }}>
+                                            This NFT entitles the holder to {(nft.allocatedRoyaltyPercent / nft.totalEditions).toFixed(2)}% of streaming revenue
+                                        </Text>
+                                    </View>
+                                </View>
+                                <View style={{
+                                    flexDirection: 'row', alignItems: 'center', gap: 6,
+                                    marginTop: 10, paddingTop: 10,
+                                    borderTopWidth: 1, borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                                }}>
+                                    <Clock size={13} color={colors.text.muted} />
+                                    <Text style={{ color: colors.text.muted, fontSize: 11 }}>
+                                        Hold for 30 days to qualify for royalty distributions
+                                    </Text>
+                                </View>
+                            </GlassCard>
+                        )}
+
+                        {/* Description */}
+                        {nft.description && (
+                            <GlassCard intensity="light" style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>
+                                    Description
+                                </Text>
+                                <Text style={{ color: colors.text.primary, fontSize: 14, lineHeight: 22 }}>
+                                    {nft.description}
+                                </Text>
+                            </GlassCard>
+                        )}
+
+                        {/* On-Chain Verification */}
+                        <GlassCard intensity="light" style={{ marginBottom: 16 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                                <Shield size={16} color="#8b5cf6" />
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                                    On-Chain Details
+                                </Text>
+                            </View>
+
+                            {/* Token ID */}
+                            {onChainTokenId ? (
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Token ID</Text>
+                                    <Text style={{ color: colors.text.primary, fontSize: 13, fontWeight: '700', fontFamily: Platform.OS === 'web' ? 'monospace' : undefined }}>
+                                        #{onChainTokenId}
+                                    </Text>
+                                </View>
+                            ) : null}
+
+                            {/* Contract Address */}
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Contract</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ color: colors.text.primary, fontSize: 13, fontFamily: Platform.OS === 'web' ? 'monospace' : undefined }}>
+                                        {truncateAddress(NFT_CONTRACT)}
+                                    </Text>
+                                    <CopyButton text={NFT_CONTRACT} colors={colors} isDark={isDark} />
+                                </View>
+                            </View>
+
+                            {/* Chain */}
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Chain</Text>
+                                <Text style={{ color: colors.text.primary, fontSize: 13 }}>Polygon Amoy Testnet</Text>
+                            </View>
+
+                            {/* Owner */}
+                            {ownerWallet ? (
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Owner</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <Text style={{ color: colors.text.primary, fontSize: 13, fontFamily: Platform.OS === 'web' ? 'monospace' : undefined }}>
+                                            {truncateAddress(ownerWallet)}
+                                        </Text>
+                                        <CopyButton text={ownerWallet} colors={colors} isDark={isDark} />
+                                    </View>
+                                </View>
+                            ) : null}
+
+                            {/* View on Polygonscan */}
+                            <AnimatedPressable
+                                preset="button"
+                                onPress={() => {
+                                    const url = onChainTokenId
+                                        ? `${POLYGONSCAN_BASE}/token/${NFT_CONTRACT}?a=${onChainTokenId}`
+                                        : `${POLYGONSCAN_BASE}/token/${NFT_CONTRACT}`;
+                                    if (Platform.OS === 'web') {
+                                        window.open(url, '_blank');
+                                    } else {
+                                        import('expo-linking').then(Linking => Linking.openURL(url));
+                                    }
+                                }}
+                                style={{
+                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    paddingVertical: 12, borderRadius: 12, marginTop: 4,
+                                    backgroundColor: isDark ? 'rgba(139,92,246,0.1)' : 'rgba(139,92,246,0.06)',
+                                    borderWidth: 1,
+                                    borderColor: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.12)',
+                                }}
+                            >
+                                <ExternalLink size={14} color="#8b5cf6" />
+                                <Text style={{ color: '#8b5cf6', fontWeight: '700', fontSize: 13 }}>View on Polygonscan</Text>
+                            </AnimatedPressable>
+                        </GlassCard>
+
+                        {/* Price Info (Mint + Last Sale) */}
+                        {(mintEvent || lastSaleEvent) && (
+                            <GlassCard intensity="light" style={{ marginBottom: 16 }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>
+                                    Price Info
+                                </Text>
+                                {mintEvent && (
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: lastSaleEvent ? 10 : 0 }}>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Mint Price</Text>
+                                        <Text style={{ color: colors.text.primary, fontSize: 14, fontWeight: '700' }}>
+                                            {formatToken(mintEvent.price)}
+                                        </Text>
+                                    </View>
+                                )}
+                                {lastSaleEvent && (
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Last Sale</Text>
+                                        <Text style={{ color: colors.text.primary, fontSize: 14, fontWeight: '700' }}>
+                                            {formatToken(lastSaleEvent.price)}
+                                        </Text>
+                                    </View>
+                                )}
+                            </GlassCard>
+                        )}
+
+                        {/* Creator / Seller info */}
                         <GlassCard intensity="light" style={{ marginBottom: 20, flexDirection: 'row', alignItems: 'center' }}>
                             <View style={{ flex: 1 }}>
                                 <Text style={{ color: colors.text.secondary, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1.5 }}>
@@ -524,8 +738,8 @@ export default function NFTDetailScreen() {
                                     {isPrimary
                                         ? nft.artistName
                                         : listing
-                                            ? `${listing.sellerWallet.slice(0, 6)}...${listing.sellerWallet.slice(-4)}`
-                                            : truncatedOwner}
+                                            ? truncateAddress(listing.sellerWallet)
+                                            : truncateAddress(ownerWallet)}
                                 </Text>
                             </View>
                             <AnimatedPressable
@@ -537,7 +751,7 @@ export default function NFTDetailScreen() {
                                     backgroundColor: isDark ? 'rgba(116,229,234,0.2)' : 'rgba(116,229,234,0.12)',
                                 }}
                             >
-                                <ExternalLink size={16} color="#38b4ba" />
+                                <ChevronRight size={16} color="#38b4ba" />
                             </AnimatedPressable>
                         </GlassCard>
                     </View>

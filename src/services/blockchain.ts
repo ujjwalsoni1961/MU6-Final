@@ -39,6 +39,12 @@ export interface MintConfig {
     priceEth: number;
     /** IPFS URI for the token metadata (uploaded before calling this) */
     metadataUri: string;
+    /** Optional release description */
+    description?: string;
+    /** Optional custom cover image path (Supabase storage) */
+    coverImagePath?: string;
+    /** Optional benefits/perks list */
+    benefits?: { title: string; description: string }[];
 }
 
 export interface ListingConfig {
@@ -686,6 +692,9 @@ export async function createNFTRelease(
                 price_eth: config.priceEth,
                 minted_count: 0,
                 is_active: true,
+                description: config.description || null,
+                cover_image_path: config.coverImagePath || null,
+                benefits: config.benefits && config.benefits.length > 0 ? JSON.stringify(config.benefits) : '[]',
             })
             .select()
             .single();

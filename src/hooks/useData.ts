@@ -139,17 +139,24 @@ export function adaptNFTRelease(r: DbNFTRelease): NFT {
         creatorId: r.song?.creatorId || '',
         songTitle: r.song?.title || 'Unknown Song',
         artistName: r.song?.creator?.displayName || 'Unknown Artist',
-        coverImage: coverUrl(r.song?.coverPath),
+        coverImage: r.coverImagePath ? coverUrl(r.coverImagePath) : coverUrl(r.song?.coverPath),
+        nftCoverImage: r.coverImagePath ? coverUrl(r.coverImagePath) : undefined,
         price: r.priceEth || 0,
-        editionNumber: r.mintedCount + 1, // next available
+        editionNumber: r.mintedCount, // how many minted so far
         totalEditions: r.totalSupply,
+        mintedCount: r.mintedCount,
         owner: '', // not applicable for releases
         rarity: (r.rarity as NFT['rarity']) || 'common',
+        tierName: r.tierName,
+        description: r.description,
+        benefits: r.benefits,
+        allocatedRoyaltyPercent: r.allocatedRoyaltyPercent,
     };
 }
 
-/** Convert a DB NFTToken (owned) to the flat UI NFT type */
-export function adaptNFTToken(t: DbNFTToken): NFT {
+/** Convert a DB NFTToken (owned) to the flat UI NFT type.
+ *  Pass editionNumber explicitly when computing per-release edition numbers. */
+export function adaptNFTToken(t: DbNFTToken, editionNum?: number): NFT {
     const release = t.release;
     const song = release?.song;
     return {
@@ -158,17 +165,26 @@ export function adaptNFTToken(t: DbNFTToken): NFT {
         creatorId: (song as any)?.creatorId || '',
         songTitle: song?.title || 'Unknown Song',
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
-        coverImage: coverUrl(song?.coverPath),
+        coverImage: release?.coverImagePath ? coverUrl(release.coverImagePath) : coverUrl(song?.coverPath),
+        nftCoverImage: release?.coverImagePath ? coverUrl(release.coverImagePath) : undefined,
         price: t.pricePaidEth || release?.priceEth || 0,
-        editionNumber: parseInt(t.onChainTokenId || '0') || 0,
+        editionNumber: editionNum ?? 0,
         totalEditions: release?.totalSupply || 0,
+        mintedCount: release?.mintedCount || 0,
         owner: t.ownerWalletAddress,
         rarity: (release?.rarity as NFT['rarity']) || 'common',
+        tierName: release?.tierName,
+        description: release?.description,
+        benefits: release?.benefits,
+        allocatedRoyaltyPercent: release?.allocatedRoyaltyPercent,
+        onChainTokenId: t.onChainTokenId || undefined,
+        ownerWallet: t.ownerWalletAddress,
     };
 }
 
-/** Convert a DB MarketplaceListing to the flat UI NFT shape (for marketplace) */
-export function adaptListing(l: DbListing): NFT & { listingId: string; sellerWallet: string; nftTokenId: string } {
+/** Convert a DB MarketplaceListing to the flat UI NFT shape (for marketplace).
+ *  Pass editionNumber explicitly when computing per-release edition numbers. */
+export function adaptListing(l: DbListing, editionNum?: number): NFT & { listingId: string; sellerWallet: string; nftTokenId: string } {
     const token = l.nftToken;
     const release = token?.release;
     const song = release?.song;
@@ -181,12 +197,20 @@ export function adaptListing(l: DbListing): NFT & { listingId: string; sellerWal
         creatorId: (song as any)?.creatorId || '',
         songTitle: song?.title || 'Unknown Song',
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
-        coverImage: coverUrl(song?.coverPath),
+        coverImage: release?.coverImagePath ? coverUrl(release.coverImagePath) : coverUrl(song?.coverPath),
+        nftCoverImage: release?.coverImagePath ? coverUrl(release.coverImagePath) : undefined,
         price: l.priceEth,
-        editionNumber: parseInt(token?.onChainTokenId || '0') || 0,
+        editionNumber: editionNum ?? 0,
         totalEditions: release?.totalSupply || 0,
+        mintedCount: release?.mintedCount || 0,
         owner: l.sellerWallet,
         rarity: (release?.rarity as NFT['rarity']) || 'common',
+        tierName: release?.tierName,
+        description: release?.description,
+        benefits: release?.benefits,
+        allocatedRoyaltyPercent: release?.allocatedRoyaltyPercent,
+        onChainTokenId: token?.onChainTokenId || undefined,
+        ownerWallet: l.sellerWallet,
     };
 }
 
@@ -420,7 +444,9 @@ export function useNFTTokenById(id: string) {
         async () => {
             if (!id) return null;
             const token = await db.getNFTTokenById(id);
-            return token ? adaptNFTToken(token) : null;
+            if (!token) return null;
+            const editionMap = await db.getEditionNumbers([token.id]);
+            return adaptNFTToken(token, editionMap[token.id]);
         },
         null as NFT | null,
         [id],
@@ -432,7 +458,10 @@ export function useMarketplaceListings(limit?: number) {
     return useAsync(
         async () => {
             const listings = await db.getMarketplaceListings({ isActive: true, limit });
-            return listings.map(adaptListing);
+            // Compute per-release edition numbers
+            const tokenIds = listings.map(l => l.nftToken?.id).filter(Boolean) as string[];
+            const editionMap = await db.getEditionNumbers(tokenIds);
+            return listings.map(l => adaptListing(l, editionMap[l.nftToken?.id || '']));
         },
         [] as (NFT & { listingId: string; sellerWallet: string; nftTokenId: string })[],
         [limit],
@@ -463,7 +492,8 @@ export function useOwnedNFTs() {
         async () => {
             if (!walletAddress) return [];
             const tokens = await db.getNFTTokensByOwner(walletAddress);
-            return tokens.map(adaptNFTToken);
+            const editionMap = await db.getEditionNumbers(tokens.map(t => t.id));
+            return tokens.map(t => adaptNFTToken(t, editionMap[t.id]));
         },
         [] as NFT[],
         [walletAddress],
@@ -991,8 +1021,10 @@ export function useOwnedNFTsWithStatus() {
         async () => {
             if (!walletAddress) return [];
             const results = await db.getOwnedNFTsWithListingStatus(walletAddress);
+            // Compute per-release edition numbers
+            const editionMap = await db.getEditionNumbers(results.map(r => r.token.id));
             return results.map(({ token, activeListing }): OwnedNFT => {
-                const baseNFT = adaptNFTToken(token);
+                const baseNFT = adaptNFTToken(token, editionMap[token.id]);
                 return {
                     ...baseNFT,
                     tokenDbId: token.id,

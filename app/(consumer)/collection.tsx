@@ -424,7 +424,7 @@ export default function CollectionScreen() {
                                         <Text style={{ color: modalMode === 'manage' ? '#10b981' : colors.text.secondary, fontSize: 13, marginTop: 2, fontWeight: modalMode === 'manage' ? '600' : '400' }}>
                                             {modalMode === 'manage'
                                                 ? `Listed at ${selectedNFT.activeListingPrice} POL`
-                                                : `Edition #${selectedNFT.editionNumber} · ${selectedNFT.rarity}`}
+                                                : `Edition ${selectedNFT.editionNumber} of ${selectedNFT.totalEditions} · ${selectedNFT.rarity}`}
                                         </Text>
                                     </View>
                                 </GlassCard>

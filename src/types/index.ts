@@ -49,6 +49,8 @@ export interface NFT {
     songTitle: string;
     artistName: string;
     coverImage: string;
+    /** Custom NFT cover image (from nft_releases.cover_image_path), falls back to song cover */
+    nftCoverImage?: string;
     price: number;
     /** Price in native token (POL) */
     priceToken?: number | null;
@@ -56,9 +58,22 @@ export interface NFT {
     priceEurAtList?: number | null;
     editionNumber: number;
     totalEditions: number;
+    mintedCount: number;
     owner: string;
     rarity: 'common' | 'rare' | 'legendary';
     priceHistory?: { price: number; date: string }[];
+    /** Release tier name */
+    tierName?: string;
+    /** Release description */
+    description?: string | null;
+    /** Benefits/perks of this NFT */
+    benefits?: { title: string; description: string }[];
+    /** Allocated royalty percent for streaming revenue */
+    allocatedRoyaltyPercent?: number;
+    /** On-chain token ID (for polygonscan links) */
+    onChainTokenId?: string;
+    /** Owner wallet address */
+    ownerWallet?: string;
 }
 
 export interface Transaction {
