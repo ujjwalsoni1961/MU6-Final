@@ -28,7 +28,15 @@ import { useCurrency } from '../../src/hooks/useCurrency';
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
-import * as Clipboard from 'expo-clipboard';
+// Use navigator.clipboard on web, fallback for native
+const copyToClipboard = async (text: string) => {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+    } else {
+        const Clipboard = require('expo-clipboard');
+        await Clipboard.setStringAsync(text);
+    }
+};
 
 const NFT_CONTRACT = '0xACF1145AdE250D356e1B2869E392e6c748c14C0E';
 const POLYGONSCAN_BASE = 'https://amoy.polygonscan.com';
@@ -77,7 +85,7 @@ function CopyButton({ text, colors, isDark }: { text: string; colors: any; isDar
     const [copied, setCopied] = useState(false);
     const handleCopy = async () => {
         try {
-            await Clipboard.setStringAsync(text);
+            await copyToClipboard(text);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         } catch { /* ignore */ }
