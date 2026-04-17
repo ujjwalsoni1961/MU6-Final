@@ -38,7 +38,7 @@ import { ActivityIndicator, Text } from 'react-native';
 export default function ConsumerLayout() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
-    const { isConnected, isLoading, role } = useAuth();
+    const { isConnected, isLoading, role, isBlocked } = useAuth();
 
     if (isLoading) {
         return (
@@ -51,6 +51,11 @@ export default function ConsumerLayout() {
     // Guard: Redirect to login if not authenticated (handles web refresh on deep links)
     if (!isConnected) {
         return <Redirect href="/(auth)/login" />;
+    }
+
+    // PDF #13 — blocked users are bounced to the suspended screen.
+    if (isBlocked) {
+        return <Redirect href="/suspended" />;
     }
 
     // Role-based redirect: creators and admins cannot view consumer routes.

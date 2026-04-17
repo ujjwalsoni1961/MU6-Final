@@ -338,7 +338,10 @@ export function useAdminNFTTokens(limit = 50) {
                 tierName: row.release?.tier_name || '',
                 rarity: row.release?.rarity || '',
                 ownerWallet: row.owner_wallet_address,
-                onChainTokenId: row.token_id || row.on_chain_token_id || '',
+                // PDF #14/#16 — prefer the real on-chain tokenId written by
+                // the atomic mint flow. Fall back to legacy `token_id` for
+                // rows that predate migration 026.
+                onChainTokenId: row.on_chain_token_id || row.token_id || '',
                 pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : 0,
                 isVoided: row.is_voided ?? false,
                 mintedAt: row.minted_at,

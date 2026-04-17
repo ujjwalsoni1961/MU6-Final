@@ -29,6 +29,7 @@ function MainLayout() {
                 <Stack.Screen name="(artist)" />
                 <Stack.Screen name="(admin)" />
                 <Stack.Screen name="admin-login" />
+                <Stack.Screen name="suspended" />
             </Stack>
         </View>
     );

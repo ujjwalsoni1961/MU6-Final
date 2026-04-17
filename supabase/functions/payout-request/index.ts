@@ -38,15 +38,33 @@ Deno.serve(async (req: Request) => {
         // Initialize Supabase admin client with the service role key to bypass RLS
         const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-        // Ensure the profile actually exists
+        // Ensure the profile actually exists and is not blocked/deactivated.
+        // PDF #13 — blocked users cannot initiate payouts even if their client
+        // somehow bypasses the UI suspended-screen redirect.
         const { data: profileExists, error: profileErr } = await supabaseAdmin
             .from("profiles")
-            .select("id")
+            .select("id, is_blocked, is_active")
             .eq("id", profileId)
             .maybeSingle();
 
         if (profileErr || !profileExists) {
             return jsonResponse({ error: "Profile not found" }, 404);
+        }
+
+        if (profileExists.is_blocked === true) {
+            return jsonResponse({
+                success: false,
+                error: "Your account is suspended. Please contact support to appeal.",
+                code: "ACCOUNT_BLOCKED",
+            }, 403);
+        }
+
+        if (profileExists.is_active === false) {
+            return jsonResponse({
+                success: false,
+                error: "Your account is not active. Please contact support.",
+                code: "ACCOUNT_INACTIVE",
+            }, 403);
         }
 
         // PDF Fix #8: Reject if an active (pending) payout already exists for this profile.

@@ -229,6 +229,10 @@ function mapDbToProfile(row: any): UserProfile {
         coverPath: row.cover_path,
         isVerified: row.is_verified,
         country: row.country,
+        // PDF #13 — admin block/deactivate flags. Default to safe values
+        // for legacy rows that predate migration 026.
+        isBlocked: row.is_blocked === true,
+        isActive: row.is_active !== false,
     };
 }
 

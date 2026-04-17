@@ -15,6 +15,10 @@ export interface UserProfile {
     coverPath: string | null;
     isVerified: boolean;
     country: string | null;
+    /** PDF #13 — admin can block a user; blocked users are force-signed-out. */
+    isBlocked: boolean;
+    /** PDF #13 — admin can deactivate an account. */
+    isActive: boolean;
 }
 
 interface AuthContextType {
@@ -23,6 +27,8 @@ interface AuthContextType {
     isConnected: boolean;
     walletAddress: string | null;
     role: 'listener' | 'creator' | 'admin' | null;
+    /** PDF #13 — true when profile.is_blocked is true. Routing layer uses this to show a suspended screen. */
+    isBlocked: boolean;
     refreshProfile: () => Promise<void>;
     signOut: () => Promise<void>;
 }
@@ -72,7 +78,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 .maybeSingle();
 
             if (existing) {
-                setProfile(mapDbToProfile(existing));
+                // PDF #13 — block enforcement. A blocked user's profile is
+                // still loaded so the routing layer can display a clear
+                // "Account suspended" screen with a support contact, but
+                // all authenticated queries are gated off downstream.
+                const mapped = mapDbToProfile(existing);
+                setProfile(mapped);
                 return;
             }
 
@@ -170,6 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 isConnected,
                 walletAddress,
                 role: profile?.role || null,
+                isBlocked: profile?.isBlocked === true,
                 refreshProfile,
                 signOut,
             }}
@@ -200,6 +212,8 @@ function mapDbToProfile(row: any): UserProfile {
         coverPath: row.cover_path,
         isVerified: row.is_verified,
         country: row.country,
+        isBlocked: row.is_blocked === true,
+        isActive: row.is_active !== false,
     };
 }
 

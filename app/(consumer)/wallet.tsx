@@ -17,6 +17,7 @@ import { getPublicUrl, UserActivity } from '../../src/services/database';
 import ErrorState from '../../src/components/shared/ErrorState';
 import { useWalletBalance } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
+import { CHAIN_ID, CHAIN_NAME, IS_MAINNET } from '../../src/config/network';
 
 const isWeb = Platform.OS === 'web';
 
@@ -241,7 +242,7 @@ export default function WalletScreen() {
                             <Text style={{ fontSize: 24, color: colors.text.muted }}>{balanceSymbol}</Text>
                         </Text>
                         <Text style={{ fontSize: 16, color: colors.text.tertiary, marginTop: 4 }}>
-                            Polygon Amoy Testnet
+                            {IS_MAINNET ? CHAIN_NAME : `${CHAIN_NAME} Testnet`}
                         </Text>
 
                         <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
@@ -271,7 +272,7 @@ export default function WalletScreen() {
                     {/* Network Info */}
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 32 }}>
                         {[
-                            { label: 'Network', val: 'Polygon Amoy (80002)' },
+                            { label: 'Network', val: `${CHAIN_NAME} (${CHAIN_ID})` },
                             { label: 'Address', val: truncatedAddress },
                         ].map((item, i) => (
                             <View key={i} style={{

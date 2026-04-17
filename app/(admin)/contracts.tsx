@@ -3,6 +3,7 @@ import { View, Text, Platform } from 'react-native';
 import { FileCode } from 'lucide-react-native';
 import { AdminScreen } from '../../src/components/admin/AdminScreenWrapper';
 import { useTheme } from '../../src/context/ThemeContext';
+import { CONTRACT_ADDRESSES, CHAIN_NAME } from '../../src/config/network';
 
 const isWeb = Platform.OS === 'web';
 
@@ -15,9 +16,9 @@ interface ContractInfo {
 }
 
 const contracts: ContractInfo[] = [
-    { name: 'MU6 Songs (DropERC721)', subtitle: 'ERC-721 + ERC-2981', address: '0xACF1145AdE250D356e1B2869E392e6c748c14C0E', network: 'Polygon Amoy', status: 'Deployed' },
-    { name: 'Marketplace (MarketplaceV3)', subtitle: 'NFT Trading Contract', address: '0x141Fc79b7F1EB7b393A5DC5f257678c3cD30506a', network: 'Polygon Amoy', status: 'Deployed' },
-    { name: 'Revenue Split', subtitle: 'Revenue Distribution', address: '0xb757e188B8A126A6D975514F3a05049a87209c2D', network: 'Polygon Amoy', status: 'Deployed' },
+    { name: 'MU6 Songs (DropERC721)', subtitle: 'ERC-721 + ERC-2981', address: CONTRACT_ADDRESSES.SONG_NFT, network: CHAIN_NAME, status: 'Deployed' },
+    { name: 'Marketplace (MarketplaceV3)', subtitle: 'NFT Trading Contract', address: CONTRACT_ADDRESSES.MARKETPLACE, network: CHAIN_NAME, status: 'Deployed' },
+    { name: 'Revenue Split', subtitle: 'Revenue Distribution', address: CONTRACT_ADDRESSES.SPLIT, network: CHAIN_NAME, status: 'Deployed' },
 ];
 
 function ContractCard({ contract }: { contract: ContractInfo }) {

@@ -200,7 +200,16 @@ export function useAdminSongActions(refresh: () => void) {
     }, [refresh]);
 
     const deleteSong = useCallback(async (songId: string) => {
-        const { error } = await executeAdminDelete('songs', songId);
+        // PDF #11 — use soft-delete so mobile hides the song instantly while
+        // preserving historical NFT / streaming / royalty data for reconciliation.
+        // Also unpublish so the song disappears from any admin query that
+        // only filters by `is_published`.
+        const { error } = await executeAdminUpdate('songs', songId, {
+            deleted_at: new Date().toISOString(),
+            is_published: false,
+            is_listed: false,
+            is_featured: false,
+        });
 
         if (error) {
             showToast('Failed to delete song', 'error');

@@ -26,9 +26,9 @@ import {
     type PayoutRequest,
 } from '../../src/services/database';
 import { formatFiat, formatToken } from '../../src/services/fxRate';
+import { EXPLORER_BASE as POLYGONSCAN_BASE, RPC_URL } from '../../src/config/network';
 
 const isWeb = Platform.OS === 'web';
-const POLYGONSCAN_BASE = 'https://amoy.polygonscan.com';
 
 function coverUrl(path: string | null | undefined): string {
     if (!path) return 'https://placehold.co/400x400/1e293b/94a3b8?text=♪';
@@ -42,7 +42,7 @@ async function fetchWalletBalancePol(walletAddress: string): Promise<number> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
     try {
-        const response = await fetch('https://rpc-amoy.polygon.technology', {
+        const response = await fetch(RPC_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

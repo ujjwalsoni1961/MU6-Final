@@ -6,7 +6,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Gem, Tag, X } from 'lucide-react-native';
+import { Gem, Tag, X, ExternalLink } from 'lucide-react-native';
+import { Linking } from 'react-native';
+import { tokenUrl, CONTRACT_ADDRESSES } from '../../src/config/network';
 import PolygonIcon from '../../src/components/shared/PolygonIcon';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import TabPill from '../../src/components/shared/TabPill';
@@ -621,6 +623,24 @@ export default function CollectionScreen() {
                                                     </Text>
                                                 </View>
                                             )}
+                                            {/* Token ID + Polygonscan link (PDF #16) */}
+                                            {item.onChainTokenId ? (
+                                                <AnimatedPressable
+                                                    preset="button"
+                                                    onPress={() => Linking.openURL(tokenUrl(CONTRACT_ADDRESSES.SONG_NFT, item.onChainTokenId))}
+                                                    style={{
+                                                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                                                        gap: 4, marginHorizontal: 6, marginBottom: 4, paddingVertical: 4,
+                                                        backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.05)',
+                                                        borderRadius: 8,
+                                                    }}
+                                                >
+                                                    <Text style={{ color: colors.text.secondary, fontSize: 10, fontWeight: '600' }}>
+                                                        Token #{item.onChainTokenId}
+                                                    </Text>
+                                                    <ExternalLink size={10} color={colors.text.muted} />
+                                                </AnimatedPressable>
+                                            ) : null}
                                             <AnimatedPressable
                                                 preset="button"
                                                 onPress={() => {

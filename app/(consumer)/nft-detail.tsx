@@ -14,6 +14,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount, PayEmbed } from 'thirdweb/react';
 import { prepareTransaction } from 'thirdweb';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
+import { CONTRACT_ADDRESSES, EXPLORER_BASE, tokenUrl, txUrl, CHAIN_NAME, IS_MAINNET } from '../../src/config/network';
 import {
     useNFTReleases,
     useNFTReleaseById,
@@ -25,6 +26,7 @@ import {
 import { getNFTTradeHistory } from '../../src/services/database';
 import { convertTokenToFiat, formatFiat, formatToken } from '../../src/services/fxRate';
 import { useCurrency } from '../../src/hooks/useCurrency';
+import { useOnChainOwnership } from '../../src/hooks/useOnChainNFT';
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
@@ -38,8 +40,8 @@ const copyToClipboard = async (text: string) => {
     }
 };
 
-const NFT_CONTRACT = '0xACF1145AdE250D356e1B2869E392e6c748c14C0E';
-const POLYGONSCAN_BASE = 'https://amoy.polygonscan.com';
+const NFT_CONTRACT = CONTRACT_ADDRESSES.SONG_NFT;
+const POLYGONSCAN_BASE = EXPLORER_BASE;
 
 type ViewMode = 'release' | 'listing';
 
@@ -339,9 +341,11 @@ export default function NFTDetailScreen() {
         }
     };
 
-    // Determine owner wallet for display
-    const ownerWallet = nft.ownerWallet || nft.owner || '';
+    // Determine owner wallet for display — ON-CHAIN IS SOURCE OF TRUTH (PDF #17).
+    // DB ownerWallet is a lagging index; prefer live on-chain ownerOf read.
     const onChainTokenId = nft.onChainTokenId || '';
+    const { owner: onChainOwner } = useOnChainOwnership(onChainTokenId || null);
+    const ownerWallet = onChainOwner || nft.ownerWallet || nft.owner || '';
 
     // Get the first trade event as mint price reference
     const mintEvent = tradeHistory.find(t => t.type === 'mint');
@@ -651,7 +655,7 @@ export default function NFTDetailScreen() {
                             {/* Chain */}
                             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                                 <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Chain</Text>
-                                <Text style={{ color: colors.text.primary, fontSize: 13 }}>Polygon Amoy Testnet</Text>
+                                <Text style={{ color: colors.text.primary, fontSize: 13 }}>{IS_MAINNET ? CHAIN_NAME : `${CHAIN_NAME} Testnet`}</Text>
                             </View>
 
                             {/* Owner */}

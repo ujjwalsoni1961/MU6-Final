@@ -15,9 +15,9 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useCreatorSongs } from '../../src/hooks/useData';
 import { getSongSplitSheet } from '../../src/services/splitContracts';
 import { supabase } from '../../src/lib/supabase';
+import { EXPLORER_BASE as POLYGONSCAN_BASE } from '../../src/config/network';
 
 const isWeb = Platform.OS === 'web';
-const POLYGONSCAN_BASE = 'https://amoy.polygonscan.com';
 
 function coverUrl(path: string | null | undefined): string {
     if (!path) return 'https://placehold.co/400x400/1e293b/94a3b8?text=♪';

@@ -19,12 +19,13 @@ import {
     thirdwebClient,
     activeChain
 } from '../lib/thirdweb';
+import { NATIVE_TOKEN_ADDRESS } from '../config/network';
 import { supabase } from '../lib/supabase';
 import { getTokenToEurRate } from './fxRate';
 
 // ── Constants ──
 
-const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+const NATIVE_TOKEN = NATIVE_TOKEN_ADDRESS;
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
@@ -85,16 +86,43 @@ export async function createMarketplaceListing(
     account: Account,
 ): Promise<{ success: boolean; listingId?: string; error?: string }> {
     try {
-        // 1. Verify seller owns the NFT
+        // 1. Verify seller owns the NFT — both DB and on-chain
         const { data: token } = await supabase
             .from('nft_tokens')
-            .select('id, owner_wallet_address, token_id')
+            .select('id, owner_wallet_address, token_id, on_chain_token_id')
             .eq('id', config.nftTokenId)
             .maybeSingle();
 
         if (!token) return { success: false, error: 'Token not found' };
         if (token.owner_wallet_address.toLowerCase() !== config.sellerWallet.toLowerCase()) {
             return { success: false, error: 'Not the token owner' };
+        }
+
+        // Prefer the real on-chain token ID. Falls back to DB token_id only
+        // for legacy rows minted before migration 026 — those should still
+        // align with the on-chain sequential IDs in practice.
+        const chainTokenIdStr = token.on_chain_token_id || token.token_id;
+        if (!/^\d+$/.test(chainTokenIdStr)) {
+            return { success: false, error: 'Invalid on-chain token ID format' };
+        }
+
+        // CRITICAL — verify on-chain ownership. This is the root cause of the
+        // "not owner or approved tokens" marketplace error: DB and on-chain
+        // disagree. If on-chain ownerOf != seller, the DB is stale.
+        try {
+            const onChainOwner = await readContract({
+                contract: getSongNFTContract(),
+                method: 'function ownerOf(uint256 tokenId) view returns (address)',
+                params: [BigInt(chainTokenIdStr)],
+            });
+            if ((onChainOwner as string).toLowerCase() !== config.sellerWallet.toLowerCase()) {
+                return {
+                    success: false,
+                    error: `You do not own this NFT on-chain. Current on-chain owner: ${onChainOwner}. Please refresh your collection.`,
+                };
+            }
+        } catch (ownerErr: any) {
+            console.warn('[marketplace] on-chain ownerOf check failed (non-blocking):', ownerErr?.message);
         }
 
         // Prevent duplicate active listings
@@ -154,7 +182,7 @@ export async function createMarketplaceListing(
 
         const listingParams = {
             assetContract: CONTRACTS.SONG_NFT as `0x${string}`,
-            tokenId: BigInt(token.token_id),
+            tokenId: BigInt(chainTokenIdStr),
             quantity: BigInt(1),
             currency: NATIVE_TOKEN as `0x${string}`,
             pricePerToken: priceWei,
@@ -170,7 +198,19 @@ export async function createMarketplaceListing(
         });
 
         const result = await sendTransaction({ account, transaction: tx });
-        console.log('[marketplace] On-chain listing created, tx:', result.transactionHash, 'listingId:', nextListingId.toString());
+        console.log('[marketplace] On-chain listing tx sent:', result.transactionHash, 'predicted listingId:', nextListingId.toString());
+
+        // Wait for listing to be confirmed on-chain before we persist — otherwise
+        // a reverted tx could leave a ghost DB listing.
+        const listingReceipt = await waitForReceipt({
+            client: thirdwebClient,
+            chain: activeChain,
+            transactionHash: result.transactionHash,
+        });
+        if (listingReceipt.status === 'reverted') {
+            return { success: false, error: 'Listing transaction reverted on-chain' };
+        }
+        console.log('[marketplace] Listing confirmed on-chain in block:', listingReceipt.blockNumber);
 
         // 4. Snapshot EUR rate + store in DB
         let eurRate = 0;
@@ -218,7 +258,7 @@ export async function buyMarketplaceListing(
         // 1. Fetch listing from DB
         const { data: listing } = await supabase
             .from('marketplace_listings')
-            .select('*, nft_token:nft_tokens!nft_token_id (id, token_id)')
+            .select('*, nft_token:nft_tokens!nft_token_id (id, token_id, on_chain_token_id)')
             .eq('id', config.listingId)
             .eq('is_active', true)
             .maybeSingle();
@@ -247,7 +287,48 @@ export async function buyMarketplaceListing(
 
         const result = await sendTransaction({ account, transaction: tx });
         const txHash = result.transactionHash;
-        console.log('[marketplace] Buy tx confirmed:', txHash);
+        console.log('[marketplace] Buy tx sent:', txHash, '— awaiting receipt');
+
+        // ATOMICITY — wait for on-chain confirmation BEFORE any DB writes.
+        // Previously we updated DB immediately which created ghost transfers
+        // when the tx later reverted (PDF bug #15).
+        const buyReceipt = await waitForReceipt({
+            client: thirdwebClient,
+            chain: activeChain,
+            transactionHash: txHash,
+        });
+        if (buyReceipt.status === 'reverted') {
+            return {
+                success: false,
+                error: 'Buy transaction reverted on-chain. Your wallet was not charged.',
+            };
+        }
+        console.log('[marketplace] Buy confirmed on-chain in block:', buyReceipt.blockNumber);
+
+        // Verify the on-chain ownership change actually happened.
+        // This catches edge cases where the tx succeeds but the NFT didn't
+        // transfer (e.g. contract has a custom hook that silently skips).
+        try {
+            const tokenRow: any = listing.nft_token;
+            const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
+            if (chainTokenId && /^\d+$/.test(chainTokenId)) {
+                const onChainOwner = await readContract({
+                    contract: getSongNFTContract(),
+                    method: 'function ownerOf(uint256 tokenId) view returns (address)',
+                    params: [BigInt(chainTokenId)],
+                });
+                if ((onChainOwner as string).toLowerCase() !== config.buyerWallet.toLowerCase()) {
+                    console.error('[marketplace] ownership mismatch after buy tx', { onChainOwner, expected: config.buyerWallet });
+                    return {
+                        success: false,
+                        error: 'Buy tx confirmed but on-chain ownership did not transfer. Contact support.',
+                    };
+                }
+                console.log('[marketplace] On-chain ownership confirmed:', onChainOwner);
+            }
+        } catch (ownerErr: any) {
+            console.warn('[marketplace] ownerOf verification skipped:', ownerErr?.message);
+        }
 
         // 3. Snapshot EUR rate
         let eurRate = 0;
@@ -267,7 +348,7 @@ export async function buyMarketplaceListing(
             })
             .eq('id', config.listingId);
 
-        // Transfer token ownership in DB
+        // Transfer token ownership in DB (cache of on-chain truth)
         await supabase
             .from('nft_tokens')
             .update({
@@ -320,7 +401,17 @@ export async function cancelMarketplaceListing(
                 method: 'function cancelListing(uint256 _listingId)',
                 params: [BigInt(listing.chain_listing_id)],
             });
-            await sendTransaction({ account, transaction: tx });
+            const cancelResult = await sendTransaction({ account, transaction: tx });
+            // Wait for confirmation before DB write — a reverted cancel would
+            // leave the NFT still listed on-chain but marked inactive in DB.
+            const cancelReceipt = await waitForReceipt({
+                client: thirdwebClient,
+                chain: activeChain,
+                transactionHash: cancelResult.transactionHash,
+            });
+            if (cancelReceipt.status === 'reverted') {
+                return { success: false, error: 'Cancel transaction reverted on-chain' };
+            }
             console.log('[marketplace] On-chain listing cancelled:', listing.chain_listing_id);
         }
 

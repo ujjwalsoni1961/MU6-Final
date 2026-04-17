@@ -156,7 +156,7 @@ import { ActivityIndicator } from 'react-native';
 /* ─── Layout Entry Point ─── */
 export default function CreatorLayout() {
     const { isDark, colors } = useTheme();
-    const { isConnected, isLoading, role } = useAuth();
+    const { isConnected, isLoading, role, isBlocked } = useAuth();
 
     if (isLoading) {
         return (
@@ -169,6 +169,11 @@ export default function CreatorLayout() {
     // Guard: Redirect to login if not authenticated (handles web refresh on deep links)
     if (!isConnected) {
         return <Redirect href="/(auth)/login" />;
+    }
+
+    // PDF #13 — blocked users are bounced to the suspended screen.
+    if (isBlocked) {
+        return <Redirect href="/suspended" />;
     }
 
     // Role-based redirect: only creators (or admins) may access artist routes.

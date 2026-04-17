@@ -14,6 +14,7 @@ import { useCurrency } from '../../src/hooks/useCurrency';
 import * as Clipboard from 'expo-clipboard';
 import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
 import { PRESET_AVATAR_IDS } from '../../src/hooks/useData';
+import { CHAIN_NAME } from '../../src/config/network';
 
 const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
@@ -232,7 +233,7 @@ export default function ProfileScreen() {
                             </View>
                             <View>
                                 <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text.primary }}>My Wallet</Text>
-                                <Text style={{ fontSize: 13, color: colors.text.secondary }}>Polygon Amoy</Text>
+                                <Text style={{ fontSize: 13, color: colors.text.secondary }}>{CHAIN_NAME}</Text>
                             </View>
                         </View>
                         <ExternalLink size={16} color={colors.text.tertiary} />

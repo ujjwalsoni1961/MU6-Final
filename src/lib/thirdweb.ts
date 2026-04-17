@@ -1,13 +1,16 @@
 import { createThirdwebClient, getContract, defineChain } from 'thirdweb';
 import { inAppWallet, createWallet } from 'thirdweb/wallets';
+import { CHAIN_ID, CONTRACT_ADDRESSES } from '../config/network';
 
 // ── Client ──
 const clientId = process.env.EXPO_PUBLIC_THIRDWEB_CLIENT_ID!;
 
 export const thirdwebClient = createThirdwebClient({ clientId });
 
-// ── Chain: Polygon Amoy Testnet (mainnet switch = just change to polygon 137) ──
-export const activeChain = defineChain(80002);
+// ── Chain ──
+// Sourced from src/config/network.ts (single source of truth).
+// Mainnet switch: set EXPO_PUBLIC_NETWORK=mainnet (no code changes here).
+export const activeChain = defineChain(CHAIN_ID);
 
 // ── Wallets ──
 // In-app wallet: email, Google, Apple (embedded wallet – no extension needed)
@@ -30,15 +33,10 @@ export const supportedWallets = [
     createWallet('io.rabby'),
 ];
 
-// ── Contract Addresses (deployed on Polygon Amoy) ──
-export const CONTRACTS = {
-    // NFT Collection – DropERC721 "MU6 Songs"
-    SONG_NFT: process.env.EXPO_PUBLIC_SONG_NFT_ADDRESS || '0xACF1145AdE250D356e1B2869E392e6c748c14C0E',
-    // Revenue Split
-    SPLIT: process.env.EXPO_PUBLIC_SPLIT_ADDRESS || '0xb757e188B8A126A6D975514F3a05049a87209c2D',
-    // MarketplaceV3
-    MARKETPLACE: process.env.EXPO_PUBLIC_MARKETPLACE_ADDRESS || '0x141Fc79b7F1EB7b393A5DC5f257678c3cD30506a',
-} as const;
+// ── Contract Addresses ──
+// Re-exported from src/config/network.ts for backwards compatibility.
+// New code should import directly from '../config/network'.
+export const CONTRACTS = CONTRACT_ADDRESSES;
 
 // ── Contract instances ──
 export function getContractInstance(contractAddress: string) {

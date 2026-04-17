@@ -11,9 +11,9 @@ import { Image } from 'expo-image';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { supabase } from '../../src/lib/supabase';
+import { EXPLORER_BASE as POLYGONSCAN_BASE } from '../../src/config/network';
 
 const isWeb = Platform.OS === 'web';
-const POLYGONSCAN_BASE = 'https://amoy.polygonscan.com';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 
 function coverUrl(path: string | null | undefined): string {

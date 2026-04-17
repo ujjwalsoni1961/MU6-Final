@@ -2,13 +2,73 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ── Config ──
+// All chain/network values are env-driven so the same edge function
+// works on Amoy testnet (chain 80002) and Polygon mainnet (chain 137)
+// without code changes. To switch to mainnet, set:
+//   MU6_NETWORK=mainnet
+//   MU6_SONG_NFT_ADDRESS=<mainnet drop address>
+//   MU6_SERVER_WALLET=<mainnet backend wallet>
 const THIRDWEB_SECRET_KEY = Deno.env.get("THIRDWEB_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-const SERVER_WALLET = "0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39";
-const DEFAULT_CONTRACT = "0xACF1145AdE250D356e1B2869E392e6c748c14C0E";
-const CHAIN_ID = 80002;
+
+const NETWORK = (Deno.env.get("MU6_NETWORK") || "amoy").toLowerCase();
+const CHAIN_ID = NETWORK === "mainnet" ? 137 : 80002;
+const SERVER_WALLET = Deno.env.get("MU6_SERVER_WALLET")
+    || "0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39";
+const DEFAULT_CONTRACT = Deno.env.get("MU6_SONG_NFT_ADDRESS")
+    || "0xACF1145AdE250D356e1B2869E392e6c748c14C0E";
 const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+// Public RPC — chain-switch aware. Used for parsing receipts / Transfer logs.
+const RPC_URL = NETWORK === "mainnet"
+    ? (Deno.env.get("MU6_RPC_URL") || "https://polygon-rpc.com")
+    : (Deno.env.get("MU6_RPC_URL") || "https://rpc-amoy.polygon.technology");
+// keccak256("Transfer(address,address,uint256)") — ERC-721 Transfer event topic0
+const ERC721_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+const ZERO_ADDRESS_TOPIC = "0x" + "00".repeat(32); // Transfer.from == 0x0 ⇒ mint
+
+/**
+ * Fetch the on-chain transaction receipt and parse the minted token ID from
+ * the ERC-721 Transfer log (from = 0x0 indicates a mint).
+ * Returns null if the receipt isn't available yet or no mint log is found.
+ */
+async function fetchMintedTokenId(txHash: string, contractAddress: string): Promise<string | null> {
+    try {
+        const resp = await fetch(RPC_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "eth_getTransactionReceipt",
+                params: [txHash],
+            }),
+        });
+        const data = await resp.json();
+        const logs: Array<{ address: string; topics: string[]; data: string }> =
+            data?.result?.logs || [];
+        const target = contractAddress.toLowerCase();
+        for (const log of logs) {
+            if ((log.address || "").toLowerCase() !== target) continue;
+            if (!log.topics || log.topics.length < 4) continue;
+            if (log.topics[0]?.toLowerCase() !== ERC721_TRANSFER_TOPIC) continue;
+            // from must be the zero-address for a mint
+            if (log.topics[1]?.toLowerCase() !== ZERO_ADDRESS_TOPIC) continue;
+            // topics[3] is tokenId (32-byte hex)
+            const tokenIdHex = log.topics[3];
+            if (!tokenIdHex) continue;
+            try {
+                return BigInt(tokenIdHex).toString();
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    } catch (err) {
+        console.warn("[nft-admin] fetchMintedTokenId error:", err);
+        return null;
+    }
+}
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -165,7 +225,21 @@ Deno.serve(async (req: Request) => {
                 const { confirmed, hash, error } = await waitForTx(txId);
                 if (!confirmed) return jsonResponse({ success: false, error: error || "serverClaim tx did not confirm" }, 500);
                 console.log("[nft-admin] serverClaim confirmed, hash:", hash);
-                return jsonResponse({ success: true, transactionId: txId, txHash: hash });
+
+                // Parse real on-chain tokenId from the Transfer event log.
+                // Best-effort: if the receipt isn't available yet we return null —
+                // the mobile reconciler will fill it in on retry.
+                let onChainTokenId: string | null = null;
+                if (hash) {
+                    onChainTokenId = await fetchMintedTokenId(hash, targetContract);
+                    console.log("[nft-admin] parsed on-chain tokenId:", onChainTokenId);
+                }
+                return jsonResponse({
+                    success: true,
+                    transactionId: txId,
+                    txHash: hash,
+                    onChainTokenId,
+                });
             }
             return jsonResponse({ success: true, transactionId: txId, result });
         }

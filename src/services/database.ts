@@ -198,6 +198,7 @@ export async function getSongs(filters?: {
                 id, wallet_address, display_name, bio, creator_type, role, avatar_path, cover_path, is_verified, country
             )
         `)
+        .is('deleted_at', null) // PDF #11 — hide soft-deleted songs from mobile
         .order('created_at', { ascending: false });
 
     // When a creator is viewing their own songs, include drafts.
@@ -258,6 +259,7 @@ export async function getSongById(id: string): Promise<Song | null> {
             )
         `)
         .eq('id', id)
+        .is('deleted_at', null) // PDF #11 — hide soft-deleted songs from mobile
         .maybeSingle();
 
     if (error || !data) return null;
@@ -274,6 +276,7 @@ export async function getTrendingSongs(limit = 10): Promise<Song[]> {
             )
         `)
         .eq('is_published', true)
+        .is('deleted_at', null) // PDF #11 — hide soft-deleted songs
         .order('plays_count', { ascending: false })
         .limit(limit);
 
@@ -294,6 +297,7 @@ export async function getNewReleases(limit = 10): Promise<Song[]> {
             )
         `)
         .eq('is_published', true)
+        .is('deleted_at', null) // PDF #11 — hide soft-deleted songs
         .order('release_date', { ascending: false })
         .limit(limit);
 
@@ -1430,7 +1434,8 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
     token: NFTToken;
     activeListing: MarketplaceListing | null;
 }>> {
-    // Step 1: Get all tokens owned by this wallet
+    // Step 1: Get all tokens DB thinks this wallet owns. Filter out tokens
+    // whose underlying song was soft-deleted (PDF #11).
     const { data: tokens, error: tokensError } = await supabase
         .from('nft_tokens')
         .select(`
@@ -1438,7 +1443,7 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
             release:nft_releases!nft_release_id (
                 *,
                 song:songs!song_id (
-                    id, title, cover_path, creator_id,
+                    id, title, cover_path, creator_id, deleted_at,
                     creator:profiles!creator_id (
                         id, display_name, avatar_path
                     )
@@ -1446,12 +1451,19 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
             )
         `)
         .eq('owner_wallet_address', walletAddress.toLowerCase())
+        .eq('is_voided', false)
         .order('minted_at', { ascending: false });
 
     if (tokensError || !tokens || tokens.length === 0) return [];
 
+    // Filter out tokens whose song was soft-deleted (PDF #11 — admin delete
+    // must remove the NFT from the owner's collection immediately).
+    const liveTokens = tokens.filter((t: any) => !t.release?.song?.deleted_at);
+
+    if (liveTokens.length === 0) return [];
+
     // Step 2: Get active listings for these tokens
-    const tokenIds = tokens.map((t: any) => t.id);
+    const tokenIds = liveTokens.map((t: any) => t.id);
     const { data: listings } = await supabase
         .from('marketplace_listings')
         .select('*')
@@ -1464,7 +1476,7 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
         listingMap.set(l.nft_token_id, l);
     });
 
-    return tokens.map((t: any) => ({
+    return liveTokens.map((t: any) => ({
         token: mapNFTTokenRow(t),
         activeListing: listingMap.has(t.id) ? mapListingRow(listingMap.get(t.id)) : null,
     }));
@@ -1687,7 +1699,9 @@ function mapNFTTokenRow(row: any): NFTToken {
     return {
         id: row.id,
         releaseId: row.nft_release_id,
-        onChainTokenId: row.token_id || row.on_chain_token_id,
+        // Prefer the real on-chain token ID parsed from the Transfer event.
+        // Falls back to DB-ordered token_id for legacy rows pre-migration 026.
+        onChainTokenId: row.on_chain_token_id || row.token_id,
         ownerWalletAddress: row.owner_wallet_address,
         mintedAt: row.minted_at,
         pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : null,

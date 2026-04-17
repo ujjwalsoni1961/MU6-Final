@@ -6,7 +6,8 @@
  *   - MarketplaceV3 (direct listings, offers)
  *   - Split (revenue distribution)
  *
- * Chain: Polygon Amoy testnet (80002) → Polygon mainnet (137) for production.
+ * Chain: configured in src/config/network.ts (single source of truth).
+ * Mainnet switch is just EXPO_PUBLIC_NETWORK=mainnet — no code changes here.
  */
 
 import { prepareContractCall, prepareTransaction, readContract, sendTransaction, waitForReceipt, getContract } from 'thirdweb';
@@ -23,6 +24,7 @@ import {
     thirdwebClient,
     activeChain,
 } from '../lib/thirdweb';
+import { CHAIN_ID, NATIVE_TOKEN_ADDRESS, SERVER_WALLET } from '../config/network';
 import { supabase } from '../lib/supabase';
 import { sendNftMintedEmail, sendNftPurchaseConfirmEmail } from './email';
 import { getTokenToEurRate } from './fxRate';
@@ -68,7 +70,7 @@ export interface BuyConfig {
 // ────────────────────────────────────────────
 
 /** Native token address placeholder used by Thirdweb contracts */
-const NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+const NATIVE_TOKEN = NATIVE_TOKEN_ADDRESS;
 
 /**
  * max uint256 – used as "unlimited" maxClaimableSupply.
@@ -383,7 +385,7 @@ export async function serverClaim(
     receiverAddress: string,
     onChainPriceWei: string,
     contractAddress?: string,
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; onChainTokenId?: string | null; error?: string }> {
     try {
         const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
         console.log('[blockchain] serverClaim: claiming NFT for', receiverAddress, 'at on-chain price', onChainPriceWei);
@@ -409,7 +411,11 @@ export async function serverClaim(
             return { success: false, error: result.error || `HTTP ${response.status}` };
         }
 
-        return { success: true, txHash: result.txHash };
+        return {
+            success: true,
+            txHash: result.txHash,
+            onChainTokenId: result.onChainTokenId ?? null,
+        };
     } catch (err: any) {
         console.error('[blockchain] serverClaim error:', err);
         return { success: false, error: err.message };
@@ -684,7 +690,7 @@ export async function createNFTRelease(
             .from('nft_releases')
             .insert({
                 song_id: config.songId,
-                chain_id: '80002',
+                chain_id: CHAIN_ID.toString(),
                 contract_address: CONTRACTS.SONG_NFT,
                 tier_name: config.tierName,
                 rarity: config.rarity,
@@ -786,8 +792,12 @@ export async function mintToken(
             }
         }
 
-        let onChainTokenId: string | null = onChainSupply !== null ? onChainSupply.toString() : null;
-        if (onChainTokenId) console.log('[blockchain] on-chain totalSupply for token ID:', onChainTokenId);
+        // NOTE: this is a *predictive* tokenId derived from the pre-mint
+        // totalSupply. It is logged for debugging only — the authoritative
+        // on-chain tokenId is parsed from the Transfer log after the mint
+        // transaction is confirmed (see `onChainTokenId` below).
+        const predictedTokenId: string | null = onChainSupply !== null ? onChainSupply.toString() : null;
+        if (predictedTokenId) console.log('[blockchain] predicted token ID from totalSupply:', predictedTokenId);
 
         let paidOnChain = false;
         let confirmedPriceWei: bigint = BigInt(0);
@@ -816,7 +826,7 @@ export async function mintToken(
         console.log('[blockchain] Buyer paying', pricePol, 'POL to server wallet. Account:', account.address);
         try {
             const paymentTx = prepareTransaction({
-                to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
+                to: SERVER_WALLET as `0x${string}`,
                 chain: activeChain,
                 client: thirdwebClient,
                 value: releasePriceWei,
@@ -854,48 +864,133 @@ export async function mintToken(
             };
         }
 
-        // Token ID: use the current minted_count as the next sequential ID.
-        // The DB trigger will increment minted_count after this insert.
-        const tokenId = `${release.minted_count}`;
-        let mintTxHash: string | null = paymentTxHash;
+        // ─────────────────────────────────────────────────────────────
+        // ATOMIC PRIMARY SALE (PDF bug #14 — no more "ghost NFTs")
+        // ─────────────────────────────────────────────────────────────
+        // Protocol:
+        //   1. Payment already confirmed above (paymentTxHash on-chain).
+        //   2. Record a `mint_intents` row in state='paid'. This is our
+        //      reconciliation anchor — if the process dies between here
+        //      and the nft_tokens insert, a background job can retry.
+        //   3. Await serverClaim(). The edge function blocks until the
+        //      on-chain claim tx is confirmed AND parses the real on-chain
+        //      tokenId from the Transfer event log.
+        //   4. Only AFTER mint success do we insert nft_tokens (the row
+        //      users see as "your NFT"). Before that point, the buyer
+        //      owns an unresolved mint_intent — never a ghost token.
+        //   5. On failure, mint_intents.status='failed' flags the row for
+        //      operator refund. The buyer's POL is still in the server
+        //      wallet, so refund is a single transferFunds call.
 
-        // ── On-chain minting via server wallet (fire-and-forget) ──
-        // After buyer pays, mint an actual on-chain ERC-721 token to their wallet.
-        // The server wallet has MINTER_ROLE and pays the on-chain claim price from its balance.
-        // This runs in the background so the user gets instant purchase confirmation.
-        if (isContractReady() && paidOnChain) {
-            // Fetch the current active claim condition price so `serverClaim` sends the EXACT matching value
-            sdkGetActiveClaimCondition({
-                contract: getContract({
-                    client: thirdwebClient,
-                    chain: activeChain,
-                    address: release.contract_address || CONTRACTS.SONG_NFT
-                })
-            }).then((condition) => {
-                const conditionPriceWei = condition.pricePerToken.toString();
-                console.log('[blockchain] Read active condition price:', conditionPriceWei);
-                return serverClaim(
-                    buyerWallet,
-                    conditionPriceWei, // Send EXACT price required by the contract
-                    release.contract_address || CONTRACTS.SONG_NFT,
-                );
-            }).then((claimResult) => {
-                if (claimResult.success && claimResult.txHash) {
-                    console.log('[blockchain] Background on-chain mint succeeded, tx:', claimResult.txHash);
-                    // Update the DB record with the mint tx hash
-                    supabase
-                        .from('nft_tokens')
-                        .update({ mint_tx_hash: claimResult.txHash })
-                        .eq('nft_release_id', releaseId)
-                        .eq('token_id', tokenId)
-                        .then(() => {});
-                } else {
-                    console.warn('[blockchain] Background on-chain mint failed:', claimResult.error);
-                }
-            }).catch((mintErr) => {
-                console.warn('[blockchain] Background on-chain mint call failed:', mintErr);
-            });
+        // Resolve buyer profile for FK (best-effort — guest purchases allowed)
+        const { data: buyerProfileRow } = await supabase
+            .from('profiles')
+            .select('id')
+            .ilike('wallet_address', buyerWallet)
+            .maybeSingle();
+
+        // Step 1 of atomicity — record the intent in state 'paid'
+        const { data: intentRow, error: intentErr } = await supabase
+            .from('mint_intents')
+            .insert({
+                nft_release_id: releaseId,
+                buyer_profile_id: buyerProfileRow?.id || null,
+                buyer_wallet: buyerWallet.toLowerCase(),
+                status: 'paid',
+                price_wei: confirmedPriceWei.toString(),
+                price_pol: pricePol,
+                payment_tx_hash: paymentTxHash,
+            })
+            .select('id')
+            .maybeSingle();
+
+        if (intentErr) {
+            // Log but don't abort — reconciler can't find the intent but payment
+            // is still on-chain and recoverable via payment_tx_hash lookup.
+            console.warn('[blockchain] mint_intents insert failed (non-blocking):', intentErr.message);
         }
+        const intentId = intentRow?.id || null;
+
+        // Step 2 — await on-chain mint (serverClaim blocks until CONFIRMED)
+        let mintTxHash: string | null = null;
+        let onChainTokenId: string | null = null;
+
+        if (!isContractReady()) {
+            // No contract configured — mark intent as failed and surface error.
+            if (intentId) {
+                await supabase
+                    .from('mint_intents')
+                    .update({ status: 'failed', error_message: 'NFT contract not configured', failed_at: new Date().toISOString() })
+                    .eq('id', intentId);
+            }
+            return { success: false, error: 'NFT contract not configured. Contact support — your payment will be refunded.' };
+        }
+
+        try {
+            // Mark as minting
+            if (intentId) {
+                await supabase.from('mint_intents').update({ status: 'minting' }).eq('id', intentId);
+            }
+
+            // Read the active claim-condition price so serverClaim sends the
+            // EXACT matching value the contract requires.
+            const contractForClaim = getContract({
+                client: thirdwebClient,
+                chain: activeChain,
+                address: release.contract_address || CONTRACTS.SONG_NFT,
+            });
+            const condition = await sdkGetActiveClaimCondition({ contract: contractForClaim });
+            const conditionPriceWei = condition.pricePerToken.toString();
+            console.log('[blockchain] Read active condition price:', conditionPriceWei);
+
+            // AWAITED — no more fire-and-forget
+            const claimResult = await serverClaim(
+                buyerWallet,
+                conditionPriceWei,
+                release.contract_address || CONTRACTS.SONG_NFT,
+            );
+
+            if (!claimResult.success || !claimResult.txHash) {
+                const errMsg = claimResult.error || 'Unknown mint error';
+                if (intentId) {
+                    await supabase
+                        .from('mint_intents')
+                        .update({ status: 'failed', error_message: errMsg, failed_at: new Date().toISOString() })
+                        .eq('id', intentId);
+                }
+                // Do NOT create nft_tokens row. Buyer has a recorded intent that
+                // operator will refund. Surface a clear error.
+                return {
+                    success: false,
+                    error: `NFT mint failed: ${errMsg}. Your payment is safe and will be refunded shortly.`,
+                };
+            }
+
+            mintTxHash = claimResult.txHash;
+            onChainTokenId = claimResult.onChainTokenId || null;
+            console.log('[blockchain] On-chain mint confirmed. txHash:', mintTxHash, 'tokenId:', onChainTokenId);
+        } catch (claimErr: any) {
+            console.error('[blockchain] serverClaim threw:', claimErr);
+            if (intentId) {
+                await supabase
+                    .from('mint_intents')
+                    .update({
+                        status: 'failed',
+                        error_message: claimErr?.message || 'serverClaim exception',
+                        failed_at: new Date().toISOString(),
+                    })
+                    .eq('id', intentId);
+            }
+            return {
+                success: false,
+                error: `Mint request failed: ${claimErr?.message || 'unknown'}. Your payment is safe and will be refunded shortly.`,
+            };
+        }
+
+        // Step 3 — on-chain mint succeeded. Insert nft_tokens.
+        // Use the REAL on-chain tokenId when available; fall back to
+        // minted_count only if the Transfer log parse failed (rare).
+        const dbTokenId = onChainTokenId || `${release.minted_count}`;
 
         // Snapshot the EUR rate at time of sale (best-effort, non-blocking)
         let eurRateAtSale = 0;
@@ -909,12 +1004,12 @@ export async function mintToken(
             ? pricePaidToken * eurRateAtSale
             : null;
 
-        // Create token record in Supabase (with token + EUR price snapshots)
         const { data: token, error: tokenErr } = await supabase
             .from('nft_tokens')
             .insert({
                 nft_release_id: releaseId,
-                token_id: tokenId,
+                token_id: dbTokenId,
+                on_chain_token_id: onChainTokenId,
                 owner_wallet_address: buyerWallet.toLowerCase(),
                 mint_tx_hash: mintTxHash,
                 price_paid_eth: pricePaidToken,
@@ -926,13 +1021,42 @@ export async function mintToken(
 
         if (tokenErr) {
             console.error('[blockchain] nft_tokens insert error:', tokenErr.message);
-            // If it's a duplicate, the purchase was already recorded — still treat as success
+            // Duplicate → purchase already recorded (retry / double-submit)
             if (tokenErr.message?.includes('duplicate') || tokenErr.code === '23505') {
                 console.log('[blockchain] Token already exists, treating as success');
             } else {
-                return { success: false, error: `Purchase recorded but failed to save: ${tokenErr.message}` };
+                // On-chain mint succeeded but DB write failed — operator must
+                // manually reconcile. Mark intent as confirmed anyway since
+                // the NFT is on-chain and the buyer owns it.
+                if (intentId) {
+                    await supabase.from('mint_intents').update({
+                        status: 'confirmed',
+                        mint_tx_hash: mintTxHash,
+                        on_chain_token_id: onChainTokenId,
+                        error_message: `DB insert failed: ${tokenErr.message}`,
+                        confirmed_at: new Date().toISOString(),
+                    }).eq('id', intentId);
+                }
+                return {
+                    success: false,
+                    error: `NFT minted on-chain but failed to save: ${tokenErr.message}. Support will reconcile.`,
+                };
             }
         }
+
+        // Step 4 — mark intent as confirmed
+        if (intentId) {
+            await supabase.from('mint_intents').update({
+                status: 'confirmed',
+                mint_tx_hash: mintTxHash,
+                on_chain_token_id: onChainTokenId,
+                nft_token_id: token?.id || null,
+                confirmed_at: new Date().toISOString(),
+            }).eq('id', intentId);
+        }
+
+        // Alias for downstream code that referenced `tokenId` before the refactor
+        const tokenId = dbTokenId;
 
         const tokenRecord = token || (await supabase
             .from('nft_tokens')
@@ -1179,7 +1303,7 @@ export async function buyListingFlow(
         if (priceWei > BigInt(0)) {
             console.log('[blockchain] Secondary sale (legacy): buyer paying', salePricePol, 'POL to server wallet');
             const paymentTx = prepareTransaction({
-                to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39' as `0x${string}`,
+                to: SERVER_WALLET as `0x${string}`,
                 chain: activeChain,
                 client: thirdwebClient,
                 value: priceWei,

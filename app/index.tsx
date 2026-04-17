@@ -11,7 +11,7 @@ import { useAuth } from '../src/context/AuthContext';
  * - Connected + listener → consumer home
  */
 export default function Index() {
-    const { isConnected, isLoading, role } = useAuth();
+    const { isConnected, isLoading, role, isBlocked } = useAuth();
 
     // Show loading while auth state is being determined
     if (isLoading) {
@@ -26,6 +26,12 @@ export default function Index() {
     // Not connected → login
     if (!isConnected) {
         return <Redirect href="/(auth)/login" />;
+    }
+
+    // PDF #13 — blocked users cannot access any authenticated route.
+    // Redirect to a dedicated suspended screen with support contact.
+    if (isBlocked) {
+        return <Redirect href="/suspended" />;
     }
 
     // Route by role
