@@ -2279,14 +2279,39 @@ export async function createPayoutRequest(
             }),
         });
 
-        const result = await response.json();
-        if (!result.success) {
-            return { id: null, error: result.error || 'Failed to request payout via edge function' };
+        let result: any;
+        try {
+            result = await response.json();
+        } catch (parseErr) {
+            console.error('[db] createPayoutRequest: non-JSON response', parseErr);
+            return {
+                id: null,
+                error: `Payout service returned an invalid response (HTTP ${response.status}). Please try again.`,
+            };
         }
+
+        if (!response.ok || !result?.success) {
+            // Prefer the server-sent error, then a status-specific fallback.
+            const serverErr = result?.error || result?.message;
+            if (serverErr) {
+                return { id: null, error: serverErr };
+            }
+            if (response.status === 404) {
+                return { id: null, error: 'Artist profile not found. Please sign out and back in.' };
+            }
+            if (response.status === 409) {
+                return { id: null, error: 'You already have a pending payout request. Please wait for it to be approved or rejected.' };
+            }
+            if (response.status >= 500) {
+                return { id: null, error: 'Payout service is temporarily unavailable. Please try again in a moment.' };
+            }
+            return { id: null, error: `Payout request failed (HTTP ${response.status}).` };
+        }
+
         return { id: result.id };
     } catch (err: any) {
         console.error('[db] createPayoutRequest edge error:', err);
-        return { id: null, error: err.message };
+        return { id: null, error: err?.message || 'Network error while contacting payout service.' };
     }
 }
 

@@ -1,19 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-    View, Text, ScrollView, Platform, ActivityIndicator, Alert, Linking,
+    View, Text, ScrollView, Platform, ActivityIndicator, Linking,
 } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
     Users, ExternalLink, ChevronRight, Percent, Wallet, AlertCircle,
-    CheckCircle, Upload, Music,
+    CheckCircle, Music, Upload,
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { useCreatorSongs } from '../../src/hooks/useData';
-import { getSongSplitSheet, deploySplitForSong } from '../../src/services/splitContracts';
+import { getSongSplitSheet } from '../../src/services/splitContracts';
 import { supabase } from '../../src/lib/supabase';
 
 const isWeb = Platform.OS === 'web';
@@ -88,16 +88,12 @@ function SplitMemberRow({ member }: {
 }
 
 /* ─── Song Split Card ─── */
-function SongSplitCard({ data, onDeploy, deploying, onEdit }: {
+function SongSplitCard({ data, onEdit }: {
     data: SongSplitData;
-    onDeploy: (songId: string) => void;
-    deploying: string | null;
     onEdit: (songId: string, songTitle: string) => void;
 }) {
     const { isDark, colors } = useTheme();
     const isDeployed = !!data.splitContractAddress;
-    const isDeploying = deploying === data.songId;
-    const canDeploy = data.allHaveWallets && data.splits.length > 0 && !isDeployed;
 
     return (
         <View style={{
@@ -153,9 +149,10 @@ function SongSplitCard({ data, onDeploy, deploying, onEdit }: {
                 </View>
             )}
 
-            {/* Contract Address / Deploy Button */}
-            <View style={{ padding: 12 }}>
-                {isDeployed ? (
+            {/* Deployed split contract reference (historical only — new deployments disabled
+                since NFT sales now go directly to the creator wallet per PDF Fix #10). */}
+            {isDeployed && (
+                <View style={{ padding: 12 }}>
                     <AnimatedPressable
                         preset="row"
                         onPress={() => Linking.openURL(`${POLYGONSCAN_BASE}/address/${data.splitContractAddress}`)}
@@ -172,39 +169,8 @@ function SongSplitCard({ data, onDeploy, deploying, onEdit }: {
                         </Text>
                         <ExternalLink size={12} color="#22c55e" />
                     </AnimatedPressable>
-                ) : canDeploy ? (
-                    <AnimatedPressable
-                        preset="button"
-                        onPress={() => onDeploy(data.songId)}
-                        disabled={isDeploying}
-                        style={{
-                            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                            backgroundColor: '#8b5cf6', borderRadius: 10, paddingVertical: 12,
-                            opacity: isDeploying ? 0.7 : 1,
-                        }}
-                    >
-                        {isDeploying ? (
-                            <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                            <>
-                                <Upload size={14} color="#fff" />
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: '#fff' }}>Deploy Split Contract</Text>
-                            </>
-                        )}
-                    </AnimatedPressable>
-                ) : data.splits.length > 0 && !data.allHaveWallets ? (
-                    <View style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 10,
-                        backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : 'rgba(245,158,11,0.04)',
-                        borderWidth: 1, borderColor: isDark ? 'rgba(245,158,11,0.15)' : 'rgba(245,158,11,0.1)',
-                    }}>
-                        <AlertCircle size={14} color="#f59e0b" />
-                        <Text style={{ flex: 1, fontSize: 11, color: '#f59e0b', fontWeight: '500', lineHeight: 16 }}>
-                            All collaborators need connected wallets before deploying
-                        </Text>
-                    </View>
-                ) : null}
-            </View>
+                </View>
+            )}
         </View>
     );
 }
@@ -218,7 +184,6 @@ export default function SplitsScreen() {
 
     const [songSplits, setSongSplits] = useState<SongSplitData[]>([]);
     const [splitsLoading, setSplitsLoading] = useState(false);
-    const [deploying, setDeploying] = useState<string | null>(null);
 
     const Container = isWeb ? View : SafeAreaView;
 
@@ -256,23 +221,6 @@ export default function SplitsScreen() {
     useEffect(() => {
         loadSplits();
     }, [loadSplits]);
-
-    const handleDeploy = async (songId: string) => {
-        setDeploying(songId);
-        try {
-            const result = await deploySplitForSong(songId);
-            if (result.success) {
-                const msg = `Split contract deployed!\n${result.contractAddress}`;
-                Platform.OS === 'web' ? alert(msg) : Alert.alert('Success', msg);
-                loadSplits();
-            } else {
-                const msg = result.error || 'Deploy failed';
-                Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
-            }
-        } finally {
-            setDeploying(null);
-        }
-    };
 
     const handleEdit = (songId: string, songTitle: string) => {
         router.push({
@@ -312,7 +260,7 @@ export default function SplitsScreen() {
                     borderWidth: 1, borderColor: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.1)',
                 }}>
                     <Text style={{ fontSize: 12, color: colors.text.secondary, lineHeight: 18 }}>
-                        Split contracts automatically distribute NFT sale revenue to all collaborators on-chain. Each collaborator receives their share directly to their connected wallet.
+                        Split sheets define how streaming royalties are distributed across your collaborators. NFT sale revenue goes directly to the primary creator — it is not split.
                     </Text>
                 </View>
 
@@ -327,8 +275,6 @@ export default function SplitsScreen() {
                         <SongSplitCard
                             key={data.songId}
                             data={data}
-                            onDeploy={handleDeploy}
-                            deploying={deploying}
                             onEdit={handleEdit}
                         />
                     ))

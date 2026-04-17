@@ -750,7 +750,7 @@ export default function SplitEditorScreen() {
                             marginTop: 12, lineHeight: 18,
                         }}>
                             Split percentages must total exactly 100%.{'\n'}
-                            Royalties from streams and NFT sales will be distributed accordingly.
+                            Streaming royalties will be distributed accordingly. NFT sale revenue goes directly to the primary creator — it is not split.
                         </Text>
                     </>
                 )}

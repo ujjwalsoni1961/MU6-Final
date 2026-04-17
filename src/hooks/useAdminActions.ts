@@ -383,6 +383,106 @@ export function useAdminPayoutActions(refresh: () => void) {
 }
 
 // ────────────────────────────────────────────
+// NFT LIMIT REQUEST ACTIONS (admin approve/reject)
+// ────────────────────────────────────────────
+
+type NftRarity = 'common' | 'rare' | 'legendary';
+
+export function useAdminNFTLimitActions(refresh: () => void) {
+    const approveRequest = useCallback(async (request: any, notes?: string) => {
+        if (!request || !request.id) {
+            showToast('Request not found', 'error');
+            return;
+        }
+        if (request.status !== 'pending') {
+            showToast('Request is not pending', 'error');
+            return;
+        }
+
+        // 1) Read latest request row to get canonical requested values / profile_id.
+        const { data: reqRow, error: reqErr } = await supabase
+            .from('nft_limit_requests')
+            .select('*')
+            .eq('id', request.id)
+            .maybeSingle();
+        if (reqErr || !reqRow) {
+            showToast('Request not found', 'error');
+            return;
+        }
+        if (reqRow.status !== 'pending') {
+            showToast('Request is no longer pending', 'error');
+            return;
+        }
+
+        // 2) Read target profile's current allowed rarities (to merge, not replace).
+        const { data: targetProfile } = await supabase
+            .from('profiles')
+            .select('allowed_nft_rarities')
+            .eq('id', reqRow.profile_id)
+            .maybeSingle();
+
+        const existing = (targetProfile?.allowed_nft_rarities ?? ['common']) as NftRarity[];
+        const requested = (reqRow.requested_rarities ?? []) as NftRarity[];
+
+        // 3) Build profile patch.
+        const profilePatch: Record<string, any> = {};
+        if (reqRow.requested_listing_limit !== null && reqRow.requested_listing_limit !== undefined) {
+            profilePatch.nft_listing_limit = reqRow.requested_listing_limit;
+        }
+        if (requested.length > 0) {
+            const combined = Array.from(new Set([...existing, ...requested])) as NftRarity[];
+            profilePatch.allowed_nft_rarities = combined;
+        }
+
+        // 4) Apply profile patch via service-role bypass.
+        if (Object.keys(profilePatch).length > 0) {
+            const profileResult = await executeAdminUpdate('profiles', reqRow.profile_id, profilePatch);
+            if (!profileResult.success) {
+                showToast(profileResult.error || 'Failed to update artist limits', 'error');
+                return;
+            }
+        }
+
+        // 5) Mark request approved.
+        const reqResult = await executeAdminUpdate('nft_limit_requests', request.id, {
+            status: 'approved',
+            admin_notes: notes || null,
+            processed_at: new Date().toISOString(),
+        });
+        if (!reqResult.success) {
+            showToast(reqResult.error || 'Failed to mark request approved', 'error');
+            return;
+        }
+
+        await logAuditAction('approve_nft_limit_request', 'nft_limit_request', request.id, {
+            profile_id: reqRow.profile_id,
+            new_limit: profilePatch.nft_listing_limit,
+            new_rarities: profilePatch.allowed_nft_rarities,
+            notes,
+        });
+        showToast('Request approved — artist limits updated');
+        refresh();
+    }, [refresh]);
+
+    const rejectRequest = useCallback(async (requestId: string, reason?: string) => {
+        const result = await executeAdminUpdate('nft_limit_requests', requestId, {
+            status: 'rejected',
+            admin_notes: reason || 'Rejected by admin',
+            processed_at: new Date().toISOString(),
+        });
+        if (!result.success) {
+            showToast(result.error || 'Failed to reject request', 'error');
+            return;
+        }
+        await logAuditAction('reject_nft_limit_request', 'nft_limit_request', requestId, { reason });
+        showToast('Request rejected');
+        refresh();
+    }, [refresh]);
+
+    return { approveRequest, rejectRequest };
+}
+
+// ────────────────────────────────────────────
 // TRANSACTION / MARKETPLACE FLAG ACTIONS
 // ────────────────────────────────────────────
 

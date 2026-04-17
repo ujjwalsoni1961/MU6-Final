@@ -1,23 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Platform, ActivityIndicator } from 'react-native';
-import { Gem, CheckCircle, XCircle, Clock } from 'lucide-react-native';
+import { View, Text, Platform } from 'react-native';
+import { Gem, CheckCircle, XCircle } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge, AdminFilterPills } from '../../src/components/admin/AdminScreenWrapper';
-import { ActionButton, PromptModal, RowActions, showToast } from '../../src/components/admin/AdminActionComponents';
+import { ActionButton, PromptModal, RowActions } from '../../src/components/admin/AdminActionComponents';
 import {
     getAllNFTLimitRequests,
-    adminApproveNFTLimitRequest,
-    adminRejectNFTLimitRequest,
     NFTLimitRequest,
 } from '../../src/services/database';
 import { useTheme } from '../../src/context/ThemeContext';
-import { useAuth } from '../../src/context/AuthContext';
+import { useAdminNFTLimitActions } from '../../src/hooks/useAdminActions';
 
 const isWeb = Platform.OS === 'web';
 
 type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
 
 export default function AdminNFTLimitRequestsScreen() {
-    const { profile } = useAuth();
     const { colors } = useTheme();
     const [status, setStatus] = useState<StatusFilter>('pending');
     const [requests, setRequests] = useState<NFTLimitRequest[]>([]);
@@ -45,31 +42,29 @@ export default function AdminNFTLimitRequestsScreen() {
         refresh();
     }, [refresh]);
 
+    const { approveRequest, rejectRequest } = useAdminNFTLimitActions(() => {
+        setApproveTarget(null);
+        setRejectTarget(null);
+        refresh();
+    });
+
     const handleApprove = async (notes: string) => {
-        if (!approveTarget || !profile?.id) return;
+        if (!approveTarget) return;
         setActionLoading(true);
-        const res = await adminApproveNFTLimitRequest(approveTarget.id, profile.id, notes || undefined);
-        setActionLoading(false);
-        if (res.success) {
-            showToast('Request approved — artist limits updated', 'success');
-            setApproveTarget(null);
-            refresh();
-        } else {
-            showToast(res.error || 'Failed to approve', 'error');
+        try {
+            await approveRequest(approveTarget, notes || undefined);
+        } finally {
+            setActionLoading(false);
         }
     };
 
     const handleReject = async (notes: string) => {
-        if (!rejectTarget || !profile?.id) return;
+        if (!rejectTarget) return;
         setActionLoading(true);
-        const res = await adminRejectNFTLimitRequest(rejectTarget.id, profile.id, notes || undefined);
-        setActionLoading(false);
-        if (res.success) {
-            showToast('Request rejected', 'success');
-            setRejectTarget(null);
-            refresh();
-        } else {
-            showToast(res.error || 'Failed to reject', 'error');
+        try {
+            await rejectRequest(rejectTarget.id, notes || undefined);
+        } finally {
+            setActionLoading(false);
         }
     };
 
