@@ -6,7 +6,7 @@ import {
     LayoutDashboard, Users, Music, ArrowLeftRight, FileCode,
     Shield, LogOut, Disc3, ShoppingBag, Tag,
     Radio, Wallet, PieChart, CreditCard, DollarSign,
-    Settings, ScrollText, Bell, ListMusic, Gem,
+    Settings, ScrollText, Bell, ListMusic, Gem, Users2,
 } from 'lucide-react-native';
 import { useAdminAuth } from '../../src/context/AdminAuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -57,6 +57,7 @@ const navSections: NavSection[] = [
             { path: '/(admin)/royalty-events', match: '/royalty-events', label: 'Royalty Events', Icon: DollarSign },
             { path: '/(admin)/royalty-shares', match: '/royalty-shares', label: 'Royalty Shares', Icon: PieChart },
             { path: '/(admin)/song-splits', match: '/song-splits', label: 'Song Splits', Icon: Wallet },
+            { path: '/(admin)/unregistered-revenue', match: '/unregistered-revenue', label: 'Accrued (Unregistered)', Icon: Users2 },
             { path: '/(admin)/payouts', match: '/payouts', label: 'Payouts', Icon: CreditCard },
             { path: '/(admin)/transactions', match: '/transactions', label: 'Transactions', Icon: ArrowLeftRight },
         ],
@@ -205,7 +206,7 @@ function AdminSidebar() {
 const allScreens = [
     'dashboard', 'users', 'songs', 'playlists',
     'nft-releases', 'nft-tokens', 'nft-limit-requests', 'marketplace', 'contracts',
-    'streams', 'royalty-events', 'royalty-shares', 'song-splits', 'payouts', 'transactions',
+    'streams', 'royalty-events', 'royalty-shares', 'song-splits', 'unregistered-revenue', 'payouts', 'transactions',
     'platform-settings', 'audit-log', 'notifications',
 ];
 

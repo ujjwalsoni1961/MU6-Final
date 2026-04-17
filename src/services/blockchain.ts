@@ -946,15 +946,21 @@ export async function mintToken(
         // double-count. The trigger in 001_initial_schema.sql handles it atomically.
 
         // ── Distribute Primary Sale Revenue (On-Chain) ──
-        // NFT sale revenue is distributed on-chain, NOT via royalty_events/royalty_shares.
-        // - 5% platform fee stays in server wallet
-        // - 95% artist pool → sent to Split contract (if deployed) or creator wallet (fallback)
+        // PDF Fix #10 — Split Sheet Revenue rework:
+        //   NFT sale revenue is restricted exclusively to the primary creator.
+        //   Split-sheet partners (e.g. external producers) only receive streaming
+        //   revenue; they are NOT included in on-chain NFT distributions.
+        //
+        // Distribution:
+        //   -  5% platform fee stays in the server wallet
+        //   - 95% artist pool → primary creator's wallet (always, regardless of any
+        //     split_contract_address that may exist from legacy flows).
         if (paidOnChain && confirmedPriceWei > BigInt(0)) {
             const salePricePol = Number(confirmedPriceWei) / 1e18;
             try {
                 const { data: songData } = await supabase
                     .from('songs')
-                    .select('id, creator_id, split_contract_address')
+                    .select('id, creator_id')
                     .eq('id', release.song_id)
                     .maybeSingle();
 
@@ -963,30 +969,21 @@ export async function mintToken(
                 if (songData && artistPoolPol > 0) {
                     const artistPoolWei = BigInt(Math.floor(artistPoolPol * 1e18)).toString();
 
-                    if (songData.split_contract_address) {
-                        // Send 95% to the deployed Split contract — it distributes on-chain per shares
-                        console.log('[blockchain] Primary sale: sending', artistPoolPol, 'POL to Split contract:', songData.split_contract_address);
+                    const { data: creatorProfile } = await supabase
+                        .from('profiles')
+                        .select('wallet_address, display_name')
+                        .eq('id', songData.creator_id)
+                        .maybeSingle();
+
+                    if (creatorProfile?.wallet_address) {
+                        console.log('[blockchain] Primary sale (creator-only): sending', artistPoolPol, 'POL to creator', creatorProfile.display_name, creatorProfile.wallet_address);
                         try {
-                            await transferToArtistWallet(songData.split_contract_address, artistPoolWei);
+                            await transferToArtistWallet(creatorProfile.wallet_address, artistPoolWei);
                         } catch (err) {
-                            console.error('[blockchain] Split contract payment failed (non-blocking):', err);
+                            console.error('[blockchain] Creator payment failed (non-blocking):', err);
                         }
                     } else {
-                        // Fallback: no Split contract → send 95% directly to creator wallet
-                        const { data: creatorProfile } = await supabase
-                            .from('profiles')
-                            .select('wallet_address')
-                            .eq('id', songData.creator_id)
-                            .maybeSingle();
-
-                        if (creatorProfile?.wallet_address) {
-                            console.log('[blockchain] Primary sale: no split contract, sending', artistPoolPol, 'POL to creator:', creatorProfile.wallet_address);
-                            try {
-                                await transferToArtistWallet(creatorProfile.wallet_address, artistPoolWei);
-                            } catch (err) {
-                                console.error('[blockchain] Creator payment failed (non-blocking):', err);
-                            }
-                        }
+                        console.warn('[blockchain] Primary sale: creator has no wallet address — funds remain in server wallet for manual reconciliation');
                     }
                     console.log('[blockchain] Primary sale on-chain distribution complete for release:', releaseId);
                 }

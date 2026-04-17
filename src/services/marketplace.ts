@@ -339,21 +339,36 @@ export async function cancelMarketplaceListing(
 }
 
 /**
- * Set royalty info on the NFT contract for a specific song's Split contract.
- * This directs MarketplaceV3's EIP-2981 royalties to the Split contract.
+ * Set royalty info (EIP-2981) on the NFT contract for a specific song.
+ *
+ * PDF Fix #10 — Split Sheet Revenue rework:
+ *   Secondary-sale royalties go to the primary creator's wallet only. Split sheet
+ *   partners (e.g. external producers / unregistered contributors) are paid via
+ *   streaming royalty_shares, NOT via on-chain NFT sales.
  */
 export async function setRoyaltyForSong(
     songId: string,
 ): Promise<{ success: boolean; error?: string }> {
     const { data: song } = await supabase
         .from('songs')
-        .select('split_contract_address')
+        .select('creator_id')
         .eq('id', songId)
         .maybeSingle();
 
-    if (!song?.split_contract_address) {
-        return { success: false, error: 'Song has no Split contract deployed' };
+    if (!song?.creator_id) {
+        return { success: false, error: 'Song not found or has no creator' };
     }
 
-    return callSetRoyalty(song.split_contract_address, '500');
+    const { data: creator } = await supabase
+        .from('profiles')
+        .select('wallet_address')
+        .eq('id', song.creator_id)
+        .maybeSingle();
+
+    if (!creator?.wallet_address) {
+        return { success: false, error: "Creator has no linked wallet — cannot set royalty recipient." };
+    }
+
+    // 5% royalty to the creator wallet
+    return callSetRoyalty(creator.wallet_address, '500');
 }

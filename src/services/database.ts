@@ -2171,6 +2171,59 @@ export async function adminRejectNFTLimitRequest(
     return { success: true };
 }
 
+// ============================================================
+// PDF Fix #10 — Split Sheet Revenue: unregistered accrued revenue
+// ============================================================
+
+export interface UnregisteredAccruedRow {
+    email: string;
+    partyNameHint: string | null;
+    songId: string;
+    songTitle: string;
+    songCreatorId: string;
+    totalAccruedEur: number;
+    shareCount: number;
+    firstAccruedAt: string;
+    lastAccruedAt: string;
+    isRegistered: boolean;
+    linkedProfileId: string | null;
+}
+
+/**
+ * Admin: list streaming royalty revenue that has accrued for non-registered
+ * split-sheet parties. NFT sales do not appear here (they go to the primary
+ * creator only per PDF Fix #10).
+ *
+ * Pass `onlyRegistered`:
+ *   - null/undefined — all rows
+ *   - true  — only those whose email has since registered (ready to claim)
+ *   - false — only those still unregistered
+ */
+export async function getUnregisteredAccruedRevenue(
+    onlyRegistered?: boolean | null,
+): Promise<UnregisteredAccruedRow[]> {
+    const { data, error } = await supabase.rpc('get_unregistered_accrued_revenue', {
+        only_registered: onlyRegistered ?? null,
+    });
+    if (error) {
+        console.error('[db] getUnregisteredAccruedRevenue error:', error);
+        return [];
+    }
+    return (data || []).map((row: any) => ({
+        email: row.email,
+        partyNameHint: row.party_name_hint,
+        songId: row.song_id,
+        songTitle: row.song_title,
+        songCreatorId: row.song_creator_id,
+        totalAccruedEur: parseFloat(row.total_accrued_eur) || 0,
+        shareCount: Number(row.share_count) || 0,
+        firstAccruedAt: row.first_accrued_at,
+        lastAccruedAt: row.last_accrued_at,
+        isRegistered: !!row.is_registered,
+        linkedProfileId: row.linked_profile_id ?? null,
+    }));
+}
+
 /** Does this profile have a pending (active) payout request? */
 export async function hasPendingPayout(profileId: string): Promise<boolean> {
     const { count, error } = await supabase
