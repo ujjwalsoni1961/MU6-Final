@@ -98,15 +98,26 @@ function isNativeToken(addr: string): boolean {
 /**
  * Build headers for calls to the `nft-admin` edge function.
  *
- * The edge function's verifyAuth() calls supabase.auth.getUser(token) on the
- * Bearer token — sending the anon key causes it to fail with "Invalid or
- * expired auth token" (root cause of the payment-but-no-mint bug). We MUST
- * send the current user session's access_token in Authorization, and the anon
- * key separately in the `apikey` header (required by Supabase ingress).
+ * The MU6 app uses wallet-based auth (Thirdweb), not Supabase Auth, so there
+ * is no user session JWT on the client. The edge function's verifyAuth()
+ * accepts either a real user session token (future-proof) or the public anon
+ * key (current path). If a Supabase session happens to exist (e.g. from a
+ * future auth migration), prefer it; otherwise fall back to the anon key.
+ *
+ * The real authorization boundary lives inside the edge function via the
+ * server-side THIRDWEB_SECRET_KEY — this header only identifies the caller
+ * to the Supabase ingress.
  */
 async function nftAdminHeaders(): Promise<Record<string, string>> {
-    const { data: { session } } = await supabase.auth.getSession();
-    const authToken = session?.access_token || SUPABASE_ANON_KEY;
+    let authToken: string = SUPABASE_ANON_KEY;
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+            authToken = session.access_token;
+        }
+    } catch (_e) {
+        // No session available — fall through to anon key.
+    }
     return {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken}`,
