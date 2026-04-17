@@ -78,7 +78,10 @@ export default function NFTManagerScreen() {
     const [rarity, setRarity] = useState<Rarity>('common');
     const [totalSupply, setTotalSupply] = useState('10');
     const [priceEth, setPriceEth] = useState('0.01');
-    const [royaltyPercent, setRoyaltyPercent] = useState('10');
+    // Royalty allocation to NFT holders is temporarily disabled — shown as
+    // "Coming Soon" in the create modal. All new releases are created with 0%
+    // allocation. Streaming revenue flows only to split-sheet parties.
+    const ROYALTY_TO_HOLDERS_ENABLED = false;
     const [description, setDescription] = useState('');
     const [coverImageUri, setCoverImageUri] = useState<string | null>(null);
     const [coverImageUploading, setCoverImageUploading] = useState(false);
@@ -143,7 +146,6 @@ export default function NFTManagerScreen() {
         setRarity('common');
         setTotalSupply('10');
         setPriceEth('0.01');
-        setRoyaltyPercent('10');
         setDescription('');
         setCoverImageUri(null);
         setBenefits([]);
@@ -209,14 +211,11 @@ export default function NFTManagerScreen() {
 
         const supply = parseInt(totalSupply) || 0;
         const price = parseFloat(priceEth) || 0;
-        const royalty = parseFloat(royaltyPercent) || 0;
+        // NFT-holder royalty allocation is disabled for this launch. Always 0.
+        const royalty = 0;
 
         if (supply < 1 || supply > 10000) {
             Alert.alert('Invalid', 'Supply must be between 1 and 10,000');
-            return;
-        }
-        if (royalty > 50) {
-            Alert.alert('Invalid', 'Royalty allocation cannot exceed 50% per song');
             return;
         }
 
@@ -544,7 +543,7 @@ export default function NFTManagerScreen() {
                             {/* Benefits / Perks */}
                             <Text style={labelStyle}>Benefits / Perks</Text>
                             <Text style={{ color: colors.text.muted, fontSize: 11, marginBottom: 8 }}>
-                                Add perks that NFT holders receive (e.g. royalty share, VIP access).
+                                Add perks that NFT holders receive (e.g. VIP Concert Access, Exclusive Content).
                             </Text>
                             {benefits.map((b, idx) => (
                                 <View key={idx} style={{
@@ -675,33 +674,28 @@ export default function NFTManagerScreen() {
                                 </View>
                             </View>
 
-                            {/* Royalty */}
-                            <Text style={labelStyle}>Royalty Allocation (%)</Text>
-                            <TextInput
-                                value={royaltyPercent}
-                                onChangeText={setRoyaltyPercent}
-                                keyboardType="numeric"
-                                placeholder="10"
-                                placeholderTextColor={colors.text.muted}
-                                style={inputStyle}
-                            />
-                            <Text style={{ color: colors.text.muted, fontSize: 11, marginTop: 4 }}>
-                                Max 50% total across all tiers per song. NFT holders share this royalty pool.
-                            </Text>
-                            {parseFloat(royaltyPercent) > 0 && parseInt(totalSupply) > 0 && (
-                                <View style={{
-                                    flexDirection: 'row', alignItems: 'center', gap: 8,
-                                    marginTop: 8, padding: 10, borderRadius: 10,
-                                    backgroundColor: isDark ? 'rgba(245,158,11,0.08)' : 'rgba(245,158,11,0.06)',
-                                    borderWidth: 1,
-                                    borderColor: isDark ? 'rgba(245,158,11,0.2)' : 'rgba(245,158,11,0.15)',
-                                }}>
-                                    <Info size={14} color="#f59e0b" />
-                                    <Text style={{ color: '#f59e0b', fontSize: 11, flex: 1 }}>
-                                        {`${royaltyPercent}% of streaming revenue will be shared across ${totalSupply} NFT holders (${(parseFloat(royaltyPercent) / parseInt(totalSupply)).toFixed(2)}% per NFT).`}
+                            {/* Royalty Allocation — Coming Soon.
+                                NFT-holder streaming revenue share is disabled for this launch.
+                                Streaming revenue goes only to split-sheet parties; NFT sale
+                                revenue goes directly to the primary creator. */}
+                            <Text style={labelStyle}>Royalty Allocation to NFT Holders</Text>
+                            <View style={{
+                                flexDirection: 'row', alignItems: 'center', gap: 10,
+                                padding: 14, borderRadius: 12,
+                                backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.05)',
+                                borderWidth: 1, borderStyle: 'dashed',
+                                borderColor: isDark ? 'rgba(139,92,246,0.3)' : 'rgba(139,92,246,0.25)',
+                            }}>
+                                <Info size={16} color="#8b5cf6" />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ color: '#8b5cf6', fontSize: 13, fontWeight: '700' }}>
+                                        Coming Soon
+                                    </Text>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2, lineHeight: 16 }}>
+                                        Revenue sharing with NFT holders is not available for this first launch. For now, streaming revenue goes to collaborators on the split sheet, and NFT sale revenue goes directly to the primary creator.
                                     </Text>
                                 </View>
-                            )}
+                            </View>
 
                             {/* Error */}
                             {createRelease.error && (

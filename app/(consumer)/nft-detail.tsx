@@ -3,7 +3,7 @@ import { View, Text, ScrollView, Platform, ActivityIndicator, Alert } from 'reac
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, ExternalLink, ShoppingCart, Zap, Tag, Copy, Check, Shield, Clock, Music, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ExternalLink, ShoppingCart, Zap, Tag, Copy, Check, Shield, ChevronRight } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import GlassCard from '../../src/components/shared/GlassCard';
 import RarityBadge from '../../src/components/shared/RarityBadge';
@@ -600,38 +600,11 @@ export default function NFTDetailScreen() {
                             </GlassCard>
                         )}
 
-                        {/* Streaming Royalty Info */}
-                        {nft.allocatedRoyaltyPercent != null && nft.allocatedRoyaltyPercent > 0 && (
-                            <GlassCard intensity="light" style={{ marginBottom: 16 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                    <View style={{
-                                        width: 36, height: 36, borderRadius: 18,
-                                        backgroundColor: 'rgba(139,92,246,0.15)',
-                                        alignItems: 'center' as const, justifyContent: 'center' as const,
-                                    }}>
-                                        <Music size={18} color="#8b5cf6" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={{ color: colors.text.primary, fontSize: 14, fontWeight: '700' }}>
-                                            Streaming Royalty Share
-                                        </Text>
-                                        <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 2 }}>
-                                            This NFT entitles the holder to {(nft.allocatedRoyaltyPercent / nft.totalEditions).toFixed(2)}% of streaming revenue
-                                        </Text>
-                                    </View>
-                                </View>
-                                <View style={{
-                                    flexDirection: 'row', alignItems: 'center', gap: 6,
-                                    marginTop: 10, paddingTop: 10,
-                                    borderTopWidth: 1, borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                                }}>
-                                    <Clock size={13} color={colors.text.muted} />
-                                    <Text style={{ color: colors.text.muted, fontSize: 11 }}>
-                                        Hold for 30 days to qualify for royalty distributions
-                                    </Text>
-                                </View>
-                            </GlassCard>
-                        )}
+                        {/* Streaming Royalty Info — temporarily disabled.
+                            NFT-holder revenue share is not available for this first launch.
+                            Streaming revenue flows only to split-sheet parties; NFT sale
+                            revenue goes directly to the primary creator. UI will return
+                            once the feature is re-enabled. */}
 
                         {/* Description */}
                         {nft.description && (

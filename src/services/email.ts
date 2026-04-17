@@ -143,17 +143,18 @@ export async function sendNftMintedEmail(
     return sendEmail(to, subject, html);
 }
 
-/** NFT purchase confirmation — to buyer */
+/** NFT purchase confirmation — to buyer.
+ *  NOTE: Royalty-share line removed for first launch — NFT-holder streaming
+ *  revenue share is temporarily disabled. */
 export async function sendNftPurchaseConfirmEmail(
     to: string,
     songTitle: string,
     artistName: string,
     tierName: string,
-    royaltyPercent: string,
 ): Promise<boolean> {
     const subject = '🎵 NFT Purchase Confirmed';
     const body = `<p>You now own a <strong>${tierName}</strong> NFT of "<strong>${songTitle}</strong>" by <strong>${artistName}</strong>.</p>
-<p>This entitles you to a <strong>${royaltyPercent}%</strong> royalty share.</p>`;
+<p>Thanks for supporting the artist. View your collection in the app to see this NFT and any perks the artist has attached.</p>`;
     const html = wrapInTemplate('NFT Purchase Confirmed', body, 'View My NFTs', `${APP_URL}/library`);
     return sendEmail(to, subject, html);
 }

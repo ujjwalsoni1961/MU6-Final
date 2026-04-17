@@ -1039,12 +1039,13 @@ export async function mintToken(
                     const buyerAuthUser = creatorUsers?.find((u: any) => u.id === buyerProfile.id);
                     const buyerEmail = buyerAuthUser?.email;
                     if (buyerEmail) {
+                        // Royalty-share argument removed — NFT-holder streaming
+                        // revenue share is temporarily disabled for first launch.
                         void sendNftPurchaseConfirmEmail(
                             buyerEmail,
                             songData2.title,
                             creatorProfile2?.display_name || 'Unknown Artist',
                             tierName,
-                            release.royalty_percent?.toString() || '0',
                         ).catch(() => {});
                     }
                 }
