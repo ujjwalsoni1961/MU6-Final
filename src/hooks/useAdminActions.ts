@@ -23,14 +23,29 @@ async function logAuditAction(
     targetId: string,
     details?: Record<string, any>,
 ) {
+    // The admin dashboard uses a static `superadmin` bypass (useAdminAuth)
+    // that is intentionally decoupled from Supabase Auth, so auth.uid() is
+    // usually NULL here. Migration 027 made admin_audit_log.admin_id nullable
+    // to represent "system / superadmin bypass" cleanly. Passing NULL avoids
+    // the FK violation against profiles(id) that previously produced 500s.
     const { data: { user } } = await supabase.auth.getUser();
-    await executeAdminInsert('admin_audit_log', {
-        admin_id: user?.id || '00000000-0000-0000-0000-000000000000',
+    const result = await executeAdminInsert('admin_audit_log', {
+        admin_id: user?.id ?? null,
         action,
         target_type: targetType,
         target_id: targetId,
         details: details || {},
     });
+    // Audit log failures must not silently swallow — surface to console so we
+    // can detect future schema drift, but do NOT throw (the primary mutation
+    // has already succeeded and we don't want to confuse the admin UI).
+    if (result && result.success === false) {
+        console.error('[admin] logAuditAction failed:', result.error, {
+            action,
+            targetType,
+            targetId,
+        });
+    }
 }
 
 async function executeAdminUpdate(table: string, id: string, updates: Record<string, any>) {

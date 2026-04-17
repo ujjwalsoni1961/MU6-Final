@@ -202,11 +202,14 @@ export async function getSongs(filters?: {
         .order('created_at', { ascending: false });
 
     // When a creator is viewing their own songs, include drafts.
-    // Otherwise only show published songs.
+    // Otherwise only show published songs AND enforce admin listing state
+    // (is_listed=true). `is_listed` is the admin kill-switch for pulling a song
+    // from the consumer app without deleting it; admin-side UI toggles this via
+    // useAdminSongActions.toggleListed.
     if (filters?.creatorId && filters?.includeDrafts) {
-        // No is_published filter — show all songs for this creator
+        // No is_published / is_listed filter — show all songs for this creator
     } else {
-        query = query.eq('is_published', true);
+        query = query.eq('is_published', true).eq('is_listed', true);
     }
 
     if (filters?.genre) {
@@ -250,6 +253,11 @@ export async function getSongs(filters?: {
 }
 
 export async function getSongById(id: string): Promise<Song | null> {
+    // NOTE: we intentionally do NOT filter on is_listed here. A song page may
+    // be opened from deep links, collection pages, or history even after admin
+    // delists it, and existing NFT holders must still resolve song metadata
+    // for their library. Listing visibility is enforced at the browse/query
+    // layer (getSongs/getTrendingSongs/getNewReleases).
     const { data, error } = await supabase
         .from('songs')
         .select(`
@@ -276,6 +284,7 @@ export async function getTrendingSongs(limit = 10): Promise<Song[]> {
             )
         `)
         .eq('is_published', true)
+        .eq('is_listed', true) // admin kill-switch — hide delisted songs
         .is('deleted_at', null) // PDF #11 — hide soft-deleted songs
         .order('plays_count', { ascending: false })
         .limit(limit);
@@ -297,6 +306,7 @@ export async function getNewReleases(limit = 10): Promise<Song[]> {
             )
         `)
         .eq('is_published', true)
+        .eq('is_listed', true) // admin kill-switch — hide delisted songs
         .is('deleted_at', null) // PDF #11 — hide soft-deleted songs
         .order('release_date', { ascending: false })
         .limit(limit);

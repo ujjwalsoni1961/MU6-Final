@@ -149,6 +149,17 @@ export default function NFTDetailScreen() {
     // More NFTs (mix of releases and listings)
     const moreNFTs = allNFTs.filter((n) => n.id !== id).slice(0, 10);
 
+    // Determine owner wallet for display — ON-CHAIN IS SOURCE OF TRUTH (PDF #17).
+    // DB ownerWallet is a lagging index; prefer live on-chain ownerOf read.
+    //
+    // This hook MUST be called before any conditional early returns (loading /
+    // !nft) below. React enforces a consistent hook call order across renders
+    // (https://react.dev/link/rules-of-hooks) — placing it after `if (loading)`
+    // or `if (!nft)` caused the "Rendered more hooks than during the previous
+    // render" error when the NFT loaded on the second pass.
+    const onChainTokenId = nft?.onChainTokenId || '';
+    const { owner: onChainOwner } = useOnChainOwnership(onChainTokenId || null);
+
     // ─── Action handlers ───
 
     const handleMint = useCallback(async () => {
@@ -341,10 +352,9 @@ export default function NFTDetailScreen() {
         }
     };
 
-    // Determine owner wallet for display — ON-CHAIN IS SOURCE OF TRUTH (PDF #17).
-    // DB ownerWallet is a lagging index; prefer live on-chain ownerOf read.
-    const onChainTokenId = nft.onChainTokenId || '';
-    const { owner: onChainOwner } = useOnChainOwnership(onChainTokenId || null);
+    // Owner wallet — on-chain read happens above (before early returns) to obey
+    // the Rules of Hooks. Fall back to DB columns only if on-chain read hasn't
+    // resolved yet.
     const ownerWallet = onChainOwner || nft.ownerWallet || nft.owner || '';
 
     // Get the first trade event as mint price reference

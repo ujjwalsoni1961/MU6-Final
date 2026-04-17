@@ -113,11 +113,16 @@ export function useAdminOnChainActivity() {
 
             if (tokenErr) throw tokenErr;
 
-            // 3. Active marketplace listings per wallet
+            // 3. Active marketplace listings per wallet.
+            // NOTE: canonical schema (migration 001) uses `seller_wallet` and
+            // `is_active` — not `seller_wallet_address` / `status`. Earlier
+            // iteration of this hook referenced the wrong column names and
+            // produced "column marketplace_listings.seller_wallet_address does
+            // not exist" on the Wallet & On-Chain Activity screen.
             const { data: listings, error: listErr } = await supabase
                 .from('marketplace_listings')
-                .select('seller_wallet_address, status')
-                .eq('status', 'active');
+                .select('seller_wallet, is_active')
+                .eq('is_active', true);
 
             if (listErr) throw listErr;
 
@@ -133,8 +138,8 @@ export function useAdminOnChainActivity() {
 
             const listingMap = new Map<string, number>();
             for (const l of listings || []) {
-                if (!l.seller_wallet_address) continue;
-                const key = l.seller_wallet_address.toLowerCase();
+                if (!l.seller_wallet) continue;
+                const key = l.seller_wallet.toLowerCase();
                 listingMap.set(key, (listingMap.get(key) || 0) + 1);
             }
 
