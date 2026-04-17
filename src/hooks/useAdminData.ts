@@ -497,7 +497,7 @@ export function useAdminSongSplits(limit = 100) {
     return useAsync(
         async () => {
             const { data, error } = await supabase
-                .from('split_entries')
+                .from('song_rights_splits')
                 .select(`
                     *,
                     song:songs!song_id ( id, title )
@@ -524,33 +524,56 @@ export function useAdminSongSplits(limit = 100) {
 // PAYOUT REQUESTS
 // ────────────────────────────────────────────
 
-export function useAdminPayoutRequests(limit = 50) {
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+
+export function useAdminPayoutRequests(adminProfileId?: string | 'superadmin', limit = 50) {
     return useAsync(
         async () => {
-            const { data, error } = await supabase
-                .from('payout_requests')
-                .select(`
-                    *,
-                    profile:profiles!profile_id ( id, display_name, wallet_address )
-                `)
-                .order('created_at', { ascending: false })
-                .limit(limit);
+            // For the admin dashboard, we can override with 'superadmin' if no specific profile is given.
+            // If the user uses standard 'useAuth' and has a profile ID, we send that.
+            const targetProfile = adminProfileId || 'superadmin';
 
-            if (error) return [];
-            return (data || []).map((row: any) => ({
-                id: row.id,
-                profileName: row.profile?.display_name || 'Unknown',
-                walletAddress: row.profile?.wallet_address || '',
-                amountEur: parseFloat(row.amount_eur) || 0,
-                paymentMethod: row.payment_method || '',
-                status: row.status,
-                adminNotes: row.admin_notes || '',
-                createdAt: row.created_at,
-                processedAt: row.processed_at,
-            }));
+            try {
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-list`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                    },
+                    body: JSON.stringify({ profileId: targetProfile }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Edge function returned ${response.status}`);
+                }
+
+                const result = await response.json();
+                console.log("[useAdminPayoutRequests] Edge Function returned:", result);
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Failed to fetch payout requests');
+                }
+
+                return (result.payouts || []).map((row: any) => ({
+                    id: row.id,
+                    profileId: row.profile_id,
+                    profileName: row.profile?.display_name || 'Unknown',
+                    walletAddress: row.profile?.wallet_address || '',
+                    amountEur: parseFloat(row.amount_eur) || 0,
+                    paymentMethod: row.payment_method || '',
+                    status: row.status,
+                    adminNotes: row.admin_notes || '',
+                    createdAt: row.requested_at,
+                    processedAt: row.processed_at,
+                }));
+            } catch (error: any) {
+                console.error("[useAdminPayoutRequests] Error:", error);
+                throw error;
+            }
         },
         [],
-        [limit],
+        [limit, adminProfileId],
     );
 }
 

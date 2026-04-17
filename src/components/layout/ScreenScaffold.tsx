@@ -16,11 +16,12 @@ interface ScreenScaffoldProps {
     noScroll?: boolean;
     /** External scrollY ref — used when noScroll=true so the parent FlatList drives the header. */
     scrollY?: Animated.Value;
+    refreshControl?: React.ReactElement;
 }
 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-export default function ScreenScaffold({ children, dominantColor, contentContainerStyle, noScroll, scrollY: externalScrollY }: ScreenScaffoldProps) {
+export default function ScreenScaffold({ children, dominantColor, contentContainerStyle, noScroll, scrollY: externalScrollY, refreshControl }: ScreenScaffoldProps) {
     const { isDark, colors } = useTheme();
     const internalScrollY = useRef(new Animated.Value(0)).current;
     const scrollY = externalScrollY || internalScrollY;
@@ -77,6 +78,7 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
                         { useNativeDriver: false }
                     )}
                     scrollEventThrottle={16}
+                    refreshControl={refreshControl}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={[
                         contentContainerStyle,

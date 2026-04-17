@@ -10,6 +10,9 @@ import { supabase } from '../lib/supabase';
 import { showToast } from '../components/admin/AdminActionComponents';
 import { sendVerificationStatusEmail, sendRoyaltyPayoutEmail } from '../services/email';
 
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+
 // ────────────────────────────────────────────
 // Audit log helper
 // ────────────────────────────────────────────
@@ -21,13 +24,65 @@ async function logAuditAction(
     details?: Record<string, any>,
 ) {
     const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from('admin_audit_log').insert({
+    await executeAdminInsert('admin_audit_log', {
         admin_id: user?.id || '00000000-0000-0000-0000-000000000000',
         action,
         target_type: targetType,
         target_id: targetId,
         details: details || {},
     });
+}
+
+async function executeAdminUpdate(table: string, id: string, updates: Record<string, any>) {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+            profileId: 'superadmin',
+            action: 'update',
+            table,
+            id,
+            updates,
+        }),
+    });
+    return response.json();
+}
+
+async function executeAdminDelete(table: string, id: string) {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+            profileId: 'superadmin',
+            action: 'delete',
+            table,
+            id,
+        }),
+    });
+    return response.json();
+}
+
+async function executeAdminInsert(table: string, updates: Record<string, any> | Record<string, any>[]) {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+            profileId: 'superadmin',
+            action: 'insert',
+            table,
+            updates,
+        }),
+    });
+    return response.json();
 }
 
 // ────────────────────────────────────────────
@@ -37,10 +92,7 @@ async function logAuditAction(
 export function useAdminUserActions(refresh: () => void) {
     const toggleActive = useCallback(async (userId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('profiles')
-            .update({ is_active: newValue })
-            .eq('id', userId);
+        const { error } = await executeAdminUpdate('profiles', userId, { is_active: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'enable' : 'disable'} user`, 'error');
@@ -53,10 +105,7 @@ export function useAdminUserActions(refresh: () => void) {
 
     const toggleBlocked = useCallback(async (userId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('profiles')
-            .update({ is_blocked: newValue })
-            .eq('id', userId);
+        const { error } = await executeAdminUpdate('profiles', userId, { is_blocked: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'block' : 'unblock'} user`, 'error');
@@ -69,10 +118,7 @@ export function useAdminUserActions(refresh: () => void) {
 
     const toggleVerified = useCallback(async (userId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('profiles')
-            .update({ is_verified: newValue })
-            .eq('id', userId);
+        const { error } = await executeAdminUpdate('profiles', userId, { is_verified: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'verify' : 'unverify'} artist`, 'error');
@@ -96,10 +142,7 @@ export function useAdminUserActions(refresh: () => void) {
     }, [refresh]);
 
     const changeRole = useCallback(async (userId: string, newRole: string) => {
-        const { error } = await supabase
-            .from('profiles')
-            .update({ role: newRole })
-            .eq('id', userId);
+        const { error } = await executeAdminUpdate('profiles', userId, { role: newRole });
 
         if (error) {
             showToast('Failed to change user role', 'error');
@@ -111,10 +154,7 @@ export function useAdminUserActions(refresh: () => void) {
     }, [refresh]);
 
     const deleteUser = useCallback(async (userId: string) => {
-        const { error } = await supabase
-            .from('profiles')
-            .delete()
-            .eq('id', userId);
+        const { error } = await executeAdminDelete('profiles', userId);
 
         if (error) {
             showToast('Failed to delete user', 'error');
@@ -135,10 +175,7 @@ export function useAdminUserActions(refresh: () => void) {
 export function useAdminSongActions(refresh: () => void) {
     const toggleListed = useCallback(async (songId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('songs')
-            .update({ is_listed: newValue })
-            .eq('id', songId);
+        const { error } = await executeAdminUpdate('songs', songId, { is_listed: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'relist' : 'delist'} song`, 'error');
@@ -151,10 +188,7 @@ export function useAdminSongActions(refresh: () => void) {
 
     const toggleFeatured = useCallback(async (songId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('songs')
-            .update({ is_featured: newValue })
-            .eq('id', songId);
+        const { error } = await executeAdminUpdate('songs', songId, { is_featured: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'feature' : 'unfeature'} song`, 'error');
@@ -166,10 +200,7 @@ export function useAdminSongActions(refresh: () => void) {
     }, [refresh]);
 
     const deleteSong = useCallback(async (songId: string) => {
-        const { error } = await supabase
-            .from('songs')
-            .delete()
-            .eq('id', songId);
+        const { error } = await executeAdminDelete('songs', songId);
 
         if (error) {
             showToast('Failed to delete song', 'error');
@@ -190,10 +221,7 @@ export function useAdminSongActions(refresh: () => void) {
 export function useAdminNFTReleaseActions(refresh: () => void) {
     const toggleActive = useCallback(async (releaseId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('nft_releases')
-            .update({ is_active: newValue })
-            .eq('id', releaseId);
+        const { error } = await executeAdminUpdate('nft_releases', releaseId, { is_active: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'relist' : 'delist'} release`, 'error');
@@ -213,10 +241,7 @@ export function useAdminNFTReleaseActions(refresh: () => void) {
 
 export function useAdminNFTTokenActions(refresh: () => void) {
     const voidToken = useCallback(async (tokenId: string) => {
-        const { error } = await supabase
-            .from('nft_tokens')
-            .update({ is_voided: true })
-            .eq('id', tokenId);
+        const { error } = await executeAdminUpdate('nft_tokens', tokenId, { is_voided: true });
 
         if (error) {
             showToast('Failed to void token', 'error');
@@ -241,74 +266,43 @@ export function useAdminMarketplaceActions(refresh: () => void) {
         if (!newValue) {
             updates.cancelled_at = new Date().toISOString();
         }
-        const { error } = await supabase
-            .from('marketplace_listings')
-            .update(updates)
-            .eq('id', listingId);
+        const { error } = await executeAdminUpdate('marketplace_listings', listingId, updates);
 
         if (error) {
-            showToast(`Failed to ${newValue ? 'relist' : 'delist'} listing`, 'error');
+            showToast(`Failed to ${newValue ? 'activate' : 'deactivate'} listing`, 'error');
             return;
         }
-        await logAuditAction(newValue ? 'relist_listing' : 'delist_listing', 'marketplace_listing', listingId);
-        showToast(`Listing ${newValue ? 'relisted' : 'delisted'} successfully`);
+        await logAuditAction(newValue ? 'activate_listing' : 'deactivate_listing', 'marketplace_listing', listingId);
+        showToast(`Listing ${newValue ? 'activated' : 'deactivated'} successfully`);
         refresh();
     }, [refresh]);
 
-    const toggleFlagged = useCallback(async (listingId: string, currentValue: boolean) => {
-        const newValue = !currentValue;
-        const { error } = await supabase
-            .from('marketplace_listings')
-            .update({ is_flagged: newValue })
-            .eq('id', listingId);
-
-        if (error) {
-            showToast(`Failed to ${newValue ? 'flag' : 'unflag'} listing`, 'error');
-            return;
-        }
-        await logAuditAction(newValue ? 'flag_listing' : 'unflag_listing', 'marketplace_listing', listingId);
-        showToast(`Listing ${newValue ? 'flagged' : 'unflagged'} successfully`);
-        refresh();
-    }, [refresh]);
-
-    return { toggleActive, toggleFlagged };
+    return { toggleActive };
 }
 
-// ────────────────────────────────────────────
-// PAYOUT ACTIONS
-// ────────────────────────────────────────────
-
 export function useAdminPayoutActions(refresh: () => void) {
-    const approvePayout = useCallback(async (payoutId: string) => {
-        // Fetch payout details to determine payment method
-        const { data: payout } = await supabase
-            .from('payout_requests')
-            .select('*, profile:profiles!profile_id (wallet_address)')
-            .eq('id', payoutId)
-            .maybeSingle();
-
-        if (!payout) {
-            showToast('Payout request not found', 'error');
+    const approvePayout = useCallback(async (payout: any, notes?: string) => {
+        if (!payout || !payout.id) {
+            showToast('Payout not found', 'error');
             return;
         }
 
-        let txHash: string | null = null;
+        let txHash: string | undefined;
 
-        // For crypto payouts: send testnet POL via server wallet
-        const recipientWallet = (payout.profile as any)?.wallet_address;
-        if (payout.payment_method === 'crypto_wallet' && recipientWallet) {
+        if (payout.paymentMethod === 'crypto' && payout.amountEur) {
+            const recipientWallet = payout.walletAddress;
             try {
-                const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-                const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
-                const amountWei = BigInt(Math.floor((payout.amount_eur || 0) * 1e18)).toString();
-                const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
+                // Approximate 1 EUR = 0.0003 ETH (hardcoded for demo)
+                const amountEth = payout.amountEur * 0.0003;
+                const amountWei = Math.floor(amountEth * 1e18).toString();
+
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/thirdweb-transfer`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
                     },
                     body: JSON.stringify({
-                        action: 'transferFunds',
                         recipientAddress: recipientWallet,
                         amountWei,
                     }),
@@ -334,30 +328,30 @@ export function useAdminPayoutActions(refresh: () => void) {
         if (txHash) {
             updatePayload.tx_hash = txHash;
         }
-        if (payout.payment_method === 'bank_transfer') {
-            updatePayload.admin_notes = 'Approved — manual bank transfer needed';
+        
+        if (notes) {
+            updatePayload.admin_notes = notes;
+        } else if (payout.paymentMethod === 'bank_transfer') {
+            updatePayload.admin_notes = 'Approved — manual processing completed';
         }
 
-        const { error } = await supabase
-            .from('payout_requests')
-            .update(updatePayload)
-            .eq('id', payoutId);
-
-        if (error) {
+        const result = await executeAdminUpdate('payout_requests', payout.id, updatePayload);
+        
+        if (!result.success) {
             showToast('Failed to approve payout', 'error');
             return;
         }
-        await logAuditAction('approve_payout', 'payout_request', payoutId, { txHash });
-        showToast(txHash ? 'Payout sent on-chain' : 'Payout approved successfully');
+        await logAuditAction('approve_payout', 'payout_request', payout.id, { txHash, notes });
+        showToast(txHash ? 'Payout sent on-chain' : 'Payout approved manually');
 
         // Fire-and-forget: email the artist about payout
         try {
             const { data: { users } } = await supabase.auth.admin.listUsers();
-            const artistUser = users?.find((u: any) => u.id === payout.profile_id);
+            const artistUser = users?.find((u: any) => u.id === payout.profileId);
             if (artistUser?.email) {
                 void sendRoyaltyPayoutEmail(
                     artistUser.email,
-                    (payout.amount_eur || 0).toFixed(4),
+                    (payout.amountEur || 0).toFixed(4),
                     'Your music',
                     'N/A',
                 ).catch(() => {});
@@ -370,16 +364,13 @@ export function useAdminPayoutActions(refresh: () => void) {
     }, [refresh]);
 
     const rejectPayout = useCallback(async (payoutId: string, reason?: string) => {
-        const { error } = await supabase
-            .from('payout_requests')
-            .update({
-                status: 'failed',
-                processed_at: new Date().toISOString(),
-                admin_notes: reason || 'Rejected by admin',
-            })
-            .eq('id', payoutId);
+        const result = await executeAdminUpdate('payout_requests', payoutId, {
+            status: 'failed',
+            processed_at: new Date().toISOString(),
+            admin_notes: reason || 'Rejected by admin',
+        });
 
-        if (error) {
+        if (!result.success) {
             showToast('Failed to reject payout', 'error');
             return;
         }
@@ -398,10 +389,7 @@ export function useAdminPayoutActions(refresh: () => void) {
 export function useAdminTransactionActions(refresh: () => void) {
     const toggleFlagged = useCallback(async (listingId: string, currentValue: boolean) => {
         const newValue = !currentValue;
-        const { error } = await supabase
-            .from('marketplace_listings')
-            .update({ is_flagged: newValue })
-            .eq('id', listingId);
+        const { error } = await executeAdminUpdate('marketplace_listings', listingId, { is_flagged: newValue });
 
         if (error) {
             showToast(`Failed to ${newValue ? 'flag' : 'unflag'} transaction`, 'error');
@@ -445,9 +433,7 @@ export function useAdminNotificationActions(refresh: () => void) {
             is_read: false,
         }));
 
-        const { error } = await supabase
-            .from('notifications')
-            .insert(notifications);
+        const { error } = await executeAdminInsert('notifications', notifications);
 
         if (error) {
             showToast('Failed to send notifications', 'error');

@@ -9,10 +9,11 @@
  * Chain: Polygon Amoy testnet (80002) → Polygon mainnet (137) for production.
  */
 
-import { prepareContractCall, prepareTransaction, readContract, sendTransaction, waitForReceipt } from 'thirdweb';
+import { prepareContractCall, prepareTransaction, readContract, sendTransaction, waitForReceipt, getContract } from 'thirdweb';
 import type { Account } from 'thirdweb/wallets';
 import {
     setClaimConditions as sdkSetClaimConditions,
+    getActiveClaimCondition as sdkGetActiveClaimCondition
 } from 'thirdweb/extensions/erc721';
 import {
     CONTRACTS,
@@ -855,11 +856,22 @@ export async function mintToken(
         // The server wallet has MINTER_ROLE and pays the on-chain claim price from its balance.
         // This runs in the background so the user gets instant purchase confirmation.
         if (isContractReady() && paidOnChain) {
-            serverClaim(
-                buyerWallet,
-                '0', // on-chain price = 0 since buyer already paid the server wallet
-                release.contract_address || CONTRACTS.SONG_NFT,
-            ).then((claimResult) => {
+            // Fetch the current active claim condition price so `serverClaim` sends the EXACT matching value
+            sdkGetActiveClaimCondition({
+                contract: getContract({
+                    client: thirdwebClient,
+                    chain: activeChain,
+                    address: release.contract_address || CONTRACTS.SONG_NFT
+                })
+            }).then((condition) => {
+                const conditionPriceWei = condition.pricePerToken.toString();
+                console.log('[blockchain] Read active condition price:', conditionPriceWei);
+                return serverClaim(
+                    buyerWallet,
+                    conditionPriceWei, // Send EXACT price required by the contract
+                    release.contract_address || CONTRACTS.SONG_NFT,
+                );
+            }).then((claimResult) => {
                 if (claimResult.success && claimResult.txHash) {
                     console.log('[blockchain] Background on-chain mint succeeded, tx:', claimResult.txHash);
                     // Update the DB record with the mint tx hash

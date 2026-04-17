@@ -335,7 +335,7 @@ export default function EarningsScreen() {
 
         setRequestingPayout(true);
         try {
-            const result = await createPayoutRequest(profile.id, availableBalance.availableBalance, bankDetails);
+            const result = await createPayoutRequest(profile.id, availableBalance.availableBalance, bankDetails, bankDetails.paymentMethod);
             if (result.error) {
                 const msg = result.error;
                 Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);

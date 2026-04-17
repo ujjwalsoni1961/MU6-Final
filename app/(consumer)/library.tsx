@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -121,6 +121,18 @@ export default function LibraryScreen() {
             fetchPlaylists();
         }, [refreshLiked, refreshArtists, refreshNFTs, fetchPlaylists])
     );
+
+    const [refreshing, setRefreshing] = useState(false);
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([
+            refreshLiked(),
+            refreshArtists(),
+            refreshNFTs(),
+            fetchPlaylists(),
+        ]);
+        setRefreshing(false);
+    }, [refreshLiked, refreshArtists, refreshNFTs, fetchPlaylists]);
 
     const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
 
@@ -322,6 +334,14 @@ export default function LibraryScreen() {
                             paddingTop: isWeb ? 80 : insets.top + 44,
                             paddingBottom: 100,
                         }}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor={colors.accent.cyan}
+                                colors={[colors.accent.cyan]}
+                            />
+                        }
                         onScroll={Animated.event(
                             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
                             { useNativeDriver: false }
@@ -350,6 +370,14 @@ export default function LibraryScreen() {
                             paddingTop: isWeb ? 80 : insets.top + 44,
                             paddingBottom: 100,
                         }}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor={colors.accent.cyan}
+                                colors={[colors.accent.cyan]}
+                            />
+                        }
                         onScroll={Animated.event(
                             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
                             { useNativeDriver: false }

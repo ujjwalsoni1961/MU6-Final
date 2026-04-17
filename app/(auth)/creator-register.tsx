@@ -284,6 +284,7 @@ function RegistrationForm({ form, errors, update }: {
                     value={form.country}
                     onChange={(v) => update('country', v)}
                     placeholder="Select your country"
+                    searchable
                 />
             </FormField>
 

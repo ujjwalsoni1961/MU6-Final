@@ -391,8 +391,11 @@ export function useArtistById(id: string | undefined) {
             if (!id) return null;
             const a = await db.getArtistById(id);
             if (!a) return null;
-            const songs = await db.getArtistSongs(id);
-            return adaptArtist(a, { totalSongs: songs.length });
+            const [songs, followers] = await Promise.all([
+                db.getArtistSongs(id),
+                db.getFollowersCount(id)
+            ]);
+            return adaptArtist(a, { totalSongs: songs.length, followers });
         },
         null as Artist | null,
         [id],

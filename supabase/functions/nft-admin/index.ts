@@ -132,36 +132,35 @@ Deno.serve(async (req: Request) => {
 
         // ── Server Claim ──
         if (action === "serverClaim") {
-            const { receiverAddress, contractAddress, onChainPriceWei } = body;
+            const { receiverAddress, contractAddress } = body;
             if (!receiverAddress) return jsonResponse({ error: "Missing receiverAddress" }, 400);
 
-            const priceWei = onChainPriceWei || "0";
-
-            const requestBody = {
-                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
-                params: [{
-                    contractAddress: contractAddress || DEFAULT_CONTRACT,
-                    method: "function claim(address _receiver, uint256 _quantity, address _currency, uint256 _pricePerToken, (bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data)",
-                    params: [
-                        receiverAddress,
-                        "1",
-                        NATIVE_TOKEN,
-                        priceWei,
-                        [[], "0", "0", NATIVE_TOKEN],
-                        "0x",
-                    ],
-                    txOverrides: {
-                        value: priceWei,
-                    },
-                }],
+            const targetContract = contractAddress || DEFAULT_CONTRACT;
+            const url = `https://engine.thirdweb.com/contract/${CHAIN_ID}/${targetContract}/erc721/claim-to`;
+            const txBody = {
+                receiver: receiverAddress,
+                quantity: "1"
             };
 
-            console.log("[nft-admin] serverClaim to:", receiverAddress, "price:", priceWei);
-            const { ok, status, result } = await callEngine(requestBody);
-            console.log("[nft-admin] serverClaim response:", status, JSON.stringify(result));
-            if (!ok) return jsonResponse({ success: false, error: result }, status);
+            console.log("[nft-admin] serverClaim to:", receiverAddress, "endpoint:", url);
+            const twResponse = await fetch(url, {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json", 
+                    "x-secret-key": THIRDWEB_SECRET_KEY,
+                    "x-backend-wallet-address": SERVER_WALLET
+                },
+                body: JSON.stringify(txBody),
+            });
 
-            const txId = result?.result?.transactions?.[0]?.id;
+            const resultText = await twResponse.text();
+            console.log("[nft-admin] serverClaim response:", twResponse.status, resultText);
+            let result;
+            try { result = JSON.parse(resultText); } catch { result = { raw: resultText }; }
+
+            if (!twResponse.ok) return jsonResponse({ success: false, error: result }, twResponse.status);
+
+            const txId = result?.result?.queueId || result?.result?.id;
             if (txId) {
                 const { confirmed, hash, error } = await waitForTx(txId);
                 if (!confirmed) return jsonResponse({ success: false, error: error || "serverClaim tx did not confirm" }, 500);

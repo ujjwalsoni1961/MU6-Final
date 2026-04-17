@@ -31,9 +31,27 @@ const getGlassTabBar = (isDark: boolean, colors: any, insets: EdgeInsets) => ({
 });
 
 /* ─── Layout Entry Point ─── */
+import { useAuth } from '../../src/context/AuthContext';
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, Text } from 'react-native';
+
 export default function ConsumerLayout() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
+    const { isConnected, isLoading } = useAuth();
+
+    if (isLoading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: isDark ? colors.bg.base : '#f8fafc' }}>
+                <ActivityIndicator size="large" color={colors.accent.cyan} />
+            </View>
+        );
+    }
+
+    // Guard: Redirect to login if not authenticated (handles web refresh on deep links)
+    if (!isConnected) {
+        return <Redirect href="/(auth)/login" />;
+    }
 
     return (
         <PlayerProvider>

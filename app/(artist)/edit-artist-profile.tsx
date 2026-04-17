@@ -377,6 +377,7 @@ export default function EditArtistProfileScreen() {
                             value={country}
                             onChange={setCountry}
                             placeholder="Select your country"
+                            searchable
                         />
                         <View style={{
                             flexDirection: 'row', alignItems: 'center',

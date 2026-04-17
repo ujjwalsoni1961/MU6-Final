@@ -9,6 +9,9 @@
 import { supabase } from '../lib/supabase';
 import { sendSongPublishedEmail, sendStreamMilestoneEmail } from './email';
 
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+
 // ────────────────────────────────────────────
 // Types (mirrors DB schema)
 // ────────────────────────────────────────────
@@ -210,7 +213,22 @@ export async function getSongs(filters?: {
     }
     if (filters?.search) {
         const s = filters.search;
-        query = query.or(`title.ilike.%${s}%,album.ilike.%${s}%,genre.ilike.%${s}%`);
+        
+        // Find artists whose display_name matches the search
+        const { data: matchedArtists } = await client
+            .from('profiles')
+            .select('id')
+            .eq('role', 'creator')
+            .ilike('display_name', `%${s}%`)
+            .limit(10);
+            
+        const artistIds = matchedArtists?.map(a => a.id) || [];
+        
+        if (artistIds.length > 0) {
+            query = query.or(`title.ilike.%${s}%,album.ilike.%${s}%,genre.ilike.%${s}%,creator_id.in.(${artistIds.join(',')})`);
+        } else {
+            query = query.or(`title.ilike.%${s}%,album.ilike.%${s}%,genre.ilike.%${s}%`);
+        }
     }
     if (filters?.creatorId) {
         query = query.eq('creator_id', filters.creatorId);
@@ -1078,6 +1096,13 @@ export async function isFollowing(followerId: string, followingId: string): Prom
     return !!data;
 }
 
+export async function getFollowersCount(artistId: string): Promise<number> {
+    const { count } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('following_id', artistId);
+    return count || 0;
+}
 // ────────────────────────────────────────────
 // CREATOR DASHBOARD
 // ────────────────────────────────────────────
@@ -1777,22 +1802,23 @@ export async function getCreatorNFTSales(profileId: string, limit = 50): Promise
     // Get nft_tokens for these releases (primary sales)
     const { data: tokens } = await supabase
         .from('nft_tokens')
-        .select('id, release_id, owner_wallet, price_paid_token, price_paid_eur_at_sale, tx_hash, created_at, edition_number')
-        .in('release_id', releaseIds)
-        .order('created_at', { ascending: false })
+        .select('id, nft_release_id, owner_wallet_address, last_sale_price_eth, last_sale_tx_hash, minted_at')
+        .in('nft_release_id', releaseIds)
+        .order('minted_at', { ascending: false })
         .limit(limit);
 
     return (tokens || []).map((t: any) => {
-        const songId = releaseSongMap.get(t.release_id) || '';
+        const songId = releaseSongMap.get(t.nft_release_id) || '';
         return {
             id: t.id,
             songTitle: songTitleMap.get(songId) || 'Unknown',
-            buyerWallet: t.owner_wallet || '',
-            pricePaidToken: parseFloat(t.price_paid_token) || 0,
-            pricePaidEurAtSale: parseFloat(t.price_paid_eur_at_sale) || 0,
-            txHash: t.tx_hash || null,
-            purchasedAt: t.created_at,
-            editionNumber: t.edition_number || 0,
+            buyerWallet: t.owner_wallet_address || '',
+            pricePaidToken: parseFloat(t.last_sale_price_eth) || 0,
+            pricePaidEurAtSale: 0, // Not stored directly in `nft_tokens` currently
+            txHash: t.last_sale_tx_hash || null,
+            purchasedAt: t.minted_at,
+            editionNumber: 0, // Not stored directly in `nft_tokens` schema
+
             saleType: 'primary' as const,
         };
     });
@@ -1803,10 +1829,15 @@ export async function getCreatorNFTSales(profileId: string, limit = 50): Promise
 // ────────────────────────────────────────────
 
 export interface BankDetails {
-    bankName: string;
-    accountHolderName: string;
-    accountNumber: string;
-    routingCode: string;
+    paymentMethod?: string;
+    accountHolderName?: string;
+    ibanOrAddress?: string;
+    taxId?: string;
+    payoutCountry?: string;
+    // Fallbacks just in case
+    bankName?: string;
+    accountNumber?: string;
+    routingCode?: string;
 }
 
 export interface PayoutRequest {
@@ -1906,7 +1937,7 @@ export async function createPayoutRequest(
     bankDetails: BankDetails,
     paymentMethod: string = 'bank_transfer',
 ): Promise<{ id: string | null; error?: string }> {
-    // Validate against available balance
+    // Validate against available balance locally
     const balance = await getArtistBalance(profileId);
     if (amountEur > balance.availableBalance) {
         return {
@@ -1915,48 +1946,65 @@ export async function createPayoutRequest(
         };
     }
 
-    const { data, error } = await supabase
-        .from('payout_requests')
-        .insert({
-            profile_id: profileId,
-            amount_eur: amountEur,
-            payment_method: paymentMethod,
-            payment_details: bankDetails,
-            status: 'pending',
-        })
-        .select('id')
-        .single();
+    try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-request`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+                profileId,
+                amountEur,
+                paymentMethod,
+                bankDetails,
+            }),
+        });
 
-    if (error || !data) {
-        console.error('[db] createPayoutRequest error:', error);
-        return { id: null, error: error?.message || 'Failed to create payout request' };
+        const result = await response.json();
+        if (!result.success) {
+            return { id: null, error: result.error || 'Failed to request payout via edge function' };
+        }
+        return { id: result.id };
+    } catch (err: any) {
+        console.error('[db] createPayoutRequest edge error:', err);
+        return { id: null, error: err.message };
     }
-    return { id: data.id };
 }
 
 /** Get payout requests for a specific user */
 export async function getPayoutRequests(profileId: string): Promise<PayoutRequest[]> {
-    const { data, error } = await supabase
-        .from('payout_requests')
-        .select('*')
-        .eq('profile_id', profileId)
-        .order('requested_at', { ascending: false });
+    try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-list`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ profileId }),
+        });
 
-    if (error || !data) {
-        console.error('[db] getPayoutRequests error:', error);
+        const result = await response.json();
+        if (!result.success || !result.payouts) {
+            console.error('[db] getPayoutRequests edge error:', result.error);
+            return [];
+        }
+
+        return result.payouts.map((row: any) => ({
+            id: row.id,
+            profileId: row.profile_id,
+            amountEur: parseFloat(row.amount_eur) || 0,
+            paymentMethod: row.payment_method,
+            paymentDetails: row.payment_details,
+            status: row.status,
+            requestedAt: row.requested_at,
+            processedAt: row.processed_at,
+            adminNotes: row.admin_notes,
+        }));
+    } catch (err: any) {
+        console.error('[db] getPayoutRequests error:', err);
         return [];
     }
-    return data.map((row: any) => ({
-        id: row.id,
-        profileId: row.profile_id,
-        amountEur: parseFloat(row.amount_eur) || 0,
-        paymentMethod: row.payment_method,
-        paymentDetails: row.payment_details,
-        status: row.status,
-        requestedAt: row.requested_at,
-        processedAt: row.processed_at,
-        adminNotes: row.admin_notes,
-    }));
 }
 
 // ────────────────────────────────────────────

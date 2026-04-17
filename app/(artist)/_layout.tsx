@@ -150,9 +150,26 @@ function CreatorSidebar() {
     );
 }
 
+import { Redirect } from 'expo-router';
+import { ActivityIndicator } from 'react-native';
+
 /* ─── Layout Entry Point ─── */
 export default function CreatorLayout() {
     const { isDark, colors } = useTheme();
+    const { isConnected, isLoading } = useAuth();
+
+    if (isLoading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg.base }}>
+                <ActivityIndicator size="large" color="#38b4ba" />
+            </View>
+        );
+    }
+
+    // Guard: Redirect to login if not authenticated (handles web refresh on deep links)
+    if (!isConnected) {
+        return <Redirect href="/(auth)/login" />;
+    }
 
     const tabScreens = (
         <Tabs

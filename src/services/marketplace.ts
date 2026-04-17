@@ -10,12 +10,14 @@
  *   - 5% → artist royalty via EIP-2981 (set on NFT contract)
  */
 
-import { prepareContractCall, readContract, sendTransaction } from 'thirdweb';
+import { prepareContractCall, readContract, sendTransaction, waitForReceipt } from 'thirdweb';
 import type { Account } from 'thirdweb/wallets';
 import {
     CONTRACTS,
     getSongNFTContract,
     getMarketplaceContract,
+    thirdwebClient,
+    activeChain
 } from '../lib/thirdweb';
 import { supabase } from '../lib/supabase';
 import { getTokenToEurRate } from './fxRate';
@@ -122,8 +124,20 @@ export async function createMarketplaceListing(
                 method: 'function setApprovalForAll(address operator, bool approved)',
                 params: [marketplaceAddr, true],
             });
-            await sendTransaction({ account, transaction: approveTx });
-            console.log('[marketplace] Marketplace approval granted');
+            const approveResult = await sendTransaction({ account, transaction: approveTx });
+            
+            console.log('[marketplace] Waiting for approval transaction receipt...', approveResult.transactionHash);
+            const receipt = await waitForReceipt({
+                client: thirdwebClient,
+                chain: activeChain,
+                transactionHash: approveResult.transactionHash,
+            });
+
+            if (receipt.status === 'reverted') {
+                return { success: false, error: 'Approval transaction reverted' };
+            }
+
+            console.log('[marketplace] Marketplace approval granted and confirmed');
         }
 
         // 3. Create on-chain listing

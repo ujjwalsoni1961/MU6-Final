@@ -347,6 +347,15 @@ export default function NFTDetailScreen() {
     const mintEvent = tradeHistory.find(t => t.type === 'mint');
     const lastSaleEvent = [...tradeHistory].reverse().find(t => t.type === 'sale');
 
+    const parsedBenefits = (() => {
+        if (!nft?.benefits) return [];
+        if (typeof nft.benefits === 'string') {
+            try { return JSON.parse(nft.benefits); } catch { return []; }
+        }
+        if (Array.isArray(nft.benefits)) return nft.benefits;
+        return [];
+    })();
+
     return (
         <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
             <View style={[
@@ -528,7 +537,7 @@ export default function NFTDetailScreen() {
                             </AnimatedPressable>
 
                             {/* PayEmbed — fiat card payment option (web only) */}
-                            {isWeb && !actionSuccess && walletAddress && (
+                            {isWeb && !actionSuccess && walletAddress && typeof PayEmbed !== 'undefined' && PayEmbed && (
                                 (isPrimary && canMint && !isSoldOut) || (!isPrimary && listing && !isOwnListing)
                             ) && (
                                 <View style={{ marginTop: 16 }}>
@@ -561,13 +570,13 @@ export default function NFTDetailScreen() {
                         </GlassCard>
 
                         {/* Benefits / Perks Section */}
-                        {nft.benefits && nft.benefits.length > 0 && (
+                        {parsedBenefits.length > 0 && (
                             <GlassCard intensity="light" style={{ marginBottom: 16 }}>
                                 <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>
                                     This NFT includes
                                 </Text>
-                                {nft.benefits.map((benefit, idx) => (
-                                    <View key={idx} style={{ flexDirection: 'row', gap: 10, marginBottom: idx < nft.benefits!.length - 1 ? 10 : 0 }}>
+                                {parsedBenefits.map((benefit: any, idx: number) => (
+                                    <View key={idx} style={{ flexDirection: 'row', gap: 10, marginBottom: idx < parsedBenefits.length - 1 ? 10 : 0 }}>
                                         <View style={{
                                             width: 22, height: 22, borderRadius: 11,
                                             backgroundColor: 'rgba(16,185,129,0.15)',

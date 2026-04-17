@@ -87,6 +87,93 @@ export function ConfirmModal({
     );
 }
 
+export function PromptModal({
+    visible,
+    title,
+    message,
+    inputPlaceholder = 'Enter details...',
+    confirmLabel = 'Confirm',
+    confirmColor = '#f87171',
+    onConfirm,
+    onCancel,
+    loading = false,
+}: {
+    visible: boolean;
+    title: string;
+    message: string;
+    inputPlaceholder?: string;
+    confirmLabel?: string;
+    confirmColor?: string;
+    onConfirm: (text: string) => void;
+    onCancel: () => void;
+    loading?: boolean;
+}) {
+    const { colors } = useTheme();
+    const [text, setText] = useState('');
+
+    useEffect(() => {
+        if (!visible) setText('');
+    }, [visible]);
+
+    return (
+        <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+            <View style={{
+                flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+                justifyContent: 'center', alignItems: 'center', padding: 20,
+            }}>
+                <View style={{
+                    backgroundColor: colors.bg.card, borderRadius: 16, padding: 24,
+                    width: isWeb ? 420 : '100%', maxWidth: 420,
+                    borderWidth: 1, borderColor: colors.border.glass,
+                }}>
+                    <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+                        {title}
+                    </Text>
+                    <Text style={{ color: colors.text.secondary, fontSize: 14, lineHeight: 20, marginBottom: 16 }}>
+                        {message}
+                    </Text>
+                    <TextInput
+                        value={text}
+                        onChangeText={setText}
+                        placeholder={inputPlaceholder}
+                        placeholderTextColor={colors.text.muted}
+                        style={{
+                            backgroundColor: colors.bg.glass, borderRadius: 10,
+                            borderWidth: 1, borderColor: colors.border.glass,
+                            padding: 12, color: colors.text.primary, fontSize: 14, marginBottom: 24,
+                            ...(isWeb ? { outlineStyle: 'none' } as any : {}),
+                        }}
+                    />
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+                        <TouchableOpacity
+                            onPress={onCancel}
+                            disabled={loading}
+                            style={{
+                                paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
+                                backgroundColor: colors.bg.glass,
+                            }}
+                        >
+                            <Text style={{ color: colors.text.secondary, fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={() => onConfirm(text)}
+                            disabled={loading}
+                            style={{
+                                paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
+                                backgroundColor: confirmColor, opacity: loading ? 0.6 : 1,
+                            }}
+                        >
+                            <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
+                                {loading ? 'Processing...' : confirmLabel}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+}
+
 /* ─── Action Button (icon + label) ─── */
 export function ActionButton({
     label,

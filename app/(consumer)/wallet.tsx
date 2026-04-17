@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, ScrollView, Animated, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Animated, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
@@ -143,9 +143,10 @@ export default function WalletScreen() {
     const router = useRouter();
     const { walletAddress } = useAuth();
     const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+    const [refreshing, setRefreshing] = useState(false);
 
     // Fetch real on-chain balance
-    const { data: balanceData, isLoading: balanceLoading } = useWalletBalance({
+    const { data: balanceData, isLoading: balanceLoading, refetch: refetchBalance } = useWalletBalance({
         chain: activeChain,
         address: walletAddress || undefined,
         client: thirdwebClient,
@@ -156,8 +157,22 @@ export default function WalletScreen() {
         : '0.00';
     const balanceSymbol = balanceData?.symbol || 'POL';
 
-    // User-scoped activity
     const { data: activities, loading: activityLoading, error: activityError, refresh: refreshActivity } = useUserActivity(activeFilter);
+
+    const onRefresh = React.useCallback(async () => {
+        setRefreshing(true);
+        try {
+            const promises = [refreshActivity()];
+            if (refetchBalance) {
+                promises.push(refetchBalance());
+            }
+            await Promise.all(promises);
+        } catch (e) {
+            console.log(e);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [refreshActivity, refetchBalance]);
 
     const truncatedAddress = walletAddress
         ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
@@ -178,6 +193,14 @@ export default function WalletScreen() {
                         { useNativeDriver: false }
                     )}
                     scrollEventThrottle={16}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            tintColor={colors.accent.purple}
+                            colors={[colors.accent.purple]}
+                        />
+                    }
                 >
                     {/* Header */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 32 }}>

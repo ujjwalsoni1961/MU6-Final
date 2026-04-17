@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -53,6 +53,7 @@ export default function ProfileScreen() {
     const { profile, walletAddress, role } = useAuth();
     const { isDark, colors } = useTheme();
     const { fiatCurrency } = useCurrency();
+    const [refreshing, setRefreshing] = React.useState(false);
 
     // Real data hooks
     const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
@@ -66,6 +67,16 @@ export default function ProfileScreen() {
             refreshActivity();
         }, [refreshNFTs, refreshLiked, refreshActivity])
     );
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([
+            refreshNFTs(),
+            refreshLiked(),
+            refreshActivity(),
+        ]);
+        setRefreshing(false);
+    }, [refreshNFTs, refreshLiked, refreshActivity]);
 
     const displayName = profile?.displayName || 'Anonymous';
     const truncatedWallet = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '0x0000...0000';
@@ -115,6 +126,14 @@ export default function ProfileScreen() {
                     paddingBottom: 32,
                 }}
                 showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor={colors.accent.cyan}
+                        colors={[colors.accent.cyan]}
+                    />
+                }
             >
                 {/* Header Row */}
                 {!isWeb && (

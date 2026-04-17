@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Platform, ActivityIndicator, RefreshControl } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TrendingUp, DollarSign, Music, Gem, Users, ArrowRight, UserCog, Settings, LogOut, Percent } from 'lucide-react-native';
@@ -155,47 +155,52 @@ function CollaboratorDashboard() {
 
     const Container = isWeb ? View : SafeAreaView;
 
-    useEffect(() => {
+    const fetchSplits = async () => {
         if (!profile?.id) return;
-        let cancelled = false;
+        try {
+            const { data, error } = await supabase
+                .from('song_rights_splits')
+                .select(`
+                    id, role, share_percent, party_name, party_email,
+                    song:songs!song_id (
+                        id, title, cover_path, creator_id,
+                        creator:profiles!creator_id ( display_name )
+                    )
+                `)
+                .or(`linked_profile_id.eq.${profile.id},party_email.eq.${profile.email}`);
 
-        (async () => {
-            try {
-                // Get all splits where this user is a collaborator
-                const { data, error } = await supabase
-                    .from('song_rights_splits')
-                    .select(`
-                        id, role, share_percent, party_name, party_email,
-                        song:songs!song_id (
-                            id, title, cover_path, creator_id,
-                            creator:profiles!creator_id ( display_name )
-                        )
-                    `)
-                    .or(`linked_profile_id.eq.${profile.id},party_email.eq.${profile.email}`);
-
-                if (cancelled) return;
-
-                if (!error && data) {
-                    const mapped = data.map((row: any) => ({
-                        id: row.id,
-                        role: row.role,
-                        share_percent: row.share_percent,
-                        song_id: row.song?.id,
-                        song_title: row.song?.title || 'Unknown Song',
-                        cover_path: row.song?.cover_path,
-                        artist_name: row.song?.creator?.display_name || 'Unknown Artist',
-                        split_contract_address: null,
-                    }));
-                    setSplits(mapped);
-                }
-            } catch (err) {
-                console.error('[CollaboratorDashboard] Error loading splits:', err);
-            } finally {
-                if (!cancelled) setLoading(false);
+            if (!error && data) {
+                const mapped = data.map((row: any) => ({
+                    id: row.id,
+                    role: row.role,
+                    share_percent: row.share_percent,
+                    song_id: row.song?.id,
+                    song_title: row.song?.title || 'Unknown Song',
+                    cover_path: row.song?.cover_path,
+                    artist_name: row.song?.creator?.display_name || 'Unknown Artist',
+                    split_contract_address: null,
+                }));
+                setSplits(mapped);
             }
-        })();
+        } catch (err) {
+            console.error('[CollaboratorDashboard] Error loading splits:', err);
+        }
+    };
 
-        return () => { cancelled = true; };
+    useEffect(() => {
+        let mounted = true;
+        setLoading(true);
+        fetchSplits().finally(() => {
+            if (mounted) setLoading(false);
+        });
+        return () => { mounted = false; };
+    }, [profile?.id, profile?.email]);
+
+    const [refreshing, setRefreshing] = useState(false);
+    const onRefresh = React.useCallback(async () => {
+        setRefreshing(true);
+        await fetchSplits();
+        setRefreshing(false);
     }, [profile?.id, profile?.email]);
 
     const totalSplits = splits.length;
@@ -217,6 +222,14 @@ function CollaboratorDashboard() {
                 style={{ flex: 1 }}
                 contentContainerStyle={{ padding: isWeb ? 32 : 16, paddingBottom: 40 }}
                 showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor={colors.accent.cyan}
+                        colors={[colors.accent.cyan]}
+                    />
+                }
             >
                 {/* Header */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -406,8 +419,17 @@ function ArtistDashboard() {
     const { isDark, colors } = useTheme();
     const router = useRouter();
     const { data: dashboard, loading: loadingDashboard, error: dashboardError, refresh: refreshDashboard } = useCreatorDashboard();
-    const { data: creatorSongs, loading: loadingSongs } = useCreatorSongs();
-    const { data: royalties } = useCreatorRoyalties();
+    const { data: creatorSongs, loading: loadingSongs, refresh: refreshSongs } = useCreatorSongs();
+    const { data: royalties, refresh: refreshRoyalties } = useCreatorRoyalties();
+
+    const [refreshing, setRefreshing] = useState(false);
+    const onRefresh = React.useCallback(() => {
+        setRefreshing(true);
+        refreshDashboard();
+        refreshSongs();
+        refreshRoyalties();
+        setTimeout(() => setRefreshing(false), 500);
+    }, [refreshDashboard, refreshSongs, refreshRoyalties]);
 
     const topSongs = [...creatorSongs].sort((a, b) => b.plays - a.plays).slice(0, 6);
 
@@ -446,6 +468,14 @@ function ArtistDashboard() {
                 style={{ flex: 1 }}
                 contentContainerStyle={{ padding: isWeb ? 32 : 16, paddingBottom: 40 }}
                 showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor={colors.accent.cyan}
+                        colors={[colors.accent.cyan]}
+                    />
+                }
             >
                 {/* Header */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>

@@ -4,8 +4,9 @@ import { View, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { ThirdwebProvider } from 'thirdweb/react';
+import { ThirdwebProvider, AutoConnect } from 'thirdweb/react';
 import AnimatedBackground from '../src/components/shared/AnimatedBackground';
+import { thirdwebClient, supportedWallets } from '../src/lib/thirdweb';
 
 import { ThemeProvider, useTheme } from '../src/context/ThemeContext';
 import { AuthProvider } from '../src/context/AuthContext';
@@ -37,6 +38,7 @@ export default function RootLayout() {
     return (
         <SafeAreaProvider>
             <ThirdwebProvider>
+                <AutoConnect client={thirdwebClient} wallets={supportedWallets} />
                 <ThemeProvider>
                     <AuthProvider>
                         <AdminAuthProvider>

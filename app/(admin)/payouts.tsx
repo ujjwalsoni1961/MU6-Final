@@ -2,33 +2,35 @@ import React, { useState } from 'react';
 import { View, Text, Platform } from 'react-native';
 import { CreditCard, CheckCircle, XCircle } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
-import { ActionButton, ConfirmModal, RowActions } from '../../src/components/admin/AdminActionComponents';
+import { ActionButton, PromptModal, RowActions } from '../../src/components/admin/AdminActionComponents';
 import { useAdminPayoutRequests } from '../../src/hooks/useAdminData';
 import { useAdminPayoutActions } from '../../src/hooks/useAdminActions';
 import { useTheme } from '../../src/context/ThemeContext';
+import { useAuth } from '../../src/context/AuthContext';
 
 const isWeb = Platform.OS === 'web';
 
 export default function AdminPayoutsScreen() {
-    const { data: payouts, loading, error, refresh } = useAdminPayoutRequests();
+    const { profile } = useAuth();
+    const { data: payouts, loading, error, refresh } = useAdminPayoutRequests(profile?.id, 50);
     const actions = useAdminPayoutActions(refresh);
     const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string } | null>(null);
-    const [approveTarget, setApproveTarget] = useState<{ id: string; name: string; amount: number } | null>(null);
+    const [approveTarget, setApproveTarget] = useState<any | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
     const { colors } = useTheme();
 
-    const handleApprove = async () => {
+    const handleApprove = async (notes: string) => {
         if (!approveTarget) return;
         setActionLoading(true);
-        await actions.approvePayout(approveTarget.id);
-        setActionLoading(false);
+        await actions.approvePayout(approveTarget, notes);
         setApproveTarget(null);
+        setActionLoading(false);
     };
 
-    const handleReject = async () => {
+    const handleReject = async (notes: string) => {
         if (!rejectTarget) return;
         setActionLoading(true);
-        await actions.rejectPayout(rejectTarget.id);
+        await actions.rejectPayout(rejectTarget.id, notes);
         setActionLoading(false);
         setRejectTarget(null);
     };
@@ -46,7 +48,7 @@ export default function AdminPayoutsScreen() {
     return (
         <AdminScreen
             title="Payout Requests"
-            subtitle={!loading ? `${payouts.length} requests` : undefined}
+            subtitle={!loading ? `${payouts.length} requests (Role: ${profile?.role || 'none'})` : 'Loading...'}
             loading={loading}
             error={error}
             onRetry={refresh}
@@ -125,7 +127,7 @@ export default function AdminPayoutsScreen() {
                                                 icon={<CheckCircle size={12} color={colors.status.success} />}
                                                 label="Approve"
                                                 color={colors.status.success}
-                                                onPress={() => setApproveTarget({ id: p.id, name: p.profileName, amount: p.amountEur })}
+                                                onPress={() => setApproveTarget(p)}
                                             />
                                             <ActionButton
                                                 icon={<XCircle size={12} color={colors.status.error} />}
@@ -142,10 +144,11 @@ export default function AdminPayoutsScreen() {
                 }}
             />
 
-            <ConfirmModal
+            <PromptModal
                 visible={!!approveTarget}
-                title="Approve Payout"
-                message={`Approve payout of ${approveTarget?.amount?.toFixed(2)} EUR to "${approveTarget?.name}"?`}
+                title="Finish/Approve Payout"
+                message={`Approve payout of ${approveTarget?.amount?.toFixed(2)} EUR to "${approveTarget?.name}"?\nAdd an optional reference number or notes below:`}
+                inputPlaceholder="e.g. Bank Transaction ID 1234..."
                 confirmLabel="Approve"
                 confirmColor="#22c55e"
                 onConfirm={handleApprove}
@@ -153,10 +156,11 @@ export default function AdminPayoutsScreen() {
                 loading={actionLoading}
             />
 
-            <ConfirmModal
+            <PromptModal
                 visible={!!rejectTarget}
                 title="Reject Payout"
-                message={`Are you sure you want to reject the payout request from "${rejectTarget?.name}"?`}
+                message={`Are you sure you want to reject the payout request from "${rejectTarget?.name}"?\nPlease provide a reason:`}
+                inputPlaceholder="Reason for rejection..."
                 confirmLabel="Reject"
                 confirmColor="#ef4444"
                 onConfirm={handleReject}

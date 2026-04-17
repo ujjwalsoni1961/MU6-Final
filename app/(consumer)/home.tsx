@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Animated, Platform, useWindowDimensions, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, Animated, Platform, useWindowDimensions, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useRouter } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
@@ -112,6 +112,7 @@ function SectionEmpty({ message }: { message: string }) {
 
 /* ─── Main Screen ─── */
 export default function HomeScreen() {
+    const [refreshing, setRefreshing] = React.useState(false);
     const router = useRouter();
     const { width } = useWindowDimensions();
     const { isDark, colors } = useTheme();
@@ -123,6 +124,17 @@ export default function HomeScreen() {
     const { data: newReleases, loading: loadingNew, error: errorNew, refresh: refreshNew } = useNewReleases(6);
     const { data: artists, loading: loadingArtists, error: errorArtists, refresh: refreshArtists } = useArtists(10);
     const { data: nftDrops, loading: loadingNFTs, error: errorNFTs, refresh: refreshNFTs } = useNFTReleases();
+
+    const onRefresh = React.useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([
+            refreshTrending(),
+            refreshNew(),
+            refreshArtists(),
+            refreshNFTs(),
+        ]);
+        setRefreshing(false);
+    }, [refreshTrending, refreshNew, refreshArtists, refreshNFTs]);
 
     // Quick play chunks
     const quickPlaySongs = trendingSongs.slice(0, 16);
@@ -137,6 +149,14 @@ export default function HomeScreen() {
         <ScreenScaffold
             dominantColor="#38b4ba"
             contentContainerStyle={{ paddingBottom: 100 }}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    tintColor={colors.accent.cyan}
+                    colors={[colors.accent.cyan]}
+                />
+            }
         >
             <View style={[
                 isWeb ? { maxWidth: 1400, width: '100%', alignSelf: 'center' } : { flex: 1 }

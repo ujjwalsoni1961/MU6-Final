@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Zap, Tag, X } from 'lucide-react-native';
@@ -47,6 +47,16 @@ export default function MarketplaceScreen() {
             refreshListings();
         }, [refreshReleases, refreshListings])
     );
+
+    const [refreshing, setRefreshing] = useState(false);
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await Promise.all([
+            refreshReleases(),
+            refreshListings(),
+        ]);
+        setRefreshing(false);
+    }, [refreshReleases, refreshListings]);
 
     // Merge drops + listings into a unified list
     const allItems: MarketplaceItem[] = useMemo(() => {
@@ -202,6 +212,14 @@ export default function MarketplaceScreen() {
                         paddingBottom: 100,
                     }}
                     showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            tintColor={colors.accent.cyan}
+                            colors={[colors.accent.cyan]}
+                        />
+                    }
                     onScroll={Animated.event(
                         [{ nativeEvent: { contentOffset: { y: scrollY } } }],
                         { useNativeDriver: false }

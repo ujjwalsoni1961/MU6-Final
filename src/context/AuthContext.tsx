@@ -132,6 +132,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Auto-sync when wallet connects/changes
     useEffect(() => {
+        let mounted = true;
+        let timer: NodeJS.Timeout;
+
         if (signingOutRef.current) {
             // During sign-out, just clear state without re-syncing
             setProfile(null);
@@ -143,12 +146,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             syncProfile(walletAddress);
         } else if (!isAutoConnecting) {
             // Only clear state if Thirdweb is done trying to auto-reconnect.
-            // Without this check, a page refresh clears the wallet state before
-            // Thirdweb has a chance to restore the session from localStorage.
-            setProfile(null);
-            setIsLoading(false);
+            // Add a small 800ms debounce because on web refresh, isAutoConnecting
+            // might be 'false' for a split second before AutoConnect fully mounts.
+            timer = setTimeout(() => {
+                if (mounted) {
+                    setProfile(null);
+                    setIsLoading(false);
+                }
+            }, 800);
         }
-        // Keep isLoading=true while auto-connecting with no wallet yet
+        
+        return () => {
+            mounted = false;
+            if (timer) clearTimeout(timer);
+        };
     }, [walletAddress, syncProfile, isAutoConnecting]);
 
     return (

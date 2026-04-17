@@ -17,13 +17,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
     Settings as SettingsIcon, UserCog, CreditCard, LogOut,
-    ChevronRight, Wallet, Building, Globe, Shield, Save, Coins,
+    ChevronRight, Wallet, Building, Globe, Shield, Save, Coins, Check,
 } from 'lucide-react-native';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import { SelectField } from '../../src/components/form';
 import { COUNTRIES, PAYMENT_METHODS } from '../../src/types/creator';
 import { useCurrency } from '../../src/hooks/useCurrency';
+import { getBankDetails, saveBankDetails } from '../../src/services/database';
 
 const CURRENCY_OPTIONS = [
     { value: 'EUR', label: '€ EUR — Euro' },
@@ -83,6 +84,28 @@ export default function SettingsScreen() {
     const [taxId, setTaxId] = useState('');
     const [payoutCountry, setPayoutCountry] = useState('');
     const [savingPayout, setSavingPayout] = useState(false);
+    const [loadingPayout, setLoadingPayout] = useState(true);
+    const [bankDetailsLoaded, setBankDetailsLoaded] = useState(false);
+
+    useEffect(() => {
+        if (!profile?.id) return;
+        setLoadingPayout(true);
+        getBankDetails(profile.id).then((details) => {
+            if (details) {
+                setPaymentMethod(details.paymentMethod || '');
+                setAccountHolderName(details.accountHolderName || '');
+                setIbanOrAddress(details.ibanOrAddress || details.accountNumber || '');
+                setTaxId(details.taxId || details.routingCode || '');
+                setPayoutCountry(details.payoutCountry || '');
+                // If they have saved details loaded, mark it as loaded so the success view is shown
+                if (details.paymentMethod && details.accountHolderName) {
+                    setBankDetailsLoaded(true);
+                }
+            }
+        }).finally(() => {
+            setLoadingPayout(false);
+        });
+    }, [profile?.id]);
 
     const Container = isWeb ? View : SafeAreaView;
     const inputStyle = {
@@ -109,13 +132,35 @@ export default function SettingsScreen() {
     };
 
     const handleSavePayout = async () => {
-        // TODO: Save payout info to profiles table
+        if (!profile?.id) return;
+        if (!paymentMethod) {
+            const msg = 'Please select a payment method.';
+            return Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+        }
+
         setSavingPayout(true);
-        setTimeout(() => {
+        try {
+            const success = await saveBankDetails(profile.id, {
+                paymentMethod,
+                accountHolderName,
+                ibanOrAddress,
+                taxId,
+                payoutCountry,
+            });
+
+            if (success) {
+                setBankDetailsLoaded(true);
+                const msg = 'Payout information saved successfully!';
+                Platform.OS === 'web' ? alert(msg) : Alert.alert('Success', msg);
+            } else {
+                throw new Error('Failed to save payout info');
+            }
+        } catch (error) {
+            const msg = 'Could not save payout details. Please try again.';
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+        } finally {
             setSavingPayout(false);
-            const msg = 'Payout information saved!';
-            Platform.OS === 'web' ? alert(msg) : Alert.alert('Success', msg);
-        }, 800);
+        }
     };
 
     return (
@@ -224,93 +269,125 @@ export default function SettingsScreen() {
                     </View>
                 </SectionCard>
 
-                {/* ─── Payout Information ─── */}
+                    {/* ─── Payout Information ─── */}
                 <SectionCard title="Payout Information" subtitle="How you receive payments" icon={CreditCard} style={{ zIndex: 10 }}>
-                    <View style={{ gap: 14 }}>
-                        <View style={{ zIndex: 20, position: 'relative' }}>
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
-                                Payment Method
+                    {savingPayout === false && bankDetailsLoaded && paymentMethod && accountHolderName ? (
+                        <View style={{ alignItems: 'center', padding: 20 }}>
+                            <View style={{
+                                width: 50, height: 50, borderRadius: 25,
+                                backgroundColor: 'rgba(56,180,186,0.15)',
+                                alignItems: 'center', justifyContent: 'center',
+                                marginBottom: 12
+                            }}>
+                                <Check size={28} color="#38b4ba" />
+                            </View>
+                            <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text.primary, marginBottom: 4 }}>
+                                Saved Successfully
                             </Text>
-                            <SelectField
-                                options={PAYMENT_METHODS.map(m => ({ value: m.value, label: m.label }))}
-                                value={paymentMethod}
-                                onChange={setPaymentMethod}
-                                placeholder="Select payment method"
-                            />
-                        </View>
-
-                        <View style={{ zIndex: 1 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
-                                Account Holder Name
+                            <Text style={{ fontSize: 13, color: colors.text.secondary, textAlign: 'center', marginBottom: 20 }}>
+                                Your payout details are configured. You can now request payouts.
                             </Text>
-                            <TextInput
-                                value={accountHolderName}
-                                onChangeText={setAccountHolderName}
-                                placeholder="Name on account"
-                                placeholderTextColor={colors.text.muted}
-                                style={inputStyle}
-                            />
+                            <AnimatedPressable
+                                preset="button"
+                                onPress={() => setPaymentMethod('')} // Reset to show form again
+                                style={{
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
+                                    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 12
+                                }}
+                            >
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary }}>
+                                    Edit Details
+                                </Text>
+                            </AnimatedPressable>
                         </View>
+                    ) : (
+                        <View style={{ gap: 14 }}>
+                            <View style={{ zIndex: 20, position: 'relative' }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
+                                    Payment Method
+                                </Text>
+                                <SelectField
+                                    options={PAYMENT_METHODS.map(m => ({ value: m.value, label: m.label }))}
+                                    value={paymentMethod}
+                                    onChange={setPaymentMethod}
+                                    placeholder="Select payment method"
+                                />
+                            </View>
 
-                        <View style={{ zIndex: 1 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
-                                {paymentMethod === 'crypto_wallet' ? 'Wallet Address' : 'IBAN'}
-                            </Text>
-                            <TextInput
-                                value={ibanOrAddress}
-                                onChangeText={setIbanOrAddress}
-                                placeholder={paymentMethod === 'crypto_wallet' ? '0x...' : 'FI00 0000 0000 0000 00'}
-                                placeholderTextColor={colors.text.muted}
-                                style={inputStyle}
-                            />
+                            <View style={{ zIndex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
+                                    Account Holder Name
+                                </Text>
+                                <TextInput
+                                    value={accountHolderName}
+                                    onChangeText={setAccountHolderName}
+                                    placeholder="Name on account"
+                                    placeholderTextColor={colors.text.muted}
+                                    style={inputStyle}
+                                />
+                            </View>
+
+                            <View style={{ zIndex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
+                                    {paymentMethod === 'crypto_wallet' ? 'Wallet Address' : 'IBAN'}
+                                </Text>
+                                <TextInput
+                                    value={ibanOrAddress}
+                                    onChangeText={setIbanOrAddress}
+                                    placeholder={paymentMethod === 'crypto_wallet' ? '0x...' : 'FI00 0000 0000 0000 00'}
+                                    placeholderTextColor={colors.text.muted}
+                                    style={inputStyle}
+                                />
+                            </View>
+
+                            <View style={{ zIndex: 1 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
+                                    Tax ID (optional)
+                                </Text>
+                                <TextInput
+                                    value={taxId}
+                                    onChangeText={setTaxId}
+                                    placeholder="Tax identification number"
+                                    placeholderTextColor={colors.text.muted}
+                                    style={inputStyle}
+                                />
+                            </View>
+
+                            <View style={{ zIndex: 10, position: 'relative' }}>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
+                                    Payout Country
+                                </Text>
+                                <SelectField
+                                    options={COUNTRY_OPTIONS}
+                                    value={payoutCountry}
+                                    onChange={setPayoutCountry}
+                                    placeholder="Select country"
+                                    searchable
+                                />
+                            </View>
+
+                            <AnimatedPressable
+                                preset="button"
+                                onPress={handleSavePayout}
+                                disabled={savingPayout || loadingPayout}
+                                style={{
+                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                                    backgroundColor: '#38b4ba', borderRadius: 12,
+                                    paddingVertical: 14, gap: 8, marginTop: 4,
+                                    opacity: savingPayout || loadingPayout ? 0.7 : 1,
+                                }}
+                            >
+                                {savingPayout ? (
+                                    <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                    <>
+                                        <Save size={16} color="#fff" />
+                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Save Payout Info</Text>
+                                    </>
+                                )}
+                            </AnimatedPressable>
                         </View>
-
-                        <View style={{ zIndex: 1 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
-                                Tax ID (optional)
-                            </Text>
-                            <TextInput
-                                value={taxId}
-                                onChangeText={setTaxId}
-                                placeholder="Tax identification number"
-                                placeholderTextColor={colors.text.muted}
-                                style={inputStyle}
-                            />
-                        </View>
-
-                        <View style={{ zIndex: 10, position: 'relative' }}>
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text.primary, marginBottom: 6 }}>
-                                Payout Country
-                            </Text>
-                            <SelectField
-                                options={COUNTRY_OPTIONS}
-                                value={payoutCountry}
-                                onChange={setPayoutCountry}
-                                placeholder="Select country"
-                            />
-                        </View>
-
-                        <AnimatedPressable
-                            preset="button"
-                            onPress={handleSavePayout}
-                            disabled={savingPayout}
-                            style={{
-                                flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-                                backgroundColor: '#38b4ba', borderRadius: 12,
-                                paddingVertical: 14, gap: 8, marginTop: 4,
-                                opacity: savingPayout ? 0.7 : 1,
-                            }}
-                        >
-                            {savingPayout ? (
-                                <ActivityIndicator size="small" color="#fff" />
-                            ) : (
-                                <>
-                                    <Save size={16} color="#fff" />
-                                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Save Payout Info</Text>
-                                </>
-                            )}
-                        </AnimatedPressable>
-                    </View>
+                    )}
                 </SectionCard>
 
                 {/* ─── Logout ─── */}

@@ -28,9 +28,14 @@ export default function CreatorProfileScreen() {
     const { playSong } = usePlayer();
 
     // Real data hooks
-    const { data: artist, loading: loadingArtist, error: artistError } = useArtistById(id);
+    const { data: artist, loading: loadingArtist, error: artistError, refresh: refreshArtist } = useArtistById(id);
     const { data: artistSongs, loading: loadingSongs } = useArtistSongs(id);
     const { following, toggle: toggleFollow } = useIsFollowing(id);
+
+    const handleToggleFollow = async () => {
+        await toggleFollow();
+        refreshArtist();
+    };
 
     if (loadingArtist) {
         return (
@@ -135,7 +140,7 @@ export default function CreatorProfileScreen() {
                     </View>
                     <AnimatedPressable
                         preset="button"
-                        onPress={toggleFollow}
+                        onPress={handleToggleFollow}
                         style={{
                             backgroundColor: following ? (isDark ? 'rgba(255,255,255,0.1)' : '#f1f5f9') : (isDark ? '#fff' : '#1e293b'),
                             borderRadius: 16,
