@@ -27,8 +27,8 @@ export default function AdminNFTReleasesScreen() {
 
     return (
         <AdminScreen
-            title="NFT Releases"
-            subtitle={!loading ? `${releases.length} releases` : undefined}
+            title="NFT Drops (Primary Mint)"
+            subtitle={!loading ? `${releases.length} drops configured` : undefined}
             loading={loading}
             error={error}
             onRetry={refresh}
@@ -37,7 +37,7 @@ export default function AdminNFTReleasesScreen() {
                 headers={['Song', 'Artist', 'Tier', 'Rarity', 'Minted', 'Price', 'Status', 'Actions']}
                 columns={nftColumns}
                 data={releases}
-                emptyMessage="No NFT releases found"
+                emptyMessage="No NFT drops configured yet"
                 minTableWidth={900}
                 renderRow={(r) => (
                     <View style={{

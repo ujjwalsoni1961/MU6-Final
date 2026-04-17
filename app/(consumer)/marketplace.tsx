@@ -122,7 +122,9 @@ export default function MarketplaceScreen() {
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>Marketplace</Text>
                 )}
                 <Text style={{ fontSize: 14, color: colors.text.secondary, marginTop: isWeb ? 0 : 4 }}>
-                    Discover unique music NFTs
+                    {loading
+                        ? 'Discover unique music NFTs'
+                        : `${dropsCount} primary drop${dropsCount === 1 ? '' : 's'} · ${resaleCount} resale listing${resaleCount === 1 ? '' : 's'}`}
                 </Text>
             </View>
 

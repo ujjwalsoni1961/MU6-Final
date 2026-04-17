@@ -43,7 +43,7 @@ const navSections: NavSection[] = [
     {
         title: 'NFT & Marketplace',
         items: [
-            { path: '/(admin)/nft-releases', match: '/nft-releases', label: 'NFT Releases', Icon: Disc3 },
+            { path: '/(admin)/nft-releases', match: '/nft-releases', label: 'NFT Drops', Icon: Disc3 },
             { path: '/(admin)/nft-tokens', match: '/nft-tokens', label: 'NFT Tokens', Icon: Tag },
             { path: '/(admin)/nft-limit-requests', match: '/nft-limit-requests', label: 'Limit Requests', Icon: Gem },
             { path: '/(admin)/marketplace', match: '/marketplace', label: 'Marketplace', Icon: ShoppingBag },

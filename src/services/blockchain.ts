@@ -95,6 +95,25 @@ function isNativeToken(addr: string): boolean {
  * Uses the nft-admin edge function's `transferFunds` action.
  * This is a best-effort call — if it fails, the DB revenue is still recorded.
  */
+/**
+ * Build headers for calls to the `nft-admin` edge function.
+ *
+ * The edge function's verifyAuth() calls supabase.auth.getUser(token) on the
+ * Bearer token — sending the anon key causes it to fail with "Invalid or
+ * expired auth token" (root cause of the payment-but-no-mint bug). We MUST
+ * send the current user session's access_token in Authorization, and the anon
+ * key separately in the `apikey` header (required by Supabase ingress).
+ */
+async function nftAdminHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const authToken = session?.access_token || SUPABASE_ANON_KEY;
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+        'apikey': SUPABASE_ANON_KEY,
+    };
+}
+
 async function transferToArtistWallet(
     recipientAddress: string,
     amountWei: string,
@@ -105,10 +124,7 @@ async function transferToArtistWallet(
 
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
+            headers: await nftAdminHeaders(),
             body: JSON.stringify({
                 action: 'transferFunds',
                 recipientAddress,
@@ -309,10 +325,7 @@ export async function serverLazyMint(
 
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
+            headers: await nftAdminHeaders(),
             body: JSON.stringify({
                 action: 'lazyMint',
                 amount,
@@ -350,10 +363,7 @@ export async function serverSetClaimConditions(
 
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
+            headers: await nftAdminHeaders(),
             body: JSON.stringify({
                 action: 'setClaimConditions',
                 priceWei,
@@ -392,10 +402,7 @@ export async function serverClaim(
 
         const response = await fetch(url, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
+            headers: await nftAdminHeaders(),
             body: JSON.stringify({
                 action: 'serverClaim',
                 receiverAddress,

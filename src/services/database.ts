@@ -789,7 +789,15 @@ export async function getMarketplaceListings(filters?: {
         console.error('[db] getMarketplaceListings error:', error);
         return [];
     }
-    return (data || []).map(mapListingRow);
+    // Self-defending filter: skip listings whose underlying NFT token has no on_chain_token_id.
+    // The unique index + FK cascade in migration 028 already prevents this at the DB level,
+    // but keeping the filter here means the UI never shows an unverifiable listing if anyone
+    // bypasses the constraint in the future.
+    const verifiable = (data || []).filter((row: any) => {
+        const chainId = row?.nft_token?.on_chain_token_id;
+        return chainId !== null && chainId !== undefined;
+    });
+    return verifiable.map(mapListingRow);
 }
 
 // ────────────────────────────────────────────
