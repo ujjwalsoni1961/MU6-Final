@@ -337,7 +337,19 @@ export function useAdminMarketplaceActions(refresh: () => void) {
         refresh();
     }, [refresh]);
 
-    return { toggleActive };
+    const toggleFlagged = useCallback(async (listingId: string, currentValue: boolean) => {
+        const newValue = !currentValue;
+        const { error } = await executeAdminUpdate('marketplace_listings', listingId, { is_flagged: newValue });
+        if (error) {
+            showToast(`Failed to ${newValue ? 'flag' : 'unflag'} listing`, 'error');
+            return;
+        }
+        await logAuditAction(newValue ? 'flag_listing' : 'unflag_listing', 'marketplace_listing', listingId);
+        showToast(`Listing ${newValue ? 'flagged' : 'unflagged'} successfully`);
+        refresh();
+    }, [refresh]);
+
+    return { toggleActive, toggleFlagged };
 }
 
 export function useAdminPayoutActions(refresh: () => void) {

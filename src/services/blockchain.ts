@@ -406,7 +406,7 @@ export async function serverClaim(
     receiverAddress: string,
     onChainPriceWei: string,
     contractAddress?: string,
-): Promise<{ success: boolean; txHash?: string; onChainTokenId?: string | null; error?: string }> {
+): Promise<{ success: boolean; txHash?: string; onChainTokenId?: string | null; pricePaidWei?: string; currency?: string; error?: string }> {
     try {
         const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
         console.log('[blockchain] serverClaim: claiming NFT for', receiverAddress, 'at on-chain price', onChainPriceWei);
@@ -426,17 +426,26 @@ export async function serverClaim(
         console.log('[blockchain] serverClaim response:', JSON.stringify(result));
 
         if (!response.ok || !result.success) {
-            return { success: false, error: result.error || `HTTP ${response.status}` };
+            // result.error may be a string (preferred) or an object (from older
+            // edge function paths that passed Thirdweb's raw response through).
+            // Normalize to a human-readable string so the UI never shows '[object Object]'.
+            const rawErr = result?.error ?? result;
+            const errMsg = typeof rawErr === 'string'
+                ? rawErr
+                : (rawErr?.message || rawErr?.error?.message || JSON.stringify(rawErr));
+            return { success: false, error: errMsg || `HTTP ${response.status}` };
         }
 
         return {
             success: true,
             txHash: result.txHash,
             onChainTokenId: result.onChainTokenId ?? null,
+            pricePaidWei: result.pricePaidWei,
+            currency: result.currency,
         };
     } catch (err: any) {
         console.error('[blockchain] serverClaim error:', err);
-        return { success: false, error: err.message };
+        return { success: false, error: err?.message || String(err) };
     }
 }
 

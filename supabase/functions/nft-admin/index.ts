@@ -160,28 +160,113 @@ async function callEngine(requestBody: unknown) {
     return { ok: response.ok, status: response.status, result };
 }
 
+/**
+ * Poll a Thirdweb Engine v3 transaction until it is confirmed / mined.
+ * Primary endpoint: GET https://api.thirdweb.com/v1/transactions/{id}
+ *   (documented at https://portal.thirdweb.com/wallets/monitor)
+ * Fallback:        POST https://engine.thirdweb.com/v1/transactions/search
+ *   (documented at https://portal.thirdweb.com/engine/v3/migrate)
+ * Both accept the x-secret-key header.
+ *
+ * Status values observed in the wild across thirdweb infra:
+ *   QUEUED | SENT | SUBMITTED | MINED | CONFIRMED | FAILED | ERRORED | CANCELLED
+ */
+async function fetchTxStatus(txId: string): Promise<{ ok: boolean; tx?: any; rawStatus?: number; rawBody?: string }> {
+    // ── Primary: api.thirdweb.com (documented, returns JSON) ──
+    try {
+        const url = `https://api.thirdweb.com/v1/transactions/${txId}`;
+        const resp = await fetch(url, { headers: { "x-secret-key": THIRDWEB_SECRET_KEY } });
+        const text = await resp.text();
+        if (resp.ok) {
+            try {
+                const data = JSON.parse(text);
+                const tx = data?.result ?? data;
+                if (tx && typeof tx === "object") return { ok: true, tx };
+            } catch (_) { /* fall through */ }
+        } else {
+            console.warn(`[nft-admin] api.thirdweb.com GET ${txId} -> ${resp.status}: ${text.slice(0, 200)}`);
+        }
+    } catch (e) {
+        console.warn("[nft-admin] api.thirdweb.com fetch error:", String(e));
+    }
+
+    // ── Fallback: engine.thirdweb.com /v1/transactions/search ──
+    try {
+        const url = `https://engine.thirdweb.com/v1/transactions/search`;
+        const resp = await fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "x-secret-key": THIRDWEB_SECRET_KEY,
+            },
+            body: JSON.stringify({
+                filters: [{ field: "id", values: [txId], operation: "OR" }],
+            }),
+        });
+        const text = await resp.text();
+        if (resp.ok) {
+            try {
+                const data = JSON.parse(text);
+                // Response shape: { result: { transactions: [...] } } per v3 docs
+                const txs = data?.result?.transactions || data?.result || [];
+                const tx = Array.isArray(txs) ? txs[0] : txs;
+                if (tx && typeof tx === "object") return { ok: true, tx };
+            } catch (_) { /* fall through */ }
+            return { ok: false, rawStatus: resp.status, rawBody: text.slice(0, 300) };
+        }
+        return { ok: false, rawStatus: resp.status, rawBody: text.slice(0, 300) };
+    } catch (e) {
+        console.warn("[nft-admin] engine search error:", String(e));
+        return { ok: false };
+    }
+}
+
 async function waitForTx(txId: string, maxWaitMs = 30000): Promise<{ confirmed: boolean; hash?: string; error?: string }> {
     const startTime = Date.now();
-    const pollUrl = `https://engine.thirdweb.com/v1/transactions/${txId}`;
+    let lastHash: string | undefined;
     while (Date.now() - startTime < maxWaitMs) {
-        try {
-            const resp = await fetch(pollUrl, { headers: { "x-secret-key": THIRDWEB_SECRET_KEY } });
-            const data = await resp.json();
-            const status = data?.result?.status;
+        const { ok, tx, rawStatus, rawBody } = await fetchTxStatus(txId);
+        if (ok && tx) {
+            const status = String(tx.status || "").toUpperCase();
+            const hash = tx.transactionHash || tx.hash || undefined;
+            if (hash) lastHash = hash;
             if (status === "CONFIRMED" || status === "MINED") {
-                return { confirmed: true, hash: data?.result?.transactionHash };
+                return { confirmed: true, hash };
             }
-            if (status === "FAILED" || status === "ERROR") {
-                const errMsg = data?.result?.errorMessage || data?.result?.executionResult?.error?.errorCode || "Unknown error";
+            if (status === "FAILED" || status === "ERROR" || status === "ERRORED" || status === "CANCELLED") {
+                const errMsg = tx.errorMessage || tx.executionResult?.error?.errorCode
+                    || tx.executionResult?.error?.message || `Transaction ${status.toLowerCase()}`;
                 console.error("[nft-admin] tx failed:", errMsg);
-                return { confirmed: false, error: errMsg };
+                return { confirmed: false, hash, error: String(errMsg) };
             }
-        } catch (e) {
-            console.warn("[nft-admin] poll error:", e);
+            // else: QUEUED | SENT | SUBMITTED — keep polling
+        } else if (rawStatus) {
+            console.warn(`[nft-admin] poll non-ok ${rawStatus}: ${rawBody}`);
+        }
+        // ── Secondary confirmation path: if we have a hash, verify directly via RPC ──
+        // This protects against stuck Thirdweb polling; on-chain is source of truth.
+        if (lastHash) {
+            try {
+                const rpcResp = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0", id: 1,
+                        method: "eth_getTransactionReceipt",
+                        params: [lastHash],
+                    }),
+                });
+                const rpcData = await rpcResp.json();
+                const receipt = rpcData?.result;
+                if (receipt && receipt.blockNumber) {
+                    if (receipt.status === "0x1") return { confirmed: true, hash: lastHash };
+                    if (receipt.status === "0x0") return { confirmed: false, hash: lastHash, error: "Transaction reverted on-chain" };
+                }
+            } catch (_) { /* non-fatal */ }
         }
         await new Promise(r => setTimeout(r, 2000));
     }
-    return { confirmed: false, error: "Timeout waiting for tx confirmation" };
+    return { confirmed: false, hash: lastHash, error: "Timeout waiting for tx confirmation" };
 }
 
 Deno.serve(async (req: Request) => {
@@ -204,6 +289,16 @@ Deno.serve(async (req: Request) => {
     try {
         const body = await req.json();
         const { action } = body;
+
+        // ── Diagnostic: Get Thirdweb TX Status ──
+        // Returns the raw Thirdweb transaction record for a given txId.
+        // Safe: read-only, no gas cost. Used to verify polling auth is healthy.
+        if (action === "getTxStatus") {
+            const { txId } = body;
+            if (!txId) return jsonResponse({ error: "Missing txId" }, 400);
+            const { ok, tx, rawStatus, rawBody } = await fetchTxStatus(txId);
+            return jsonResponse({ success: ok, tx, rawStatus, rawBody });
+        }
 
         // ── Lazy Mint ──
         if (action === "lazyMint") {
@@ -229,57 +324,141 @@ Deno.serve(async (req: Request) => {
         }
 
         // ── Server Claim ──
+        // Calls DropERC721.claim() on behalf of the buyer from the server wallet.
+        // Uses Thirdweb Engine v1 /write/contract endpoint (the older /erc721/
+        // claim-to path has been removed and now returns 404).
         if (action === "serverClaim") {
-            const { receiverAddress, contractAddress } = body;
+            const { receiverAddress, contractAddress, onChainPriceWei } = body;
             if (!receiverAddress) return jsonResponse({ error: "Missing receiverAddress" }, 400);
 
             const targetContract = contractAddress || DEFAULT_CONTRACT;
-            const url = `https://engine.thirdweb.com/contract/${CHAIN_ID}/${targetContract}/erc721/claim-to`;
-            const txBody = {
-                receiver: receiverAddress,
-                quantity: "1"
+            const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+
+            // ── Read active claim condition on-chain (source of truth) ──
+            // The contract's verifyClaim rejects any call whose _pricePerToken /
+            // _currency args don't exactly match the active claim condition.
+            // We query the chain and use those values rather than trusting the
+            // client-supplied `onChainPriceWei`, which may be stale relative to
+            // the on-chain state (e.g. if an admin re-set claim conditions).
+            let pricePerToken = (onChainPriceWei ?? "0").toString();
+            let currencyOnChain = NATIVE_TOKEN;
+            try {
+                // claimCondition() returns (currentStartId, count)
+                const ccResp = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: targetContract, data: "0xd637ed59" }, "latest"] }),
+                });
+                const ccData = await ccResp.json();
+                const ccHex = (ccData?.result || "0x").slice(2);
+                const currentStartId = BigInt("0x" + (ccHex.slice(0, 64) || "0"));
+                // getClaimConditionById(currentStartId) selector 0x6f8934f4
+                const idHex = currentStartId.toString(16).padStart(64, "0");
+                const condResp = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: targetContract, data: "0x6f8934f4" + idHex }, "latest"] }),
+                });
+                const condData = await condResp.json();
+                const condHex = (condData?.result || "0x").slice(2);
+                // Struct layout starting at word 1 (word 0 is the tuple offset 0x20):
+                //   [1]=startTimestamp [2]=maxClaimableSupply [3]=supplyClaimed
+                //   [4]=quantityLimitPerWallet [5]=merkleRoot [6]=pricePerToken
+                //   [7]=currency [8..]=metadata(string)
+                if (condHex.length >= 64 * 8) {
+                    const onChainPrice = BigInt("0x" + condHex.slice(64 * 6, 64 * 7)).toString();
+                    const onChainCurrency = "0x" + condHex.slice(64 * 7 + 24, 64 * 8);
+                    if (onChainPrice && onChainPrice !== "0") pricePerToken = onChainPrice;
+                    if (onChainCurrency && /^0x[a-fA-F0-9]{40}$/.test(onChainCurrency)) currencyOnChain = onChainCurrency;
+                    if (onChainPriceWei && onChainPriceWei.toString() !== onChainPrice) {
+                        console.warn(
+                            `[nft-admin] serverClaim: client price ${onChainPriceWei} ≠ on-chain ${onChainPrice}; using on-chain (source of truth).`,
+                        );
+                    }
+                }
+            } catch (e) {
+                console.warn("[nft-admin] serverClaim: failed to read claim condition, falling back to client price:", String(e));
+            }
+
+            // DropERC721.claim(receiver, quantity, currency, pricePerToken,
+            //                  (proof, qtyLimitPerWallet, pricePerToken, currency), data)
+            // For a public (no-allowlist) claim: proof = [], and the allowlist
+            // tuple's qtyLimit/price/currency must match the active condition —
+            // using MAX_UINT256/pricePerToken/currency is the standard
+            // "no override" form Thirdweb SDK sends.
+            const allowlistProof: [string[], string, string, string] = [
+                [],
+                MAX_UINT256,
+                pricePerToken,
+                currencyOnChain,
+            ];
+
+            const requestBody = {
+                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: targetContract,
+                    method: "function claim(address _receiver, uint256 _quantity, address _currency, uint256 _pricePerToken, (bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
+                    params: [
+                        receiverAddress,
+                        "1",
+                        currencyOnChain,
+                        pricePerToken,
+                        allowlistProof,
+                        "0x",
+                    ],
+                    // Server wallet forwards the claim price as msg.value so the
+                    // contract accepts the payment. Payment from buyer → server
+                    // wallet already happened before this call (confirmed on-chain
+                    // client-side); server wallet is just relaying.
+                    // Only set value when currency is NATIVE_TOKEN; ERC20 claims
+                    // do not send native value (they rely on allowance).
+                    value: currencyOnChain.toLowerCase() === NATIVE_TOKEN.toLowerCase() ? pricePerToken : "0",
+                }],
             };
 
-            console.log("[nft-admin] serverClaim to:", receiverAddress, "endpoint:", url);
-            const twResponse = await fetch(url, {
-                method: "POST",
-                headers: { 
-                    "Content-Type": "application/json", 
-                    "x-secret-key": THIRDWEB_SECRET_KEY,
-                    "x-backend-wallet-address": SERVER_WALLET
-                },
-                body: JSON.stringify(txBody),
-            });
-
-            const resultText = await twResponse.text();
-            console.log("[nft-admin] serverClaim response:", twResponse.status, resultText);
-            let result;
-            try { result = JSON.parse(resultText); } catch { result = { raw: resultText }; }
-
-            if (!twResponse.ok) return jsonResponse({ success: false, error: result }, twResponse.status);
-
-            const txId = result?.result?.queueId || result?.result?.id;
-            if (txId) {
-                const { confirmed, hash, error } = await waitForTx(txId);
-                if (!confirmed) return jsonResponse({ success: false, error: error || "serverClaim tx did not confirm" }, 500);
-                console.log("[nft-admin] serverClaim confirmed, hash:", hash);
-
-                // Parse real on-chain tokenId from the Transfer event log.
-                // Best-effort: if the receipt isn't available yet we return null —
-                // the mobile reconciler will fill it in on retry.
-                let onChainTokenId: string | null = null;
-                if (hash) {
-                    onChainTokenId = await fetchMintedTokenId(hash, targetContract);
-                    console.log("[nft-admin] parsed on-chain tokenId:", onChainTokenId);
-                }
-                return jsonResponse({
-                    success: true,
-                    transactionId: txId,
-                    txHash: hash,
-                    onChainTokenId,
-                });
+            console.log("[nft-admin] serverClaim v1/write/contract receiver:", receiverAddress, "price:", pricePerToken);
+            const { ok, status, result } = await callEngine(requestBody);
+            console.log("[nft-admin] serverClaim engine response:", status, JSON.stringify(result));
+            if (!ok) {
+                const errMsg = typeof result === "string"
+                    ? result
+                    : (result?.error?.message || result?.message || JSON.stringify(result));
+                return jsonResponse({ success: false, error: errMsg }, status);
             }
-            return jsonResponse({ success: true, transactionId: txId, result });
+
+            const txId = result?.result?.transactions?.[0]?.id
+                || result?.result?.queueId
+                || result?.result?.id;
+            if (!txId) {
+                return jsonResponse({ success: false, error: "Engine did not return a transaction id" }, 500);
+            }
+
+            const { confirmed, hash, error } = await waitForTx(txId);
+            if (!confirmed) {
+                const errMsg = typeof error === "string" ? error : (error || "serverClaim tx did not confirm");
+                return jsonResponse({ success: false, error: errMsg }, 500);
+            }
+            console.log("[nft-admin] serverClaim confirmed, hash:", hash);
+
+            // Parse real on-chain tokenId from the Transfer event log.
+            // Best-effort: if the receipt isn't available yet we return null —
+            // the mobile reconciler will fill it in on retry.
+            let onChainTokenId: string | null = null;
+            if (hash) {
+                onChainTokenId = await fetchMintedTokenId(hash, targetContract);
+                console.log("[nft-admin] parsed on-chain tokenId:", onChainTokenId);
+            }
+            return jsonResponse({
+                success: true,
+                transactionId: txId,
+                txHash: hash,
+                onChainTokenId,
+                // Price actually paid to the contract (in wei), read from
+                // on-chain claim condition. May differ from onChainPriceWei the
+                // client sent; the client should reconcile its records to this.
+                pricePaidWei: pricePerToken,
+                currency: currencyOnChain,
+            });
         }
 
         // ── Set Claim Conditions (requires ADMIN role) ──
@@ -450,13 +629,12 @@ Deno.serve(async (req: Request) => {
                 const txResult = await waitForTx(deployTxId, 60000);
                 if (txResult.confirmed) {
                     // Fetch the deployed address from the transaction result
-                    const txStatusUrl = `https://engine.thirdweb.com/v1/transactions/${deployTxId}`;
-                    const statusResp = await fetch(txStatusUrl, {
-                        headers: { "x-secret-key": THIRDWEB_SECRET_KEY },
-                    });
-                    const statusData = await statusResp.json();
-                    finalAddress = statusData?.result?.contractAddress
-                        || statusData?.result?.deployedAddress;
+                    const { ok, tx } = await fetchTxStatus(deployTxId);
+                    if (ok && tx) {
+                        finalAddress = tx.contractAddress
+                            || tx.deployedAddress
+                            || tx.executionResult?.contractAddress;
+                    }
                 } else {
                     return jsonResponse({
                         success: false,
@@ -533,11 +711,8 @@ Deno.serve(async (req: Request) => {
                 console.log("[nft-admin] Waiting for marketplace deploy tx:", deployTxId);
                 const txResult = await waitForTx(deployTxId, 60000);
                 if (txResult.confirmed) {
-                    const txStatusUrl = `https://engine.thirdweb.com/v1/transactions/${deployTxId}`;
-                    const statusResp = await fetch(txStatusUrl, {
-                        headers: { "x-secret-key": THIRDWEB_SECRET_KEY },
-                    });
-                    const statusData = await statusResp.json();
+                    const { ok, tx } = await fetchTxStatus(deployTxId);
+                    const statusData = ok && tx ? { result: tx } : { result: {} };
                     finalAddress = statusData?.result?.contractAddress
                         || statusData?.result?.deployedAddress;
                 } else {
