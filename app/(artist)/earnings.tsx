@@ -500,30 +500,53 @@ export default function EarningsScreen() {
                         {/* ── Section 4: Payout History ── */}
                         <SectionTitle title="Payout History" icon={ArrowUpRight} color="#22c55e" />
 
-                        {/* Request Payout Button */}
-                        {availableBalance && availableBalance.availableBalance > 0.001 && (
-                            <AnimatedPressable
-                                preset="button"
-                                onPress={handleRequestPayout}
-                                disabled={requestingPayout}
-                                style={{
-                                    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                                    backgroundColor: '#22c55e', borderRadius: 12, paddingVertical: 14, marginBottom: 16,
-                                    opacity: requestingPayout ? 0.7 : 1,
-                                }}
-                            >
-                                {requestingPayout ? (
-                                    <ActivityIndicator size="small" color="#fff" />
-                                ) : (
-                                    <>
-                                        <ArrowUpRight size={16} color="#fff" />
-                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>
-                                            Request Payout ({formatFiat(availableBalance.availableBalance, 'eur')})
+                        {/* Request Payout Button (PDF Fix #8: disabled while a pending request exists) */}
+                        {(() => {
+                            const hasPending = payouts.some((p) => p.status === 'pending');
+                            const hasBalance = !!availableBalance && availableBalance.availableBalance > 0.001;
+                            if (!hasBalance && !hasPending) return null;
+
+                            if (hasPending) {
+                                return (
+                                    <View
+                                        style={{
+                                            flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                            backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)',
+                                            borderRadius: 12, paddingVertical: 14, marginBottom: 16,
+                                        }}
+                                    >
+                                        <ActivityIndicator size="small" color="#f59e0b" />
+                                        <Text style={{ fontSize: 13, fontWeight: '600', color: '#f59e0b' }}>
+                                            Payout request pending admin review
                                         </Text>
-                                    </>
-                                )}
-                            </AnimatedPressable>
-                        )}
+                                    </View>
+                                );
+                            }
+
+                            return (
+                                <AnimatedPressable
+                                    preset="button"
+                                    onPress={handleRequestPayout}
+                                    disabled={requestingPayout}
+                                    style={{
+                                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                        backgroundColor: '#22c55e', borderRadius: 12, paddingVertical: 14, marginBottom: 16,
+                                        opacity: requestingPayout ? 0.7 : 1,
+                                    }}
+                                >
+                                    {requestingPayout ? (
+                                        <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                        <>
+                                            <ArrowUpRight size={16} color="#fff" />
+                                            <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>
+                                                Request Payout ({formatFiat(availableBalance!.availableBalance, 'eur')})
+                                            </Text>
+                                        </>
+                                    )}
+                                </AnimatedPressable>
+                            );
+                        })()}
 
                         <Text style={{ fontSize: 11, color: colors.text.muted, marginBottom: 12, lineHeight: 16 }}>
                             Payouts are for streaming earnings only. NFT sales revenue goes directly to your wallet on-chain.

@@ -10,6 +10,13 @@ import NFTCard from '../../src/components/shared/NFTCard';
 import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { NFT, Song } from '../../src/types';
 import { useCreatorNFTs, useCreatorSongs, useCreateNFTRelease } from '../../src/hooks/useData';
+import {
+    getArtistNFTLimits,
+    submitNFTLimitRequest,
+    ArtistNFTLimits,
+    NftRarity,
+} from '../../src/services/database';
+import { Lock, Send } from 'lucide-react-native';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useCurrency } from '../../src/hooks/useCurrency';
 import ErrorState from '../../src/components/shared/ErrorState';
@@ -78,6 +85,57 @@ export default function NFTManagerScreen() {
     const [benefits, setBenefits] = useState<{ title: string; description: string }[]>([]);
     const [newBenefitTitle, setNewBenefitTitle] = useState('');
     const [newBenefitDesc, setNewBenefitDesc] = useState('');
+
+    // PDF Fix #9: artist NFT listing limits + "Request Higher Limit" flow.
+    const [limits, setLimits] = useState<ArtistNFTLimits | null>(null);
+    const [showLimitRequestModal, setShowLimitRequestModal] = useState(false);
+    const [reqListingLimit, setReqListingLimit] = useState('');
+    const [reqRarities, setReqRarities] = useState<Record<NftRarity, boolean>>({ common: false, rare: false, legendary: false });
+    const [reqReason, setReqReason] = useState('');
+    const [reqSubmitting, setReqSubmitting] = useState(false);
+
+    const refreshLimits = useCallback(async () => {
+        if (!profile?.id) return;
+        const l = await getArtistNFTLimits(profile.id);
+        setLimits(l);
+    }, [profile?.id]);
+
+    useFocusEffect(useCallback(() => { refreshLimits(); }, [refreshLimits]));
+
+    const atLimit = !!limits && limits.activeListings >= limits.listingLimit;
+
+    const handleSubmitLimitRequest = async () => {
+        if (!profile?.id) return;
+        const parsedLimit = reqListingLimit.trim() ? parseInt(reqListingLimit, 10) : null;
+        if (parsedLimit !== null && (isNaN(parsedLimit) || parsedLimit <= (limits?.listingLimit ?? 0))) {
+            const msg = `Requested limit must be a number greater than your current limit (${limits?.listingLimit}).`;
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Invalid', msg);
+            return;
+        }
+        const requestedRarities = (Object.keys(reqRarities) as NftRarity[])
+            .filter((k) => reqRarities[k] && !(limits?.allowedRarities.includes(k)));
+        setReqSubmitting(true);
+        try {
+            const res = await submitNFTLimitRequest(
+                profile.id,
+                parsedLimit,
+                requestedRarities.length > 0 ? requestedRarities : null,
+                reqReason.trim() || null,
+            );
+            if (res.error) {
+                Platform.OS === 'web' ? alert(res.error) : Alert.alert('Error', res.error);
+            } else {
+                const msg = 'Request submitted. An admin will review it shortly.';
+                Platform.OS === 'web' ? alert(msg) : Alert.alert('Sent', msg);
+                setShowLimitRequestModal(false);
+                setReqListingLimit('');
+                setReqRarities({ common: false, rare: false, legendary: false });
+                setReqReason('');
+            }
+        } finally {
+            setReqSubmitting(false);
+        }
+    };
 
     const resetForm = () => {
         setSelectedSong(null);
@@ -215,7 +273,7 @@ export default function NFTManagerScreen() {
     return (
         <Container style={{ flex: 1, backgroundColor: isWeb ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
             <View style={{ padding: isWeb ? 32 : 16 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                     <View>
                         <Text style={{ fontSize: isWeb ? 28 : 24, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
                             NFT Manager
@@ -226,11 +284,21 @@ export default function NFTManagerScreen() {
                     </View>
                     <AnimatedPressable
                         preset="button"
-                        onPress={() => { resetForm(); setShowModal(true); }}
+                        onPress={() => {
+                            if (atLimit) {
+                                const msg = `You have reached your NFT listing limit (${limits!.activeListings}/${limits!.listingLimit}). Use "Request Higher Limit" to petition your admin.`;
+                                Platform.OS === 'web' ? alert(msg) : Alert.alert('Limit reached', msg);
+                                return;
+                            }
+                            resetForm();
+                            setShowModal(true);
+                        }}
+                        disabled={atLimit}
                         style={{
                             flexDirection: 'row', alignItems: 'center',
                             paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
-                            backgroundColor: '#8b5cf6',
+                            backgroundColor: atLimit ? '#6b7280' : '#8b5cf6',
+                            opacity: atLimit ? 0.7 : 1,
                             shadowColor: '#8b5cf6', shadowOffset: { width: 0, height: 6 },
                             shadowOpacity: 0.35, shadowRadius: 16, elevation: 8,
                         }}
@@ -239,6 +307,50 @@ export default function NFTManagerScreen() {
                         <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13, marginLeft: 6 }}>Create NFT</Text>
                     </AnimatedPressable>
                 </View>
+
+                {/* PDF Fix #9: Limits panel */}
+                {limits && (
+                    <View
+                        style={{
+                            flexDirection: 'row', flexWrap: 'wrap', gap: 12,
+                            padding: 12, borderRadius: 12,
+                            backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f1f5f9',
+                            borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
+                            marginBottom: 20, alignItems: 'center', justifyContent: 'space-between',
+                        }}
+                    >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 240 }}>
+                            <View style={{
+                                paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+                                backgroundColor: atLimit ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)',
+                            }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: atLimit ? '#ef4444' : '#22c55e' }}>
+                                    {limits.activeListings} / {limits.listingLimit} LISTINGS
+                                </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Lock size={12} color={colors.text.muted} />
+                                <Text style={{ fontSize: 12, color: colors.text.secondary }}>
+                                    Allowed tiers: {limits.allowedRarities.join(', ')}
+                                </Text>
+                            </View>
+                        </View>
+                        <AnimatedPressable
+                            preset="button"
+                            onPress={() => setShowLimitRequestModal(true)}
+                            style={{
+                                flexDirection: 'row', alignItems: 'center', gap: 6,
+                                paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10,
+                                borderWidth: 1, borderColor: '#8b5cf6', backgroundColor: 'transparent',
+                            }}
+                        >
+                            <Send size={12} color="#8b5cf6" />
+                            <Text style={{ color: '#8b5cf6', fontSize: 12, fontWeight: '600' }}>
+                                Request Higher Limit
+                            </Text>
+                        </AnimatedPressable>
+                    </View>
+                )}
             </View>
 
             {loading ? (
@@ -490,35 +602,51 @@ export default function NFTManagerScreen() {
                                 </AnimatedPressable>
                             </View>
 
-                            {/* Rarity */}
+                            {/* Rarity (PDF Fix #9: locked tiers show a lock icon and cannot be selected) */}
                             <Text style={labelStyle}>Rarity</Text>
                             <View style={{ flexDirection: 'row', gap: 8 }}>
-                                {RARITY_OPTIONS.map((opt) => (
-                                    <AnimatedPressable
-                                        key={opt.value}
-                                        preset="button"
-                                        onPress={() => setRarity(opt.value)}
-                                        style={{
-                                            flex: 1,
-                                            paddingVertical: 10,
-                                            borderRadius: 10,
-                                            alignItems: 'center' as const,
-                                            backgroundColor: rarity === opt.value
-                                                ? opt.color + '20'
-                                                : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
-                                            borderWidth: 2,
-                                            borderColor: rarity === opt.value ? opt.color : 'transparent',
-                                        }}
-                                    >
-                                        <Text style={{
-                                            color: rarity === opt.value ? opt.color : colors.text.secondary,
-                                            fontWeight: '700',
-                                            fontSize: 13,
-                                        }}>
-                                            {opt.label}
-                                        </Text>
-                                    </AnimatedPressable>
-                                ))}
+                                {RARITY_OPTIONS.map((opt) => {
+                                    const allowed = !limits || limits.allowedRarities.includes(opt.value as NftRarity);
+                                    return (
+                                        <AnimatedPressable
+                                            key={opt.value}
+                                            preset="button"
+                                            onPress={() => {
+                                                if (!allowed) {
+                                                    const msg = `The "${opt.label}" tier is locked. Use "Request Higher Limit" to petition your admin for access.`;
+                                                    Platform.OS === 'web' ? alert(msg) : Alert.alert('Tier locked', msg);
+                                                    return;
+                                                }
+                                                setRarity(opt.value);
+                                            }}
+                                            disabled={!allowed}
+                                            style={{
+                                                flex: 1,
+                                                paddingVertical: 10,
+                                                borderRadius: 10,
+                                                alignItems: 'center' as const,
+                                                flexDirection: 'row',
+                                                justifyContent: 'center',
+                                                gap: 6,
+                                                opacity: allowed ? 1 : 0.45,
+                                                backgroundColor: rarity === opt.value && allowed
+                                                    ? opt.color + '20'
+                                                    : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
+                                                borderWidth: 2,
+                                                borderColor: rarity === opt.value && allowed ? opt.color : 'transparent',
+                                            }}
+                                        >
+                                            {!allowed && <Lock size={12} color={colors.text.muted} />}
+                                            <Text style={{
+                                                color: rarity === opt.value && allowed ? opt.color : colors.text.secondary,
+                                                fontWeight: '700',
+                                                fontSize: 13,
+                                            }}>
+                                                {opt.label}
+                                            </Text>
+                                        </AnimatedPressable>
+                                    );
+                                })}
                             </View>
 
                             {/* Supply + Price */}
@@ -666,6 +794,178 @@ export default function NFTManagerScreen() {
                                         />
                                     </View>
                                 ))}
+                            </View>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* ── Request Higher Limit Modal (PDF Fix #9) ── */}
+            <Modal visible={showLimitRequestModal} animationType="slide" transparent onRequestClose={() => setShowLimitRequestModal(false)}>
+                <View style={{
+                    flex: 1,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    padding: 20,
+                }}>
+                    <View style={{
+                        width: '100%',
+                        maxWidth: 480,
+                        maxHeight: '90%',
+                        backgroundColor: isDark ? '#0f172a' : '#fff',
+                        borderRadius: 24,
+                        borderWidth: 1,
+                        borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+                        overflow: 'hidden',
+                    }}>
+                        {/* Header */}
+                        <View style={{
+                            flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+                            padding: 20, borderBottomWidth: 1,
+                            borderBottomColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+                        }}>
+                            <Text style={{ fontSize: 20, fontWeight: '800', color: colors.text.primary }}>
+                                Request Higher Limit
+                            </Text>
+                            <AnimatedPressable preset="icon" onPress={() => setShowLimitRequestModal(false)}>
+                                <X size={22} color={colors.text.secondary} />
+                            </AnimatedPressable>
+                        </View>
+
+                        <ScrollView contentContainerStyle={{ padding: 20 }} showsVerticalScrollIndicator={false}>
+                            <Text style={{ color: colors.text.secondary, fontSize: 13, lineHeight: 20, marginBottom: 8 }}>
+                                Ask an admin to raise your NFT listing cap or unlock premium rarity tiers. Leave the limit blank if you only want new tiers.
+                            </Text>
+
+                            {limits && (
+                                <View style={{
+                                    backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : 'rgba(56,180,186,0.1)',
+                                    borderRadius: 12, padding: 12, marginTop: 12,
+                                    borderWidth: 1, borderColor: 'rgba(56,180,186,0.25)',
+                                }}>
+                                    <Text style={{ fontSize: 12, color: colors.text.secondary, marginBottom: 4 }}>
+                                        Current limit
+                                    </Text>
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text.primary }}>
+                                        {limits.activeListings} / {limits.listingLimit} listings · tiers: {limits.allowedRarities.join(', ')}
+                                    </Text>
+                                </View>
+                            )}
+
+                            <Text style={labelStyle}>New Listing Limit (optional)</Text>
+                            <TextInput
+                                value={reqListingLimit}
+                                onChangeText={setReqListingLimit}
+                                placeholder={`e.g. ${(limits?.listingLimit ?? 5) + 5}`}
+                                placeholderTextColor={colors.text.muted}
+                                keyboardType="number-pad"
+                                style={inputStyle}
+                            />
+
+                            <Text style={labelStyle}>Request Access to Tiers</Text>
+                            <View style={{ gap: 10 }}>
+                                {RARITY_OPTIONS.map((opt) => {
+                                    const alreadyAllowed = !!limits?.allowedRarities.includes(opt.value as NftRarity);
+                                    const checked = reqRarities[opt.value as NftRarity];
+                                    return (
+                                        <AnimatedPressable
+                                            key={opt.value}
+                                            preset="row"
+                                            disabled={alreadyAllowed}
+                                            onPress={() => {
+                                                setReqRarities((prev) => ({
+                                                    ...prev,
+                                                    [opt.value]: !prev[opt.value as NftRarity],
+                                                }));
+                                            }}
+                                            style={{
+                                                ...inputStyle,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'space-between',
+                                                opacity: alreadyAllowed ? 0.5 : 1,
+                                            }}
+                                        >
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                                <View style={{
+                                                    width: 10, height: 10, borderRadius: 5,
+                                                    backgroundColor: opt.color,
+                                                }} />
+                                                <Text style={{ color: colors.text.primary, fontSize: 15, fontWeight: '600' }}>
+                                                    {opt.label}
+                                                </Text>
+                                                {alreadyAllowed && (
+                                                    <Text style={{ color: colors.text.muted, fontSize: 12 }}>
+                                                        (already unlocked)
+                                                    </Text>
+                                                )}
+                                            </View>
+                                            <View style={{
+                                                width: 22, height: 22, borderRadius: 6,
+                                                borderWidth: 2,
+                                                borderColor: checked ? opt.color : (isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.2)'),
+                                                backgroundColor: checked ? opt.color : 'transparent',
+                                                alignItems: 'center', justifyContent: 'center',
+                                            }}>
+                                                {alreadyAllowed && !checked && <Lock size={12} color={colors.text.muted} />}
+                                            </View>
+                                        </AnimatedPressable>
+                                    );
+                                })}
+                            </View>
+
+                            <Text style={labelStyle}>Reason (optional)</Text>
+                            <TextInput
+                                value={reqReason}
+                                onChangeText={setReqReason}
+                                placeholder="Tell the admin why you need a higher limit or new tier"
+                                placeholderTextColor={colors.text.muted}
+                                multiline
+                                numberOfLines={4}
+                                style={{ ...inputStyle, minHeight: 96, textAlignVertical: 'top' }}
+                            />
+
+                            <View style={{ flexDirection: 'row', gap: 12, marginTop: 24 }}>
+                                <AnimatedPressable
+                                    preset="row"
+                                    onPress={() => setShowLimitRequestModal(false)}
+                                    style={{
+                                        flex: 1,
+                                        padding: 14,
+                                        borderRadius: 12,
+                                        borderWidth: 1,
+                                        borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
+                                        alignItems: 'center',
+                                    }}
+                                >
+                                    <Text style={{ color: colors.text.primary, fontWeight: '700' }}>Cancel</Text>
+                                </AnimatedPressable>
+                                <AnimatedPressable
+                                    preset="row"
+                                    disabled={reqSubmitting}
+                                    onPress={handleSubmitLimitRequest}
+                                    style={{
+                                        flex: 1,
+                                        padding: 14,
+                                        borderRadius: 12,
+                                        backgroundColor: '#38b4ba',
+                                        alignItems: 'center',
+                                        flexDirection: 'row',
+                                        justifyContent: 'center',
+                                        gap: 8,
+                                        opacity: reqSubmitting ? 0.6 : 1,
+                                    }}
+                                >
+                                    {reqSubmitting ? (
+                                        <ActivityIndicator size="small" color="#fff" />
+                                    ) : (
+                                        <Send size={16} color="#fff" />
+                                    )}
+                                    <Text style={{ color: '#fff', fontWeight: '800' }}>
+                                        {reqSubmitting ? 'Submitting…' : 'Submit Request'}
+                                    </Text>
+                                </AnimatedPressable>
                             </View>
                         </ScrollView>
                     </View>

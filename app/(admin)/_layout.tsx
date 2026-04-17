@@ -6,7 +6,7 @@ import {
     LayoutDashboard, Users, Music, ArrowLeftRight, FileCode,
     Shield, LogOut, Disc3, ShoppingBag, Tag,
     Radio, Wallet, PieChart, CreditCard, DollarSign,
-    Settings, ScrollText, Bell, ListMusic,
+    Settings, ScrollText, Bell, ListMusic, Gem,
 } from 'lucide-react-native';
 import { useAdminAuth } from '../../src/context/AdminAuthContext';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -45,6 +45,7 @@ const navSections: NavSection[] = [
         items: [
             { path: '/(admin)/nft-releases', match: '/nft-releases', label: 'NFT Releases', Icon: Disc3 },
             { path: '/(admin)/nft-tokens', match: '/nft-tokens', label: 'NFT Tokens', Icon: Tag },
+            { path: '/(admin)/nft-limit-requests', match: '/nft-limit-requests', label: 'Limit Requests', Icon: Gem },
             { path: '/(admin)/marketplace', match: '/marketplace', label: 'Marketplace', Icon: ShoppingBag },
             { path: '/(admin)/contracts', match: '/contracts', label: 'Contracts', Icon: FileCode },
         ],
@@ -203,7 +204,7 @@ function AdminSidebar() {
 /* ─── All tab screen definitions ─── */
 const allScreens = [
     'dashboard', 'users', 'songs', 'playlists',
-    'nft-releases', 'nft-tokens', 'marketplace', 'contracts',
+    'nft-releases', 'nft-tokens', 'nft-limit-requests', 'marketplace', 'contracts',
     'streams', 'royalty-events', 'royalty-shares', 'song-splits', 'payouts', 'transactions',
     'platform-settings', 'audit-log', 'notifications',
 ];

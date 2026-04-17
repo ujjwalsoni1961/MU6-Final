@@ -1939,6 +1939,252 @@ export async function getArtistBalance(profileId: string): Promise<{
     };
 }
 
+// ─────────────────────────────────────────────────────────────
+// NFT LISTING LIMITS (PDF Fix #9)
+// ─────────────────────────────────────────────────────────────
+
+export type NftRarity = 'common' | 'rare' | 'legendary';
+
+export interface ArtistNFTLimits {
+    listingLimit: number;        // how many active releases this artist may have
+    allowedRarities: NftRarity[]; // which rarities they may create
+    activeListings: number;      // how many active releases they currently have
+}
+
+export interface NFTLimitRequest {
+    id: string;
+    profileId: string;
+    requestedListingLimit: number | null;
+    requestedRarities: NftRarity[] | null;
+    reason: string | null;
+    status: 'pending' | 'approved' | 'rejected';
+    adminNotes: string | null;
+    requestedAt: string;
+    processedAt: string | null;
+    processedBy: string | null;
+    // Optional enrichments (admin view):
+    artistName?: string;
+    currentListingLimit?: number | null;
+    currentAllowedRarities?: NftRarity[] | null;
+}
+
+/** Fetch an artist's current NFT listing limits + their active listing count. */
+export async function getArtistNFTLimits(profileId: string): Promise<ArtistNFTLimits> {
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('nft_listing_limit, allowed_nft_rarities')
+        .eq('id', profileId)
+        .maybeSingle();
+
+    // Count active releases across all of this artist's songs.
+    const { data: songs } = await supabase
+        .from('songs')
+        .select('id')
+        .eq('creator_id', profileId);
+    const songIds = (songs || []).map((s: any) => s.id);
+
+    let activeListings = 0;
+    if (songIds.length > 0) {
+        const { count } = await supabase
+            .from('nft_releases')
+            .select('id', { count: 'exact', head: true })
+            .in('song_id', songIds)
+            .eq('is_active', true);
+        activeListings = count ?? 0;
+    }
+
+    return {
+        listingLimit: profile?.nft_listing_limit ?? 5,
+        allowedRarities: (profile?.allowed_nft_rarities ?? ['common']) as NftRarity[],
+        activeListings,
+    };
+}
+
+/** Submit a "Request Higher Limit" petition. Fails if one is already pending. */
+export async function submitNFTLimitRequest(
+    profileId: string,
+    requestedListingLimit: number | null,
+    requestedRarities: NftRarity[] | null,
+    reason: string | null,
+): Promise<{ id: string | null; error?: string }> {
+    if (requestedListingLimit === null && (!requestedRarities || requestedRarities.length === 0)) {
+        return { id: null, error: 'You must request either a new listing limit or additional tier access.' };
+    }
+
+    // Block if there is already a pending request.
+    const { count } = await supabase
+        .from('nft_limit_requests')
+        .select('id', { count: 'exact', head: true })
+        .eq('profile_id', profileId)
+        .eq('status', 'pending');
+    if ((count ?? 0) > 0) {
+        return {
+            id: null,
+            error: 'You already have a pending limit-increase request. Please wait for admin review.',
+        };
+    }
+
+    const { data, error } = await supabase
+        .from('nft_limit_requests')
+        .insert({
+            profile_id: profileId,
+            requested_listing_limit: requestedListingLimit,
+            requested_rarities: requestedRarities,
+            reason,
+            status: 'pending',
+        })
+        .select('id')
+        .single();
+
+    if (error || !data) {
+        return { id: null, error: error?.message || 'Failed to submit request' };
+    }
+    return { id: data.id };
+}
+
+/** List NFT limit requests for a specific profile (artist view). */
+export async function getMyNFTLimitRequests(profileId: string): Promise<NFTLimitRequest[]> {
+    const { data, error } = await supabase
+        .from('nft_limit_requests')
+        .select('*')
+        .eq('profile_id', profileId)
+        .order('requested_at', { ascending: false });
+    if (error) {
+        console.error('[db] getMyNFTLimitRequests error:', error);
+        return [];
+    }
+    return (data || []).map(mapNFTLimitRequest);
+}
+
+/** List all NFT limit requests (admin view). Enriched with artist display name + current limits. */
+export async function getAllNFTLimitRequests(statusFilter?: 'pending' | 'approved' | 'rejected'): Promise<NFTLimitRequest[]> {
+    let query = supabase
+        .from('nft_limit_requests')
+        .select(`*, profile:profiles!profile_id ( id, display_name, nft_listing_limit, allowed_nft_rarities )`)
+        .order('requested_at', { ascending: false });
+    if (statusFilter) query = query.eq('status', statusFilter);
+    const { data, error } = await query;
+    if (error) {
+        console.error('[db] getAllNFTLimitRequests error:', error);
+        return [];
+    }
+    return (data || []).map((row: any) => ({
+        ...mapNFTLimitRequest(row),
+        artistName: row.profile?.display_name ?? 'Unknown',
+        currentListingLimit: row.profile?.nft_listing_limit ?? null,
+        currentAllowedRarities: row.profile?.allowed_nft_rarities ?? null,
+    }));
+}
+
+function mapNFTLimitRequest(row: any): NFTLimitRequest {
+    return {
+        id: row.id,
+        profileId: row.profile_id,
+        requestedListingLimit: row.requested_listing_limit,
+        requestedRarities: row.requested_rarities,
+        reason: row.reason,
+        status: row.status,
+        adminNotes: row.admin_notes,
+        requestedAt: row.requested_at,
+        processedAt: row.processed_at,
+        processedBy: row.processed_by,
+    };
+}
+
+/** Admin: directly set an artist's NFT limit & allowed rarities. */
+export async function adminSetArtistNFTLimits(
+    profileId: string,
+    newLimit: number | null,
+    newRarities: NftRarity[] | null,
+): Promise<{ success: boolean; error?: string }> {
+    const patch: Record<string, any> = {};
+    if (newLimit !== null) patch.nft_listing_limit = newLimit;
+    if (newRarities !== null) patch.allowed_nft_rarities = newRarities;
+    if (Object.keys(patch).length === 0) return { success: true };
+
+    const { error } = await supabase.from('profiles').update(patch).eq('id', profileId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+}
+
+/** Admin: approve a pending limit request — applies the requested changes to the profile. */
+export async function adminApproveNFTLimitRequest(
+    requestId: string,
+    adminProfileId: string,
+    adminNotes?: string,
+): Promise<{ success: boolean; error?: string }> {
+    const { data: req, error: reqErr } = await supabase
+        .from('nft_limit_requests')
+        .select('*')
+        .eq('id', requestId)
+        .maybeSingle();
+    if (reqErr || !req) return { success: false, error: 'Request not found' };
+    if (req.status !== 'pending') return { success: false, error: 'Request is not pending' };
+
+    // Merge existing allowed rarities with requested ones (add, don't replace).
+    let newRarities: NftRarity[] | null = null;
+    if (req.requested_rarities && req.requested_rarities.length > 0) {
+        const { data: profile } = await supabase
+            .from('profiles').select('allowed_nft_rarities').eq('id', req.profile_id).maybeSingle();
+        const existing = (profile?.allowed_nft_rarities ?? ['common']) as NftRarity[];
+        const combined = Array.from(new Set([...existing, ...req.requested_rarities])) as NftRarity[];
+        newRarities = combined;
+    }
+
+    const setResult = await adminSetArtistNFTLimits(
+        req.profile_id,
+        req.requested_listing_limit ?? null,
+        newRarities,
+    );
+    if (!setResult.success) return setResult;
+
+    const { error: updErr } = await supabase
+        .from('nft_limit_requests')
+        .update({
+            status: 'approved',
+            admin_notes: adminNotes || null,
+            processed_at: new Date().toISOString(),
+            processed_by: adminProfileId,
+        })
+        .eq('id', requestId);
+    if (updErr) return { success: false, error: updErr.message };
+    return { success: true };
+}
+
+/** Admin: reject a pending limit request. */
+export async function adminRejectNFTLimitRequest(
+    requestId: string,
+    adminProfileId: string,
+    adminNotes?: string,
+): Promise<{ success: boolean; error?: string }> {
+    const { error } = await supabase
+        .from('nft_limit_requests')
+        .update({
+            status: 'rejected',
+            admin_notes: adminNotes || 'Rejected by admin',
+            processed_at: new Date().toISOString(),
+            processed_by: adminProfileId,
+        })
+        .eq('id', requestId)
+        .eq('status', 'pending');
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+}
+
+/** Does this profile have a pending (active) payout request? */
+export async function hasPendingPayout(profileId: string): Promise<boolean> {
+    const { count, error } = await supabase
+        .from('payout_requests')
+        .select('id', { count: 'exact', head: true })
+        .eq('profile_id', profileId)
+        .eq('status', 'pending');
+    if (error) {
+        console.warn('[db] hasPendingPayout error:', error);
+        return false;
+    }
+    return (count ?? 0) > 0;
+}
+
 /** Create a payout request with balance validation */
 export async function createPayoutRequest(
     profileId: string,
@@ -1946,6 +2192,16 @@ export async function createPayoutRequest(
     bankDetails: BankDetails,
     paymentMethod: string = 'bank_transfer',
 ): Promise<{ id: string | null; error?: string }> {
+    // PDF Fix #8: reject if an active (pending) request already exists.
+    // The edge function + DB unique index also enforce this; we check here
+    // first for a fast client-side error.
+    if (await hasPendingPayout(profileId)) {
+        return {
+            id: null,
+            error: 'You already have a pending payout request. Please wait for admin approval or rejection before submitting a new one.',
+        };
+    }
+
     // Validate against available balance locally
     const balance = await getArtistBalance(profileId);
     if (amountEur > balance.availableBalance) {

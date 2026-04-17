@@ -156,7 +156,7 @@ import { ActivityIndicator } from 'react-native';
 /* ─── Layout Entry Point ─── */
 export default function CreatorLayout() {
     const { isDark, colors } = useTheme();
-    const { isConnected, isLoading } = useAuth();
+    const { isConnected, isLoading, role } = useAuth();
 
     if (isLoading) {
         return (
@@ -169,6 +169,15 @@ export default function CreatorLayout() {
     // Guard: Redirect to login if not authenticated (handles web refresh on deep links)
     if (!isConnected) {
         return <Redirect href="/(auth)/login" />;
+    }
+
+    // Role-based redirect: only creators (or admins) may access artist routes.
+    // A listener manually visiting /dashboard is bounced back to consumer home.
+    if (role === 'listener') {
+        return <Redirect href="/(consumer)/home" />;
+    }
+    if (role === 'admin') {
+        return <Redirect href="/(admin)/dashboard" />;
     }
 
     const tabScreens = (

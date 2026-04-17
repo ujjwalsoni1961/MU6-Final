@@ -703,6 +703,12 @@ export async function createNFTRelease(
             .single();
 
         if (dbError) {
+            // Pass through listing-limit + tier errors verbatim (set by the
+            // enforce_nft_listing_limits trigger in migration 023).
+            if (dbError.message?.includes('NFT listing limit reached')
+                || dbError.message?.includes('NFT rarity')) {
+                return { success: false, error: dbError.message };
+            }
             if (dbError.message?.includes('50')) {
                 return { success: false, error: 'Total NFT royalty allocation would exceed 50% for this song.' };
             }

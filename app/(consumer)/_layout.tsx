@@ -38,7 +38,7 @@ import { ActivityIndicator, Text } from 'react-native';
 export default function ConsumerLayout() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
-    const { isConnected, isLoading } = useAuth();
+    const { isConnected, isLoading, role } = useAuth();
 
     if (isLoading) {
         return (
@@ -51,6 +51,15 @@ export default function ConsumerLayout() {
     // Guard: Redirect to login if not authenticated (handles web refresh on deep links)
     if (!isConnected) {
         return <Redirect href="/(auth)/login" />;
+    }
+
+    // Role-based redirect: creators and admins cannot view consumer routes.
+    // This prevents an artist from manually navigating to /home, /library, etc.
+    if (role === 'creator') {
+        return <Redirect href="/(artist)/dashboard" />;
+    }
+    if (role === 'admin') {
+        return <Redirect href="/(admin)/dashboard" />;
     }
 
     return (

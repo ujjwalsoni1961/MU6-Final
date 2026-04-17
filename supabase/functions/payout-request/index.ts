@@ -38,8 +38,7 @@ Deno.serve(async (req: Request) => {
         // Initialize Supabase admin client with the service role key to bypass RLS
         const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-        // Optional: Re-verify balance server side before insert (Recommended for security)
-        // Since we are creating a payout, we need to ensure the profile actually exists
+        // Ensure the profile actually exists
         const { data: profileExists, error: profileErr } = await supabaseAdmin
             .from("profiles")
             .select("id")
@@ -48,6 +47,28 @@ Deno.serve(async (req: Request) => {
 
         if (profileErr || !profileExists) {
             return jsonResponse({ error: "Profile not found" }, 404);
+        }
+
+        // PDF Fix #8: Reject if an active (pending) payout already exists for this profile.
+        // This is also enforced at the DB level by the partial unique index in migration 022,
+        // but we check here first so we can return a clean, specific error to the client.
+        const { data: existingPending, error: existingErr } = await supabaseAdmin
+            .from("payout_requests")
+            .select("id")
+            .eq("profile_id", profileId)
+            .eq("status", "pending")
+            .maybeSingle();
+
+        if (existingErr) {
+            console.error("[payout-request] Pending lookup error:", existingErr);
+            return jsonResponse({ success: false, error: "Failed to validate existing payout requests" }, 500);
+        }
+        if (existingPending) {
+            return jsonResponse({
+                success: false,
+                error: "You already have a pending payout request. Please wait for it to be approved or rejected before submitting a new one.",
+                code: "PENDING_PAYOUT_EXISTS",
+            }, 409);
         }
 
         // Insert the payout request securely bypassing RLS
@@ -64,6 +85,15 @@ Deno.serve(async (req: Request) => {
             .single();
 
         if (error || !data) {
+            // 23505 = unique_violation; this is the DB-level backstop if
+            // two requests land in parallel and beat our explicit check above.
+            if ((error as any)?.code === "23505") {
+                return jsonResponse({
+                    success: false,
+                    error: "You already have a pending payout request. Please wait for it to be approved or rejected before submitting a new one.",
+                    code: "PENDING_PAYOUT_EXISTS",
+                }, 409);
+            }
             console.error("[payout-request] Insert Error:", error);
             return jsonResponse({ success: false, error: error?.message || "Failed to create payout request" }, 500);
         }
