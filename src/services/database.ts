@@ -1447,6 +1447,79 @@ export async function getActiveListingForToken(nftTokenId: string): Promise<Mark
     return mapListingRow(data);
 }
 
+/**
+ * Batch: get DB NFTToken rows keyed by on_chain_token_id.
+ *
+ * Used by the on-chain-first collection view (useOwnedNFTsWithStatus).
+ * We hand it the set of token IDs that the wallet actually owns on-chain and
+ * it returns whatever DB metadata exists for them — tokens without DB rows
+ * are simply absent from the result (the hook synthesizes placeholders).
+ *
+ * Joins release → song → creator so the adapter has everything it needs.
+ * Soft-deleted songs are filtered out (same rule as getOwnedNFTsWithListingStatus).
+ */
+export async function getTokensByOnChainIds(
+    onChainIds: string[],
+): Promise<Record<string, NFTToken>> {
+    if (onChainIds.length === 0) return {};
+
+    const { data, error } = await supabase
+        .from('nft_tokens')
+        .select(`
+            *,
+            release:nft_releases!nft_release_id (
+                *,
+                song:songs!song_id (
+                    id, title, cover_path, creator_id, deleted_at,
+                    creator:profiles!creator_id (
+                        id, display_name, avatar_path
+                    )
+                )
+            )
+        `)
+        .in('on_chain_token_id', onChainIds)
+        .eq('is_voided', false);
+
+    if (error || !data) return {};
+
+    const out: Record<string, NFTToken> = {};
+    for (const row of data as any[]) {
+        // Same soft-delete filter as getOwnedNFTsWithListingStatus (PDF #11).
+        if (row.release?.song?.deleted_at) continue;
+        if (row.on_chain_token_id === null || row.on_chain_token_id === undefined) continue;
+        const key = String(row.on_chain_token_id);
+        out[key] = mapNFTTokenRow(row);
+    }
+    return out;
+}
+
+/**
+ * Batch version of getActiveListingForToken.
+ *
+ * Returns a map keyed by nft_token_id (the DB UUID, NOT the on-chain tokenId).
+ * Only active listings are returned. Missing entries mean the token is not
+ * currently listed.
+ */
+export async function getActiveListingsForTokens(
+    nftTokenIds: string[],
+): Promise<Record<string, MarketplaceListing>> {
+    if (nftTokenIds.length === 0) return {};
+
+    const { data, error } = await supabase
+        .from('marketplace_listings')
+        .select('*')
+        .in('nft_token_id', nftTokenIds)
+        .eq('is_active', true);
+
+    if (error || !data) return {};
+
+    const out: Record<string, MarketplaceListing> = {};
+    for (const row of data as any[]) {
+        out[row.nft_token_id] = mapListingRow(row);
+    }
+    return out;
+}
+
 /** Get owned NFTs with their listing status for the collection view */
 export async function getOwnedNFTsWithListingStatus(walletAddress: string): Promise<Array<{
     token: NFTToken;

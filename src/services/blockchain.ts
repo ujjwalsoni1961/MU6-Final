@@ -766,15 +766,26 @@ export async function createNFTRelease(
             }
 
             // 3. Set claim conditions with the correct price via server wallet.
-            //    This ensures the buyer is charged when they claim.
+            //    BLOCKING: the on-chain price is the source of truth. If we
+            //    allow the release to exist with a DB price that doesn't match
+            //    the active claim condition, buyers get charged the wrong
+            //    amount (this is exactly what caused the 0.01-vs-0.2 POL drift
+            //    on the OULU tier before admin role was granted). Roll back
+            //    both the DB row and the on-chain lazy mint on failure is not
+            //    possible (lazy-minted batches can't be undone cheaply), so we
+            //    rely on admin to retry; the DB row is cleared so the artist
+            //    can re-submit without the "release already exists" conflict.
             const priceWei = BigInt(Math.floor(config.priceEth * 1e18)).toString();
             const ccResult = await serverSetClaimConditions(priceWei);
             if (!ccResult.success) {
-                console.warn('[blockchain] Failed to set claim conditions (non-blocking):', ccResult.error);
-                // Don't roll back — the release exists, conditions can be set later
-            } else {
-                console.log('[blockchain] Claim conditions set with price:', config.priceEth, 'POL');
+                console.error('[blockchain] setClaimConditions FAILED, rolling back DB release:', ccResult.error);
+                await supabase.from('nft_releases').delete().eq('id', release.id);
+                return {
+                    success: false,
+                    error: `On-chain price setup failed: ${ccResult.error}. Release was rolled back; please retry.`,
+                };
             }
+            console.log('[blockchain] Claim conditions set with price:', config.priceEth, 'POL');
         }
 
         return { success: true, releaseId: release.id };

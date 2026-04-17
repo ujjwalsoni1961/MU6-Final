@@ -453,6 +453,48 @@ export async function buyMarketplaceListing(
             })
             .eq('id', listing.nft_token_id);
 
+        // Post-buy DB reconciliation guard.
+        //
+        // At this point the on-chain Transfer event has already been verified
+        // (buyer now owns the token on-chain). We also just wrote the DB row
+        // via the listing's nft_token_id. BUT — and this is the bug we keep
+        // hitting — the DB cache can drift from on-chain reality in a handful
+        // of subtle ways:
+        //
+        //   a) two DB rows accidentally share the same on_chain_token_id
+        //      (only one gets updated via .eq('id', ...)),
+        //   b) the listing's nft_token_id references a stale / soft-voided row
+        //      while a second, correct row exists for the same on-chain id,
+        //   c) direct wallet-to-wallet transfers happened out-of-band and
+        //      never landed in our DB.
+        //
+        // To make drift IMPOSSIBLE from this flow we do a second, unconditional
+        // write keyed by on_chain_token_id. This is the source of truth from
+        // the on-chain Transfer event we just verified — so overwriting every
+        // row with that on_chain_token_id to point at the buyer is correct.
+        try {
+            const tokenRow: any = listing.nft_token;
+            const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
+            if (chainTokenId && /^\d+$/.test(String(chainTokenId))) {
+                const { error: reconErr } = await supabase
+                    .from('nft_tokens')
+                    .update({
+                        owner_wallet_address: config.buyerWallet.toLowerCase(),
+                        last_transferred_at: now,
+                    })
+                    .eq('on_chain_token_id', String(chainTokenId));
+                if (reconErr) {
+                    console.warn('[marketplace] post-buy reconciliation update failed (non-fatal):', reconErr.message);
+                } else {
+                    console.log('[marketplace] post-buy DB reconciled: on_chain_token_id=', chainTokenId, '→', config.buyerWallet);
+                }
+            }
+        } catch (reconErr: any) {
+            // Non-fatal: the primary update already succeeded. Log so ops
+            // can notice if this path starts failing.
+            console.warn('[marketplace] post-buy reconciliation guard error (non-fatal):', reconErr?.message);
+        }
+
         // NOTE: NO royalty_events/royalty_shares creation here.
         // The MarketplaceV3 contract handles fund distribution:
         //   - 90% to seller

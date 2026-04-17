@@ -749,6 +749,22 @@ Deno.serve(async (req: Request) => {
             });
         }
 
+        // ── Deploy NFT Drop (DropERC721) — RETIRED ──
+        //
+        // The legacy Thirdweb Engine v1 /deploy/prebuilt/nft-drop endpoint
+        // returns 404 as of 2026-04. We no longer need this action: the
+        // existing drop contract 0xACF1145A... now has server wallet granted
+        // DEFAULT_ADMIN_ROLE so setClaimConditions works without a redeploy.
+        // If we ever need a fresh drop, redeploy via the thirdweb dashboard UI
+        // (web.thirdweb.com/polygon-amoy-testnet/deploy/DropERC721) manually.
+        if (action === "deployNftDrop") {
+            return jsonResponse({
+                success: false,
+                error: "deployNftDrop is retired. Deploy a new DropERC721 manually via thirdweb dashboard and update platform_settings.song_nft_contract_address.",
+            }, 410);
+        }
+
+
         // ── Set Default Royalty Info (EIP-2981) ──
         if (action === "setRoyalty") {
             const { royaltyRecipient, royaltyBps, contractAddress } = body;
