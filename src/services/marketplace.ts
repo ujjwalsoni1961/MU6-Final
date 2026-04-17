@@ -64,6 +64,84 @@ async function callSetRoyalty(
     }
 }
 
+/**
+ * ERC-721 Transfer event topic0:
+ *   keccak256("Transfer(address,address,uint256)")
+ */
+const ERC721_TRANSFER_TOPIC =
+    '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+/** Pad an address to a 32-byte topic (lowercase, 0x-prefixed). */
+function addressToTopic(addr: string): string {
+    const clean = addr.toLowerCase().replace(/^0x/, '');
+    return '0x' + clean.padStart(64, '0');
+}
+
+/** Normalize a hex tokenId topic to a BigInt for safe comparison. */
+function topicToBigInt(topic: string): bigint {
+    try {
+        return BigInt(topic);
+    } catch {
+        return BigInt(0);
+    }
+}
+
+/**
+ * Verify an ERC-721 ownership transfer happened inside a tx receipt.
+ *
+ * Rationale: after a buy tx is mined, calling readContract(ownerOf) can hit
+ * a stale RPC node that hasn't indexed the just-mined block yet, returning
+ * the pre-transfer owner. The receipt logs, however, are definitive — they
+ * ARE the events emitted in that exact tx. So we parse the receipt directly.
+ *
+ * Returns true iff we find at least one Transfer log where:
+ *   - log.address   == the NFT contract
+ *   - topics[0]     == ERC-721 Transfer signature
+ *   - topics[3]     == tokenId
+ *   - topics[2]     == buyer (padded)
+ */
+async function verifyBuyOwnershipTransfer(args: {
+    receipt: { logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string> }> };
+    nftContractAddress: string;
+    tokenId: bigint;
+    buyer: string;
+}): Promise<boolean> {
+    const nftAddrLc = args.nftContractAddress.toLowerCase();
+    const buyerTopic = addressToTopic(args.buyer);
+
+    for (const log of args.receipt.logs) {
+        if (!log?.address || log.address.toLowerCase() !== nftAddrLc) continue;
+        const topics = log.topics || [];
+        if (topics.length < 4) continue; // ERC-721 Transfer is indexed on all 3 params => 4 topics
+        if ((topics[0] || '').toLowerCase() !== ERC721_TRANSFER_TOPIC) continue;
+        if (topicToBigInt(topics[3]) !== args.tokenId) continue;
+        if ((topics[2] || '').toLowerCase() !== buyerTopic) continue;
+        return true;
+    }
+
+    // Safety-net fallback: the receipt didn't contain a matching Transfer log
+    // (shouldn't happen for a successful buyFromListing, but be defensive).
+    // Retry readContract(ownerOf) with backoff to let RPC catch up.
+    try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            const onChainOwner = await readContract({
+                contract: getSongNFTContract(),
+                method: 'function ownerOf(uint256 tokenId) view returns (address)',
+                params: [args.tokenId],
+            });
+            if ((onChainOwner as string).toLowerCase() === args.buyer.toLowerCase()) {
+                console.log('[marketplace] Ownership confirmed via fallback ownerOf after attempt', attempt + 1);
+                return true;
+            }
+        }
+    } catch (err: any) {
+        console.warn('[marketplace] fallback ownerOf retry failed:', err?.message);
+    }
+
+    return false;
+}
+
 // ────────────────────────────────────────────
 // On-chain marketplace operations
 // ────────────────────────────────────────────
@@ -312,26 +390,37 @@ export async function buyMarketplaceListing(
         // Verify the on-chain ownership change actually happened.
         // This catches edge cases where the tx succeeds but the NFT didn't
         // transfer (e.g. contract has a custom hook that silently skips).
+        //
+        // We parse the ERC-721 Transfer event directly from the receipt logs.
+        // This is the source of truth for the transfer that just happened in
+        // this specific tx — whereas a follow-up readContract(ownerOf) call
+        // can hit a stale RPC node that hasn't indexed the just-mined block
+        // yet and return the pre-transfer owner (RPC indexing race).
         try {
             const tokenRow: any = listing.nft_token;
             const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
             if (chainTokenId && /^\d+$/.test(chainTokenId)) {
-                const onChainOwner = await readContract({
-                    contract: getSongNFTContract(),
-                    method: 'function ownerOf(uint256 tokenId) view returns (address)',
-                    params: [BigInt(chainTokenId)],
+                const ownershipOk = await verifyBuyOwnershipTransfer({
+                    receipt: buyReceipt,
+                    nftContractAddress: CONTRACTS.SONG_NFT,
+                    tokenId: BigInt(chainTokenId),
+                    buyer: config.buyerWallet,
                 });
-                if ((onChainOwner as string).toLowerCase() !== config.buyerWallet.toLowerCase()) {
-                    console.error('[marketplace] ownership mismatch after buy tx', { onChainOwner, expected: config.buyerWallet });
+                if (!ownershipOk) {
+                    console.error('[marketplace] ownership mismatch after buy tx', {
+                        expected: config.buyerWallet,
+                        tokenId: chainTokenId,
+                        txHash,
+                    });
                     return {
                         success: false,
-                        error: 'Buy tx confirmed but on-chain ownership did not transfer. Contact support.',
+                        error: 'Buy tx confirmed but no matching NFT transfer event found on-chain. Contact support.',
                     };
                 }
-                console.log('[marketplace] On-chain ownership confirmed:', onChainOwner);
+                console.log('[marketplace] On-chain ownership confirmed via Transfer event for token', chainTokenId);
             }
         } catch (ownerErr: any) {
-            console.warn('[marketplace] ownerOf verification skipped:', ownerErr?.message);
+            console.warn('[marketplace] Transfer-log verification skipped:', ownerErr?.message);
         }
 
         // 3. Snapshot EUR rate
