@@ -276,7 +276,43 @@ export function useAdminNFTTokenActions(refresh: () => void) {
         refresh();
     }, [refresh]);
 
-    return { voidToken };
+    /**
+     * Reconcile DB NFT ownership with on-chain state.
+     * Calls the reconcile-nfts edge function which walks every nft_tokens row
+     * with an on_chain_token_id and syncs owner_wallet_address against ownerOf().
+     */
+    const reconcileOnChain = useCallback(async (): Promise<{
+        success: boolean;
+        summary?: { total: number; updated: number; voided: number; unchanged: number; errors: number };
+        error?: string;
+    }> => {
+        try {
+            const response = await fetch(`${SUPABASE_URL}/functions/v1/reconcile-nfts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({ profileId: 'superadmin' }),
+            });
+            const json = await response.json();
+            if (!response.ok || json.error) {
+                showToast(`Reconcile failed: ${json.error || response.statusText}`, 'error');
+                return { success: false, error: json.error || response.statusText };
+            }
+            await logAuditAction('reconcile_nfts', 'nft_token', 'all', json);
+            showToast(
+                `Reconciled ${json.total} tokens: ${json.updated} updated, ${json.voided} voided`,
+            );
+            refresh();
+            return { success: true, summary: json };
+        } catch (e: any) {
+            showToast(`Reconcile error: ${e?.message || String(e)}`, 'error');
+            return { success: false, error: e?.message };
+        }
+    }, [refresh]);
+
+    return { voidToken, reconcileOnChain };
 }
 
 // ────────────────────────────────────────────

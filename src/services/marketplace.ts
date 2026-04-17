@@ -98,12 +98,16 @@ export async function createMarketplaceListing(
             return { success: false, error: 'Not the token owner' };
         }
 
-        // Prefer the real on-chain token ID. Falls back to DB token_id only
-        // for legacy rows minted before migration 026 — those should still
-        // align with the on-chain sequential IDs in practice.
-        const chainTokenIdStr = token.on_chain_token_id || token.token_id;
-        if (!/^\d+$/.test(chainTokenIdStr)) {
-            return { success: false, error: 'Invalid on-chain token ID format' };
+        // Post-migration 028: require a real on_chain_token_id. The legacy
+        // `token_id` column (per-release edition number) is NOT usable for
+        // on-chain operations; any row missing on_chain_token_id is legacy
+        // data that cannot be listed.
+        const chainTokenIdStr = token.on_chain_token_id;
+        if (!chainTokenIdStr || !/^\d+$/.test(chainTokenIdStr)) {
+            return {
+                success: false,
+                error: 'This NFT is not verifiable on-chain and cannot be listed. Please contact support.',
+            };
         }
 
         // CRITICAL — verify on-chain ownership. This is the root cause of the

@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/database';
 import * as blockchain from '../services/blockchain';
+import { filterOnChainOwned } from './useOnChainNFT';
 import type {
     Song as DbSong,
     ArtistProfile as DbArtist,
@@ -1053,16 +1054,35 @@ export function useCancelListing() {
 // COLLECTION (Owned NFTs with listing status)
 // ────────────────────────────────────────────
 
-/** User's owned NFTs WITH listing status (for collection page) */
+/** User's owned NFTs WITH listing status (for collection page).
+ *
+ * Double-verification: DB query already filters to rows with non-null
+ * on_chain_token_id (post-Bug-14 era). We then call ownerOf() on-chain for each
+ * and drop any that have been transferred out directly (wallet-to-wallet sends
+ * bypassing the marketplace). This guarantees the collection view only shows
+ * NFTs the user actually holds on-chain right now.
+ */
 export function useOwnedNFTsWithStatus() {
     const { walletAddress } = useAuth();
     return useAsync(
         async () => {
             if (!walletAddress) return [];
             const results = await db.getOwnedNFTsWithListingStatus(walletAddress);
-            // Compute per-release edition numbers
-            const editionMap = await db.getEditionNumbers(results.map(r => r.token.id));
-            return results.map(({ token, activeListing }): OwnedNFT => {
+            if (results.length === 0) return [];
+
+            // On-chain verification: confirm each token is still owned by this wallet
+            const onChainIds = results
+                .map(r => r.token.onChainTokenId)
+                .filter((id): id is string => !!id);
+            const verified = await filterOnChainOwned(onChainIds, walletAddress);
+            const verifiedResults = results.filter(
+                r => r.token.onChainTokenId && verified.has(r.token.onChainTokenId),
+            );
+            if (verifiedResults.length === 0) return [];
+
+            // Compute per-release edition numbers (only for verified tokens)
+            const editionMap = await db.getEditionNumbers(verifiedResults.map(r => r.token.id));
+            return verifiedResults.map(({ token, activeListing }): OwnedNFT => {
                 const baseNFT = adaptNFTToken(token, editionMap[token.id]);
                 return {
                     ...baseNFT,

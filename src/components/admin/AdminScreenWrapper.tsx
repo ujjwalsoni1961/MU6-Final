@@ -299,6 +299,7 @@ export function StatusBadge({ status, color }: { status: string; color?: string 
         delisted: { bg: 'rgba(234,179,8,0.15)', text: '#facc15' },
         featured: { bg: 'rgba(139,92,246,0.15)', text: '#a78bfa' },
         verified: { bg: 'rgba(34,197,94,0.15)', text: '#4ade80' },
+        unverified: { bg: 'rgba(249,115,22,0.15)', text: '#fb923c' },
         voided: { bg: 'rgba(239,68,68,0.15)', text: '#f87171' },
         flagged: { bg: 'rgba(249,115,22,0.15)', text: '#fb923c' },
         approved: { bg: 'rgba(34,197,94,0.15)', text: '#4ade80' },

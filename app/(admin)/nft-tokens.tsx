@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, Platform } from 'react-native';
-import { Tag, Ban } from 'lucide-react-native';
+import { View, Text, Platform, Pressable, ActivityIndicator } from 'react-native';
+import { Tag, Ban, RefreshCw } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
 import { ActionButton, ConfirmModal, RowActions } from '../../src/components/admin/AdminActionComponents';
 import { useAdminNFTTokens } from '../../src/hooks/useAdminData';
@@ -14,7 +14,14 @@ export default function AdminNFTTokensScreen() {
     const actions = useAdminNFTTokenActions(refresh);
     const [voidTarget, setVoidTarget] = useState<{ id: string; tokenId: string } | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
+    const [reconciling, setReconciling] = useState(false);
     const { colors } = useTheme();
+
+    const handleReconcile = async () => {
+        setReconciling(true);
+        await actions.reconcileOnChain();
+        setReconciling(false);
+    };
 
     const handleVoid = async () => {
         if (!voidTarget) return;
@@ -28,8 +35,9 @@ export default function AdminNFTTokensScreen() {
         { label: 'Song', flex: 1.2 },
         { label: 'Tier', flex: 0.7 },
         { label: 'Rarity', flex: 0.7 },
-        { label: 'Token ID', flex: 0.8 },
+        { label: 'Chain ID', flex: 0.7 },
         { label: 'Owner', flex: 1 },
+        { label: 'Sync', flex: 0.6 },
         { label: 'Status', flex: 0.7 },
         { label: 'Actions', flex: 0.7 },
     ];
@@ -42,12 +50,37 @@ export default function AdminNFTTokensScreen() {
             error={error}
             onRetry={refresh}
         >
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 12 }}>
+                <Pressable
+                    onPress={handleReconcile}
+                    disabled={reconciling}
+                    style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: 'rgba(56,180,186,0.15)',
+                        borderWidth: 1,
+                        borderColor: '#38b4ba',
+                        borderRadius: 8,
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        gap: 8,
+                        opacity: reconciling ? 0.6 : 1,
+                    }}
+                >
+                    {reconciling
+                        ? <ActivityIndicator size="small" color="#38b4ba" />
+                        : <RefreshCw size={14} color="#38b4ba" />}
+                    <Text style={{ color: '#38b4ba', fontWeight: '600', fontSize: 13 }}>
+                        {reconciling ? 'Reconciling…' : 'Sync with chain'}
+                    </Text>
+                </Pressable>
+            </View>
             <AdminDataTable
-                headers={['Song', 'Tier', 'Rarity', 'Token ID', 'Owner', 'Status', 'Actions']}
+                headers={['Song', 'Tier', 'Rarity', 'Chain ID', 'Owner', 'Sync', 'Status', 'Actions']}
                 columns={tokenColumns}
                 data={tokens}
                 emptyMessage="No NFT tokens found"
-                minTableWidth={850}
+                minTableWidth={950}
                 renderRow={(t) => (
                     <View style={{
                         flexDirection: isWeb ? 'row' : 'column',
@@ -63,10 +96,13 @@ export default function AdminNFTTokensScreen() {
                                 </View>
                                 <Text style={{ flex: 0.7, color: colors.text.secondary, fontSize: 12 }}>{t.tierName}</Text>
                                 <View style={{ flex: 0.7 }}><StatusBadge status={t.rarity} /></View>
-                                <Text style={{ flex: 0.8, color: colors.text.secondary, fontSize: 12, fontFamily: 'monospace' }}>#{t.onChainTokenId || '—'}</Text>
+                                <Text style={{ flex: 0.7, color: colors.text.secondary, fontSize: 12, fontFamily: 'monospace' }}>#{t.onChainTokenId || '—'}</Text>
                                 <Text style={{ flex: 1, color: colors.text.muted, fontSize: 11, fontFamily: 'monospace' }}>
                                     {t.ownerWallet ? `${t.ownerWallet.slice(0, 6)}...${t.ownerWallet.slice(-4)}` : '—'}
                                 </Text>
+                                <View style={{ flex: 0.6 }}>
+                                    <StatusBadge status={t.onChainVerifiable ? 'verified' : 'unverified'} />
+                                </View>
                                 <View style={{ flex: 0.7 }}>
                                     <StatusBadge status={t.isVoided ? 'voided' : 'active'} />
                                 </View>
@@ -89,7 +125,9 @@ export default function AdminNFTTokensScreen() {
                                     <Tag size={18} color={t.isVoided ? colors.status.error : colors.status.success} style={{ marginRight: 10 }} />
                                     <View style={{ flex: 1 }}>
                                         <Text style={{ color: colors.text.primary, fontWeight: '600', fontSize: 14 }}>{t.songTitle}</Text>
-                                        <Text style={{ color: colors.text.secondary, fontSize: 12 }}>{t.tierName} | #{t.onChainTokenId}</Text>
+                                        <Text style={{ color: colors.text.secondary, fontSize: 12 }}>
+                                            {t.tierName} | #{t.onChainTokenId || '—'} {t.onChainVerifiable ? '✓' : '⚠'}
+                                        </Text>
                                     </View>
                                     <StatusBadge status={t.isVoided ? 'voided' : t.rarity} />
                                 </View>

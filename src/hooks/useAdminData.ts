@@ -338,13 +338,17 @@ export function useAdminNFTTokens(limit = 50) {
                 tierName: row.release?.tier_name || '',
                 rarity: row.release?.rarity || '',
                 ownerWallet: row.owner_wallet_address,
-                // PDF #14/#16 — prefer the real on-chain tokenId written by
-                // the atomic mint flow. Fall back to legacy `token_id` for
-                // rows that predate migration 026.
-                onChainTokenId: row.on_chain_token_id || row.token_id || '',
+                // Post-migration 028: on_chain_token_id is the ONLY source of
+                // truth. Legacy `token_id` (per-release edition number) is
+                // shown separately in a dedicated column and never used for
+                // on-chain verification.
+                onChainTokenId: row.on_chain_token_id || '',
+                legacyEditionId: row.token_id || '',
                 pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : 0,
                 isVoided: row.is_voided ?? false,
                 mintedAt: row.minted_at,
+                // Sync badge: a row is verifiable only if it has a real on-chain id.
+                onChainVerifiable: !!row.on_chain_token_id,
             }));
         },
         [],

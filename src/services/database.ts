@@ -1462,6 +1462,10 @@ export async function getOwnedNFTsWithListingStatus(walletAddress: string): Prom
         `)
         .eq('owner_wallet_address', walletAddress.toLowerCase())
         .eq('is_voided', false)
+        // Only tokens with a verified on-chain id are shown to consumers.
+        // Rows with on_chain_token_id=NULL are pre-Bug-14 legacy and cannot be
+        // verified against the blockchain — they're filtered out entirely.
+        .not('on_chain_token_id', 'is', null)
         .order('minted_at', { ascending: false });
 
     if (tokensError || !tokens || tokens.length === 0) return [];
