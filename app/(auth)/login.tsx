@@ -66,7 +66,7 @@ function WebLogin() {
             {/* Left side – branding */}
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}>
                 <Image
-                    source={require('../../assets/mu6-logo.png')}
+                    source={require('../../assets/mu6-logo-white.png')}
                     style={{ width: 120, height: 120, marginBottom: 24 }}
                     contentFit="contain"
                 />
@@ -191,7 +191,7 @@ function MobileLogin() {
                 showsVerticalScrollIndicator={false}
             >
                 <Image
-                    source={require('../../assets/mu6-logo.png')}
+                    source={isDark ? require('../../assets/mu6-logo-white.png') : require('../../assets/mu6-logo.png')}
                     style={{ width: 120, height: 120, marginBottom: 12 }}
                     contentFit="contain"
                 />

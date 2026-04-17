@@ -433,8 +433,9 @@ function ArtistDashboard() {
 
     const topSongs = [...creatorSongs].sort((a, b) => b.plays - a.plays).slice(0, 6);
 
-    // Use royalty engine total when available, fall back to dashboard estimate
-    const totalRevenueEur = royalties?.totalRevenue ?? dashboard?.totalRevenueEur ?? 0;
+    // Streaming revenue is always denominated in EUR. NFT sale revenue is on-chain
+    // in POL and intentionally NOT mixed into this EUR figure (see MU6 currency rules).
+    const streamingRevenueEur = royalties?.streamRevenue ?? dashboard?.totalRevenueEur ?? 0;
 
     const Container = isWeb ? View : SafeAreaView;
 
@@ -498,9 +499,9 @@ function ArtistDashboard() {
                         icon={<TrendingUp size={18} color="#38b4ba" />}
                     />
                     <StatCard
-                        title="Revenue"
-                        value={`€${totalRevenueEur.toFixed(2)}`}
-                        subtitle={royalties ? `${royalties.streamCount} streams · ${royalties.totalNFTsSold} NFTs sold` : undefined}
+                        title="Streaming Revenue"
+                        value={`€${streamingRevenueEur.toFixed(2)}`}
+                        subtitle={royalties ? `${royalties.streamCount} streams` : undefined}
                         icon={<DollarSign size={18} color="#38b4ba" />}
                         accent="#38b4ba"
                         highlight

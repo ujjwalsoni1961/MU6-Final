@@ -1103,6 +1103,15 @@ export async function getFollowersCount(artistId: string): Promise<number> {
         .eq('following_id', artistId);
     return count || 0;
 }
+
+/** How many artists this profile is currently following. */
+export async function getFollowingCount(profileId: string): Promise<number> {
+    const { count } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', profileId);
+    return count || 0;
+}
 // ────────────────────────────────────────────
 // CREATOR DASHBOARD
 // ────────────────────────────────────────────
@@ -1942,7 +1951,7 @@ export async function createPayoutRequest(
     if (amountEur > balance.availableBalance) {
         return {
             id: null,
-            error: `Insufficient balance. Available: ${balance.availableBalance.toFixed(4)} POL, requested: ${amountEur.toFixed(4)} POL`,
+            error: `Insufficient balance. Available: €${balance.availableBalance.toFixed(2)}, requested: €${amountEur.toFixed(2)}`,
         };
     }
 

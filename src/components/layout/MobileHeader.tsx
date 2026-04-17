@@ -163,7 +163,7 @@ export default function MobileHeader({ scrollY }: MobileHeaderProps) {
             >
                 {/* Logo */}
                 <Image
-                    source={require('../../../assets/mu6-logo.png')}
+                    source={isDark ? require('../../../assets/mu6-logo-white.png') : require('../../../assets/mu6-logo.png')}
                     style={{ width: 34, height: 34, borderRadius: 8 }}
                     contentFit="contain"
                 />

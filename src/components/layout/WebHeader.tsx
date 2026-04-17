@@ -123,7 +123,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                 style={{ flexDirection: 'row', alignItems: 'center', zIndex: 51 }}
             >
                 <Image
-                    source={require('../../../assets/mu6-logo.png')}
+                    source={isDark ? require('../../../assets/mu6-logo-white.png') : require('../../../assets/mu6-logo.png')}
                     style={{ width: 40, height: 40, borderRadius: 8 }}
                     contentFit="contain"
                 />

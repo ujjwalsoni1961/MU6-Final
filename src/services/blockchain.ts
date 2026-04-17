@@ -695,7 +695,9 @@ export async function createNFTRelease(
                 is_active: true,
                 description: config.description || null,
                 cover_image_path: config.coverImagePath || null,
-                benefits: config.benefits && config.benefits.length > 0 ? JSON.stringify(config.benefits) : '[]',
+                // JSONB columns accept JS arrays/objects directly via supabase-js; double-stringifying
+                // previously caused benefits to round-trip as an encoded string and not render.
+                benefits: config.benefits && config.benefits.length > 0 ? config.benefits : [],
             })
             .select()
             .single();

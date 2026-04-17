@@ -242,7 +242,7 @@ function WebArtistLogin() {
             {/* Left branding panel */}
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}>
                 <Image
-                    source={require('../../assets/mu6-logo.png')}
+                    source={require('../../assets/mu6-logo-white.png')}
                     style={{ width: 100, height: 100, marginBottom: 20 }}
                     contentFit="contain"
                 />

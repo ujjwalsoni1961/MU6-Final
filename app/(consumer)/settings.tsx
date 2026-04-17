@@ -261,7 +261,8 @@ export default function SettingsScreen() {
                         subtitle="Manage bank account for withdrawals"
                         onPress={() => router.push('/(consumer)/bank-details')}
                     />
-                    {role === 'listener' && (
+                    {/* Become a Creator: web-only (hidden on mobile per UX spec) */}
+                    {role === 'listener' && isWeb && (
                         <>
                             <Divider />
                             <SettingRow

@@ -530,6 +530,42 @@ export function useIsLiked(songId: string | undefined) {
     return { liked, toggle };
 }
 
+/**
+ * Live follower / following counts for a profile.
+ *
+ * The consumer profile previously hard-coded "Following: 0" which never
+ * updated. This hook fetches both counts and exposes a `refresh()` the
+ * screen can call after the user follows or unfollows an artist so the
+ * stats stay in sync with the `follows` table.
+ */
+export function useFollowCounts(profileId: string | undefined) {
+    const [counts, setCounts] = useState<{ followers: number; following: number }>({ followers: 0, following: 0 });
+    const [loading, setLoading] = useState(false);
+
+    const refresh = useCallback(async () => {
+        if (!profileId) {
+            setCounts({ followers: 0, following: 0 });
+            return;
+        }
+        setLoading(true);
+        try {
+            const [followers, following] = await Promise.all([
+                db.getFollowersCount(profileId),
+                db.getFollowingCount(profileId),
+            ]);
+            setCounts({ followers, following });
+        } finally {
+            setLoading(false);
+        }
+    }, [profileId]);
+
+    useEffect(() => {
+        refresh();
+    }, [refresh]);
+
+    return { ...counts, loading, refresh };
+}
+
 /** Check if current user follows an artist */
 export function useIsFollowing(artistId: string | undefined) {
     const { profile } = useAuth();

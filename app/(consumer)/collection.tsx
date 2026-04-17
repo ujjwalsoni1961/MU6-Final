@@ -6,7 +6,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Gem, Tag, X, DollarSign } from 'lucide-react-native';
+import { Gem, Tag, X } from 'lucide-react-native';
+import PolygonIcon from '../../src/components/shared/PolygonIcon';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import TabPill from '../../src/components/shared/TabPill';
 import NFTCard from '../../src/components/shared/NFTCard';
@@ -443,7 +444,7 @@ export default function CollectionScreen() {
                                     paddingHorizontal: 16,
                                     marginBottom: 12,
                                 }}>
-                                    <DollarSign size={18} color={colors.text.secondary} />
+                                    <PolygonIcon size={18} color={colors.text.secondary} />
                                     <TextInput
                                         value={modalMode === 'list' ? listPrice : newPrice}
                                         onChangeText={modalMode === 'list' ? setListPrice : setNewPrice}

@@ -8,7 +8,7 @@ import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet, B
 import GlassCard from '../../src/components/shared/GlassCard';
 import NFTCard from '../../src/components/shared/NFTCard';
 import { useAuth } from '../../src/context/AuthContext';
-import { useOwnedNFTs, useLikedSongs, useUserActivity } from '../../src/hooks/useData';
+import { useOwnedNFTs, useLikedSongs, useUserActivity, useFollowCounts } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useCurrency } from '../../src/hooks/useCurrency';
 import * as Clipboard from 'expo-clipboard';
@@ -59,13 +59,15 @@ export default function ProfileScreen() {
     const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
     const { data: likedSongs, refresh: refreshLiked } = useLikedSongs();
     const { data: recentActivity, loading: loadingActivity, refresh: refreshActivity } = useUserActivity();
+    const { following: followingCount, refresh: refreshFollowCounts } = useFollowCounts(profile?.id);
 
     useFocusEffect(
         useCallback(() => {
             refreshNFTs();
             refreshLiked();
             refreshActivity();
-        }, [refreshNFTs, refreshLiked, refreshActivity])
+            refreshFollowCounts();
+        }, [refreshNFTs, refreshLiked, refreshActivity, refreshFollowCounts])
     );
 
     const onRefresh = useCallback(async () => {
@@ -74,9 +76,10 @@ export default function ProfileScreen() {
             refreshNFTs(),
             refreshLiked(),
             refreshActivity(),
+            refreshFollowCounts(),
         ]);
         setRefreshing(false);
-    }, [refreshNFTs, refreshLiked, refreshActivity]);
+    }, [refreshNFTs, refreshLiked, refreshActivity, refreshFollowCounts]);
 
     const displayName = profile?.displayName || 'Anonymous';
     const truncatedWallet = walletAddress ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : '0x0000...0000';
@@ -236,8 +239,8 @@ export default function ProfileScreen() {
                     </AnimatedPressable>
                 )}
 
-                {/* Become a Creator CTA – only for listeners */}
-                {role === 'listener' && (
+                {/* Become a Creator CTA – only for listeners on web (hidden on mobile per UX spec) */}
+                {role === 'listener' && isWeb && (
                     <AnimatedPressable
                         preset="row"
                         onPress={() => router.push('/(auth)/creator-register')}
@@ -270,7 +273,7 @@ export default function ProfileScreen() {
                 <View style={{ flexDirection: 'row', marginBottom: 28 }}>
                     <StatCard icon={<Gem size={22} color="#8b5cf6" />} value={ownedNFTs.length} label="NFTs" />
                     <StatCard icon={<Heart size={22} color="#ef4444" />} value={likedSongs.length} label="Liked" />
-                    <StatCard icon={<UsersIcon size={22} color="#38b4ba" />} value={0} label="Following" />
+                    <StatCard icon={<UsersIcon size={22} color="#38b4ba" />} value={followingCount} label="Following" />
                 </View>
 
                 {/* My NFTs */}

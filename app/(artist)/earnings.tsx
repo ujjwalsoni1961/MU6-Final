@@ -117,9 +117,10 @@ function SongRevenueRow({ song, onPress }: {
                 <Text style={{ fontSize: 12, color: colors.text.secondary, marginTop: 2 }}>{song.streamCount.toLocaleString()} streams</Text>
             </View>
             <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#38b4ba' }}>{song.totalRevenue.toFixed(4)} POL</Text>
+                {/* Streaming revenue is denominated in EUR per MU6 currency rules. */}
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#38b4ba' }}>€{song.streamRevenue.toFixed(2)}</Text>
                 {song.nftRevenue > 0 && (
-                    <Text style={{ fontSize: 10, color: '#8b5cf6', fontWeight: '600', marginTop: 2 }}>+{song.nftRevenue.toFixed(4)} NFT</Text>
+                    <Text style={{ fontSize: 10, color: '#8b5cf6', fontWeight: '600', marginTop: 2 }}>+€{song.nftRevenue.toFixed(2)} NFT royalties</Text>
                 )}
             </View>
             {onPress && <ArrowRight size={16} color={colors.text.muted} style={{ marginLeft: 8 }} />}
@@ -240,7 +241,7 @@ function RoyaltyRow({ share }: { share: any }) {
                     <Text style={{ fontSize: 11, color: colors.text.muted }}>{share.sharePercent}% share</Text>
                 </View>
             </View>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.primary }}>{share.amountEur.toFixed(4)} POL</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.primary }}>€{share.amountEur.toFixed(2)}</Text>
         </View>
     );
 }
@@ -389,20 +390,21 @@ export default function EarningsScreen() {
 
                 {/* ── Section 1: Overview Cards ── */}
                 <View style={{ flexDirection: 'row', marginBottom: 4 }}>
-                    <OverviewCard title="Streaming" amount={`${streamingRevenue.toFixed(4)} POL`} subtitle="Accrued" color="#38b4ba" />
-                    <OverviewCard title="NFT Sales" amount={`${totalNFTRevenue.toFixed(4)} POL`} subtitle="On-chain" color="#8b5cf6" />
+                    {/* Streaming revenue is EUR; NFT sale POL totals come from the wallet card below. */}
+                    <OverviewCard title="Streaming" amount={`€${streamingRevenue.toFixed(2)}`} subtitle="Accrued" color="#38b4ba" />
+                    <OverviewCard title="NFT Royalties" amount={`€${totalNFTRevenue.toFixed(2)}`} subtitle="Split-sheet accrual" color="#8b5cf6" />
                 </View>
                 <View style={{ flexDirection: 'row', marginBottom: 20 }}>
                     <OverviewCard
                         title="Available for Payout"
-                        amount={`${(availableBalance?.availableBalance || 0).toFixed(4)} POL`}
+                        amount={`€${(availableBalance?.availableBalance || 0).toFixed(2)}`}
                         subtitle="Streaming only"
                         color="#22c55e"
                     />
                     <OverviewCard
                         title="Total Earned"
-                        amount={`${totalEarned.toFixed(4)} POL`}
-                        subtitle="All sources"
+                        amount={`€${totalEarned.toFixed(2)}`}
+                        subtitle="All fiat sources"
                         color={colors.text.primary}
                         highlight
                     />
@@ -452,8 +454,8 @@ export default function EarningsScreen() {
                                 <Text style={{ fontSize: 9, fontWeight: '700', color: colors.text.muted, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 }}>Streams</Text>
                             </View>
                             <View style={{ flex: 1, padding: 12, borderRadius: 12, backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)', alignItems: 'center' }}>
-                                <Text style={{ fontSize: 18, fontWeight: '800', color: '#38b4ba' }}>{streamingRevenue.toFixed(4)}</Text>
-                                <Text style={{ fontSize: 9, fontWeight: '700', color: colors.text.muted, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 }}>POL Earned</Text>
+                                <Text style={{ fontSize: 18, fontWeight: '800', color: '#38b4ba' }}>€{streamingRevenue.toFixed(2)}</Text>
+                                <Text style={{ fontSize: 9, fontWeight: '700', color: colors.text.muted, textTransform: 'uppercase', letterSpacing: 1, marginTop: 2 }}>EUR Earned</Text>
                             </View>
                         </View>
 
