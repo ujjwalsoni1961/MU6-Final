@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/database';
 import * as blockchain from '../services/blockchain';
-import { filterOnChainOwned, enumerateOwnedTokenIds } from './useOnChainNFT';
+import { filterOnChainOwned, enumerateOwnedTokenIds, readErc1155Balance } from './useOnChainNFT';
 import type {
     Song as DbSong,
     ArtistProfile as DbArtist,
@@ -1074,77 +1074,115 @@ export function useOwnedNFTsWithStatus() {
         async () => {
             if (!walletAddress) return [];
 
-            // Step 1: on-chain discovery — authoritative list of what the wallet owns
-            const rawOnChainTokenIds = await enumerateOwnedTokenIds(walletAddress);
-            if (rawOnChainTokenIds.length === 0) return [];
-
-            // Step 1a: filter out ghost tokens (pre-prod / legacy junk from before
-            // the atomic mint flow — see migration 030 / nft_ghost_tokens table).
-            // We do this in-hook rather than in enumerateOwnedTokenIds so that
-            // enumeration stays a pure on-chain read — admin tools that want the
-            // full raw set (e.g. for reconciliation) can still get it.
-            const ghostIds = await db.getGhostTokenIds();
-            const onChainTokenIds = rawOnChainTokenIds.filter((id) => !ghostIds.has(id));
-            if (onChainTokenIds.length === 0) return [];
-
-            // Step 2: pull DB rows for every on-chain tokenId (if they exist) plus
-            //        active listings. Fetch both in parallel.
-            const dbTokensByOnChainId = await db.getTokensByOnChainIds(onChainTokenIds);
-            const dbTokenIds = Object.values(dbTokensByOnChainId).map((t) => t.id);
-
-            const [editionMap, activeListingsByTokenId] = await Promise.all([
-                dbTokenIds.length > 0 ? db.getEditionNumbers(dbTokenIds) : Promise.resolve({} as Record<string, number>),
-                dbTokenIds.length > 0 ? db.getActiveListingsForTokens(dbTokenIds) : Promise.resolve({} as Record<string, DbListing>),
-            ]);
-
-            // Step 3: build the OwnedNFT list, preserving on-chain order.
             const out: OwnedNFT[] = [];
-            for (const onChainId of onChainTokenIds) {
-                const dbToken = dbTokensByOnChainId[onChainId];
-                if (dbToken) {
-                    const baseNFT = adaptNFTToken(dbToken, editionMap[dbToken.id]);
-                    const activeListing = activeListingsByTokenId[dbToken.id];
-                    out.push({
-                        ...baseNFT,
-                        tokenDbId: dbToken.id,
-                        onChainTokenId: onChainId,
-                        ownershipStatus: activeListing ? 'listed' : 'unlisted',
-                        activeListingId: activeListing?.id,
-                        activeListingPrice: activeListing?.priceEth,
-                        chainListingId: activeListing?.chainListingId || undefined,
-                    });
-                } else {
-                    // No DB row — the NFT exists on-chain but isn't tracked in our
-                    // metadata cache. Show a placeholder entry so the user knows
-                    // they own it. Title, artist, cover are unknown until the
-                    // DB reconciler picks this up (post-buy guard / admin tool).
-                    out.push({
-                        id: `onchain-${onChainId}`,
-                        songId: '',
-                        creatorId: '',
-                        songTitle: `Token #${onChainId}`,
-                        artistName: 'Unknown (off-chain metadata missing)',
-                        coverImage: 'https://placehold.co/400x400/1e293b/94a3b8?text=♪',
-                        price: 0,
-                        editionNumber: 0,
-                        totalEditions: 0,
-                        mintedCount: 0,
-                        owner: walletAddress,
-                        rarity: 'common',
-                        tierName: undefined,
-                        description: undefined,
-                        benefits: undefined,
-                        allocatedRoyaltyPercent: undefined,
-                        onChainTokenId: onChainId,
-                        ownerWallet: walletAddress,
-                        tokenDbId: '',
-                        ownershipStatus: 'unlisted',
-                        activeListingId: undefined,
-                        activeListingPrice: undefined,
-                        chainListingId: undefined,
-                    });
+
+            // ── Part A: Legacy ERC-721 (DropERC721) ──
+            // On-chain-first discovery: totalSupply + ownerOf scan.
+            const rawOnChainTokenIds = await enumerateOwnedTokenIds(walletAddress);
+            if (rawOnChainTokenIds.length > 0) {
+                // Filter out ghost tokens (pre-prod / legacy junk — migration 030).
+                const ghostIds = await db.getGhostTokenIds();
+                const onChainTokenIds = rawOnChainTokenIds.filter((id) => !ghostIds.has(id));
+
+                if (onChainTokenIds.length > 0) {
+                    const dbTokensByOnChainId = await db.getTokensByOnChainIds(onChainTokenIds);
+                    const dbTokenIds = Object.values(dbTokensByOnChainId).map((t) => t.id);
+
+                    const [editionMap, activeListingsByTokenId] = await Promise.all([
+                        dbTokenIds.length > 0 ? db.getEditionNumbers(dbTokenIds) : Promise.resolve({} as Record<string, number>),
+                        dbTokenIds.length > 0 ? db.getActiveListingsForTokens(dbTokenIds) : Promise.resolve({} as Record<string, DbListing>),
+                    ]);
+
+                    for (const onChainId of onChainTokenIds) {
+                        const dbToken = dbTokensByOnChainId[onChainId];
+                        if (dbToken) {
+                            // Skip ERC-1155 rows that might share a low numeric id with legacy
+                            // ERC-721 tokens. They're handled by Part B below.
+                            if (dbToken.release?.nftStandard === 'erc1155') continue;
+                            const baseNFT = adaptNFTToken(dbToken, editionMap[dbToken.id]);
+                            const activeListing = activeListingsByTokenId[dbToken.id];
+                            out.push({
+                                ...baseNFT,
+                                tokenDbId: dbToken.id,
+                                onChainTokenId: onChainId,
+                                ownershipStatus: activeListing ? 'listed' : 'unlisted',
+                                activeListingId: activeListing?.id,
+                                activeListingPrice: activeListing?.priceEth,
+                                chainListingId: activeListing?.chainListingId || undefined,
+                            });
+                        } else {
+                            // No DB row — NFT exists on-chain but isn't tracked. Placeholder.
+                            out.push({
+                                id: `onchain-${onChainId}`,
+                                songId: '',
+                                creatorId: '',
+                                songTitle: `Token #${onChainId}`,
+                                artistName: 'Unknown (off-chain metadata missing)',
+                                coverImage: 'https://placehold.co/400x400/1e293b/94a3b8?text=♪',
+                                price: 0,
+                                editionNumber: 0,
+                                totalEditions: 0,
+                                mintedCount: 0,
+                                owner: walletAddress,
+                                rarity: 'common',
+                                tierName: undefined,
+                                description: undefined,
+                                benefits: undefined,
+                                allocatedRoyaltyPercent: undefined,
+                                onChainTokenId: onChainId,
+                                ownerWallet: walletAddress,
+                                tokenDbId: '',
+                                ownershipStatus: 'unlisted',
+                                activeListingId: undefined,
+                                activeListingPrice: undefined,
+                                chainListingId: undefined,
+                            });
+                        }
+                    }
                 }
             }
+
+            // ── Part B: ERC-1155 (DropERC1155) ──
+            // DB-first: nft_tokens has one ledger row per claim (per holder).
+            // Then verify on-chain with balanceOf(wallet, tokenId) > 0 to drop
+            // stale rows where the wallet has since transferred all copies out.
+            const erc1155Tokens = await db.getErc1155OwnedTokens(walletAddress);
+            if (erc1155Tokens.length > 0) {
+                // Batch the on-chain balance checks in parallel.
+                const balanceChecks = await Promise.all(
+                    erc1155Tokens.map(async (t) => {
+                        const contract = t.release?.contractAddress;
+                        const tokenIdStr = t.onChainTokenId;
+                        if (!contract || tokenIdStr == null) return 0n;
+                        try {
+                            return await readErc1155Balance(contract, walletAddress, BigInt(tokenIdStr));
+                        } catch {
+                            return 0n;
+                        }
+                    }),
+                );
+
+                const liveTokens = erc1155Tokens.filter((_, i) => balanceChecks[i] > 0n);
+                if (liveTokens.length > 0) {
+                    const liveTokenIds = liveTokens.map((t) => t.id);
+                    const activeListingsByTokenId = await db.getActiveListingsForTokens(liveTokenIds);
+
+                    for (const token of liveTokens) {
+                        const baseNFT = adaptNFTToken(token, 0);
+                        const activeListing = activeListingsByTokenId[token.id];
+                        out.push({
+                            ...baseNFT,
+                            tokenDbId: token.id,
+                            onChainTokenId: token.onChainTokenId || '0',
+                            ownershipStatus: activeListing ? 'listed' : 'unlisted',
+                            activeListingId: activeListing?.id,
+                            activeListingPrice: activeListing?.priceEth,
+                            chainListingId: activeListing?.chainListingId || undefined,
+                        });
+                    }
+                }
+            }
+
             return out;
         },
         [] as OwnedNFT[],

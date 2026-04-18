@@ -1331,20 +1331,54 @@ export async function mintToken(
             ? pricePaidToken * eurRateAtSale
             : null;
 
-        const { data: token, error: tokenErr } = await supabase
-            .from('nft_tokens')
-            .insert({
-                nft_release_id: releaseId,
-                token_id: dbTokenId,
-                on_chain_token_id: onChainTokenId,
-                owner_wallet_address: buyerWallet.toLowerCase(),
-                mint_tx_hash: mintTxHash,
-                price_paid_eth: pricePaidToken,
-                price_paid_token: pricePaidToken,
-                price_paid_eur_at_sale: pricePaidEurAtSale,
-            })
-            .select()
-            .maybeSingle();
+        // For ERC-1155, the edge function already inserts the nft_tokens ledger
+        // row (self-healing path in supabase/functions/nft-admin/index.ts). Skip
+        // the client-side insert to avoid a duplicate-key race; just look up the
+        // row the edge function created and continue.
+        const isErc1155 = release.nft_standard === 'erc1155';
+
+        let token: any = null;
+        let tokenErr: any = null;
+
+        if (isErc1155) {
+            // Edge function owns the insert for ERC-1155. Fetch the row it created.
+            const { data: erc1155Row, error: erc1155Err } = await supabase
+                .from('nft_tokens')
+                .select('*')
+                .eq('nft_release_id', releaseId)
+                .eq('token_id', dbTokenId)
+                .eq('owner_wallet_address', buyerWallet.toLowerCase())
+                .maybeSingle();
+            if (erc1155Err) {
+                console.warn('[blockchain] ERC-1155 post-mint row lookup failed:', erc1155Err.message);
+            }
+            token = erc1155Row || null;
+
+            // Backfill price fields if the edge function didn't write them.
+            if (token && token.price_paid_eur_at_sale == null && pricePaidEurAtSale != null) {
+                await supabase
+                    .from('nft_tokens')
+                    .update({ price_paid_eur_at_sale: pricePaidEurAtSale })
+                    .eq('id', token.id);
+            }
+        } else {
+            const result = await supabase
+                .from('nft_tokens')
+                .insert({
+                    nft_release_id: releaseId,
+                    token_id: dbTokenId,
+                    on_chain_token_id: onChainTokenId,
+                    owner_wallet_address: buyerWallet.toLowerCase(),
+                    mint_tx_hash: mintTxHash,
+                    price_paid_eth: pricePaidToken,
+                    price_paid_token: pricePaidToken,
+                    price_paid_eur_at_sale: pricePaidEurAtSale,
+                })
+                .select()
+                .maybeSingle();
+            token = result.data;
+            tokenErr = result.error;
+        }
 
         if (tokenErr) {
             console.error('[blockchain] nft_tokens insert error:', tokenErr.message);

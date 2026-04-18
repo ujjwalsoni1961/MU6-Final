@@ -171,6 +171,52 @@ export function invalidateOnChainCaches() {
     ownerCache.clear();
     balanceCache.clear();
     ownedTokensCache.clear();
+    erc1155BalanceCache.clear();
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ERC-1155 on-chain balance reader
+// ─────────────────────────────────────────────────────────────────────────
+//
+// DropERC1155 balanceOf(address account, uint256 id) returns the number of
+// copies of `id` held by `account`. We use this to filter the DB-first list
+// of ERC-1155 ledger rows down to tokens the wallet still actually owns.
+
+type Erc1155BalanceCacheEntry = { balance: bigint; at: number };
+const erc1155BalanceCache = new Map<string, Erc1155BalanceCacheEntry>();
+const ERC1155_BALANCE_CACHE_MS = 30_000;
+
+/**
+ * Read the on-chain ERC-1155 balance of (wallet, tokenId) on a given contract.
+ * Returns 0n on any error so the caller fails-closed (treat as "not owned").
+ */
+export async function readErc1155Balance(
+    contract: string,
+    wallet: string,
+    tokenId: bigint,
+): Promise<bigint> {
+    const cacheKey = `${contract.toLowerCase()}:${wallet.toLowerCase()}:${tokenId.toString()}`;
+    const cached = erc1155BalanceCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < ERC1155_BALANCE_CACHE_MS) {
+        return cached.balance;
+    }
+
+    // balanceOf(address account, uint256 id) selector = 0x00fdd58e
+    const walletHex = wallet.replace(/^0x/, '').toLowerCase().padStart(64, '0');
+    const tokenHex = uint256Hex(tokenId);
+    try {
+        const res = await rpcCall('eth_call', [{
+            to: contract,
+            data: '0x00fdd58e' + walletHex + tokenHex,
+        }, 'latest']);
+        const bal = BigInt(res || '0x0');
+        erc1155BalanceCache.set(cacheKey, { balance: bal, at: Date.now() });
+        return bal;
+    } catch (err: any) {
+        console.warn('[useOnChainNFT] readErc1155Balance failed:', err?.message);
+        erc1155BalanceCache.set(cacheKey, { balance: 0n, at: Date.now() });
+        return 0n;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

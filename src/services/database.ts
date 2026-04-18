@@ -64,6 +64,10 @@ export interface NFTRelease {
     description: string | null;
     coverImagePath: string | null;
     benefits: { title: string; description: string }[];
+    /** 'erc721' (legacy DropERC721) or 'erc1155' (new DropERC1155). Defaults to 'erc721'. */
+    nftStandard: 'erc721' | 'erc1155';
+    /** On-chain token id for ERC-1155 releases (one release = one tokenId). Null for ERC-721. */
+    tokenId: number | null;
     // Joined
     song?: Song;
 }
@@ -1514,6 +1518,51 @@ export async function getTokensByOnChainIds(
 }
 
 /**
+ * Get the DB ledger rows for every ERC-1155 token this wallet owns.
+ *
+ * ERC-1155 is fungible within a tokenId — many wallets can own copies of the
+ * same (contract, tokenId). We store one nft_tokens row per claim (ledger
+ * model) so we can track per-holder mint price, tx hash, and timestamps.
+ *
+ * The collection view uses this as the DB-first source of truth for ERC-1155
+ * holdings and then filters by on-chain `balanceOf(wallet, tokenId) > 0` to
+ * keep the displayed list honest if the wallet ever transfers a copy out.
+ *
+ * Returns an array of NFTToken with `release` populated (joined). Tokens whose
+ * underlying song was soft-deleted are filtered out.
+ */
+export async function getErc1155OwnedTokens(walletAddress: string): Promise<NFTToken[]> {
+    const { data, error } = await supabase
+        .from('nft_tokens')
+        .select(`
+            *,
+            release:nft_releases!nft_release_id (
+                *,
+                song:songs!song_id (
+                    id, title, cover_path, creator_id, deleted_at,
+                    creator:profiles!creator_id (
+                        id, display_name, avatar_path
+                    )
+                )
+            )
+        `)
+        .eq('owner_wallet_address', walletAddress.toLowerCase())
+        .eq('is_voided', false)
+        .not('on_chain_token_id', 'is', null)
+        .order('minted_at', { ascending: false });
+
+    if (error || !data) return [];
+
+    const out: NFTToken[] = [];
+    for (const row of data as any[]) {
+        if (row.release?.nft_standard !== 'erc1155') continue;
+        if (row.release?.song?.deleted_at) continue;
+        out.push(mapNFTTokenRow(row));
+    }
+    return out;
+}
+
+/**
  * Get the set of on-chain token ids that the UI must treat as non-existent.
  *
  * These are legacy / pre-production tokens that live on the drop contract
@@ -1814,6 +1863,7 @@ function mapArtistRow(row: any): ArtistProfile {
 }
 
 function mapNFTReleaseRow(row: any): NFTRelease {
+    const standard = row.nft_standard === 'erc1155' ? 'erc1155' : 'erc721';
     return {
         id: row.id,
         songId: row.song_id,
@@ -1830,6 +1880,8 @@ function mapNFTReleaseRow(row: any): NFTRelease {
         description: row.description || null,
         coverImagePath: row.cover_image_path || null,
         benefits: row.benefits || [],
+        nftStandard: standard,
+        tokenId: row.token_id != null ? Number(row.token_id) : null,
         song: row.song ? mapSongRow(row.song) : undefined,
     };
 }
