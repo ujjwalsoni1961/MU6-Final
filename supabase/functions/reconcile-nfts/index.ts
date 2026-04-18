@@ -1,18 +1,23 @@
 /**
- * reconcile-nfts
+ * reconcile-nfts (DropERC1155)
  *
- * Admin-callable edge function that reconciles the `nft_tokens` table with the
- * on-chain NFT contract state. For every row in the DB that has an
- * `on_chain_token_id`, we call `ownerOf(tokenId)` on-chain and update the
- * `owner_wallet_address` + `last_transferred_at` if they differ. Rows that
- * revert on `ownerOf` (token burned or non-existent) are flagged as voided.
+ * Admin-callable edge function that reconciles the `nft_tokens` ledger with
+ * on-chain DropERC1155 state.
  *
- * This complements the mint-time writes from admin-action: it covers the case
- * where an NFT is transferred directly (wallet-to-wallet) outside the
- * marketplace, which doesn't trigger any app-level event.
+ * Each `nft_tokens` row represents one copy of a release-scoped tokenId owned
+ * by one wallet. We verify each row by calling
+ *   balanceOf(owner_wallet_address, on_chain_token_id)
+ * on the release's `contract_address` and comparing to the wallet's share of
+ * the ledger (count of non-voided rows with the same owner × tokenId).
+ *
+ * If the ledger overcounts relative to on-chain, we void the excess rows
+ * (oldest first) so the UI stops showing tokens the wallet has already
+ * transferred away. We don't attempt to "discover" new wallets here — new
+ * owners arrive via claim (admin-action) or marketplace buy (marketplace.ts),
+ * both of which insert rows directly.
  *
  * Request body: { profileId: 'superadmin' }
- * Response: { updated: number, voided: number, unchanged: number, errors: number }
+ * Response: { success, total, voided, unchanged, errors, report }
  */
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -22,8 +27,6 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RPC_URL = Deno.env.get("AMOY_RPC_URL") ||
     "https://80002.rpc.thirdweb.com/64c9d6a04c2edcf1c8b117db980edd41";
-const NFT_CONTRACT = Deno.env.get("NFT_CONTRACT_ADDRESS") ||
-    "0xACF1145AdE250D356e1B2869E392e6c748c14C0E";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -39,8 +42,13 @@ function jsonResponse(data: any, status = 200) {
     });
 }
 
-function uintHex(n: string): string {
-    return "0x" + BigInt(n).toString(16).padStart(64, "0");
+function padHex(value: string | bigint): string {
+    const n = typeof value === "bigint" ? value : BigInt(value);
+    return n.toString(16).padStart(64, "0");
+}
+
+function addrPad(addr: string): string {
+    return addr.replace(/^0x/, "").toLowerCase().padStart(64, "0");
 }
 
 async function rpc(method: string, params: any[]): Promise<any> {
@@ -54,16 +62,32 @@ async function rpc(method: string, params: any[]): Promise<any> {
     return j.result;
 }
 
-async function ownerOf(tokenId: string): Promise<string | null> {
+/**
+ * ERC-1155 balanceOf(address account, uint256 id) — selector 0x00fdd58e.
+ * Returns 0 on any RPC error (fail-closed for reconcile).
+ */
+async function erc1155BalanceOf(
+    contract: string,
+    wallet: string,
+    tokenId: string,
+): Promise<bigint> {
     try {
-        // ownerOf(uint256) selector = 0x6352211e
-        const data = "0x6352211e" + uintHex(tokenId).slice(2);
-        const res = await rpc("eth_call", [{ to: NFT_CONTRACT, data }, "latest"]);
-        if (!res || res === "0x") return null;
-        return "0x" + res.slice(26).toLowerCase();
-    } catch {
-        return null;
+        const data = "0x00fdd58e" + addrPad(wallet) + padHex(tokenId);
+        const res = await rpc("eth_call", [{ to: contract, data }, "latest"]);
+        return BigInt(res || "0x0");
+    } catch (e) {
+        console.warn("[reconcile] balanceOf failed:", String(e));
+        return 0n;
     }
+}
+
+interface TokenRow {
+    id: string;
+    owner_wallet_address: string | null;
+    on_chain_token_id: string | null;
+    is_voided: boolean | null;
+    created_at: string | null;
+    release: { contract_address: string | null } | null;
 }
 
 serve(async (req) => {
@@ -79,103 +103,108 @@ serve(async (req) => {
 
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-        // Only reconcile rows that have a real on-chain id. Legacy rows with
-        // on_chain_token_id=NULL are post-migration-028 filtered out of views
-        // already and don't need touching here.
-        const { data: tokens, error } = await supabase
+        // Pull all non-voided rows that have both an on-chain id and an
+        // owner wallet. Join in nft_releases.contract_address (one drop per
+        // release in the ERC-1155 world, so the contract to query lives on
+        // the release, not on a global constant).
+        const { data: rawTokens, error } = await supabase
             .from("nft_tokens")
-            .select("id, on_chain_token_id, owner_wallet_address, is_voided")
-            .not("on_chain_token_id", "is", null);
+            .select(
+                "id, owner_wallet_address, on_chain_token_id, is_voided, created_at, release:nft_releases(contract_address)",
+            )
+            .not("on_chain_token_id", "is", null)
+            .or("is_voided.is.null,is_voided.eq.false");
 
         if (error) {
             return jsonResponse({ error: error.message }, 500);
         }
 
-        let updated = 0;
+        const tokens = (rawTokens || []) as unknown as TokenRow[];
+
+        // Group ledger rows by (contract, tokenId, owner) so we can compare
+        // DB count vs on-chain balance in one pass.
+        type GroupKey = string; // `${contract}:${tokenId}:${owner}`
+        const groups = new Map<GroupKey, TokenRow[]>();
+
+        for (const t of tokens) {
+            const contract = t.release?.contract_address?.toLowerCase();
+            const owner = t.owner_wallet_address?.toLowerCase();
+            const tokenId = t.on_chain_token_id;
+            if (!contract || !owner || tokenId === null || tokenId === undefined) continue;
+            const key = `${contract}:${tokenId}:${owner}`;
+            const arr = groups.get(key) || [];
+            arr.push(t);
+            groups.set(key, arr);
+        }
+
         let voided = 0;
         let unchanged = 0;
         let errors = 0;
         const report: Array<{
-            tokenDbId: string;
-            onChainTokenId: string;
-            before: string;
-            after: string | null;
-            action: string;
+            contract: string;
+            tokenId: string;
+            owner: string;
+            dbCount: number;
+            onChainBalance: string;
+            voidedIds: string[];
         }> = [];
 
-        for (const t of tokens || []) {
-            const chainId = t.on_chain_token_id as string;
-            const dbOwner = (t.owner_wallet_address || "").toLowerCase();
-            const onChainOwner = await ownerOf(chainId);
+        for (const [key, rows] of groups.entries()) {
+            const [contract, tokenId, owner] = key.split(":");
+            const onChainBal = await erc1155BalanceOf(contract, owner, tokenId);
+            const dbCount = BigInt(rows.length);
 
-            if (onChainOwner === null) {
-                // Token does not exist on-chain (reverted ownerOf). Void it.
-                if (!t.is_voided) {
-                    await supabase
-                        .from("nft_tokens")
-                        .update({ is_voided: true })
-                        .eq("id", t.id);
-                    voided++;
-                    report.push({
-                        tokenDbId: t.id,
-                        onChainTokenId: chainId,
-                        before: dbOwner,
-                        after: null,
-                        action: "voided",
-                    });
-                } else {
-                    unchanged++;
-                }
+            if (onChainBal >= dbCount) {
+                unchanged += rows.length;
                 continue;
             }
 
-            if (onChainOwner !== dbOwner) {
-                const { error: upErr } = await supabase
-                    .from("nft_tokens")
-                    .update({
-                        owner_wallet_address: onChainOwner,
-                        last_transferred_at: new Date().toISOString(),
-                    })
-                    .eq("id", t.id);
-                if (upErr) {
-                    errors++;
-                    console.error("[reconcile] update failed:", upErr.message);
-                } else {
-                    updated++;
-                    // Record the new ownership window in nft_ownership_log.
-                    // Close out any previous open window for this token first.
-                    const now = new Date().toISOString();
-                    await supabase
-                        .from("nft_ownership_log")
-                        .update({ released_at: now })
-                        .eq("nft_token_id", t.id)
-                        .is("released_at", null);
-                    await supabase.from("nft_ownership_log").insert({
-                        nft_token_id: t.id,
-                        owner_wallet_address: onChainOwner,
-                        acquired_at: now,
-                    });
-                    report.push({
-                        tokenDbId: t.id,
-                        onChainTokenId: chainId,
-                        before: dbOwner,
-                        after: onChainOwner,
-                        action: "updated",
-                    });
-                }
+            // Ledger overcounts — void the oldest rows until counts match.
+            const excess = Number(dbCount - onChainBal);
+            const sorted = [...rows].sort((a, b) => {
+                const ta = a.created_at ? Date.parse(a.created_at) : 0;
+                const tb = b.created_at ? Date.parse(b.created_at) : 0;
+                return ta - tb; // oldest first
+            });
+            const toVoid = sorted.slice(0, excess);
+
+            const ids = toVoid.map((r) => r.id);
+            const { error: upErr } = await supabase
+                .from("nft_tokens")
+                .update({ is_voided: true })
+                .in("id", ids);
+            if (upErr) {
+                errors += ids.length;
+                console.error("[reconcile] void update failed:", upErr.message);
             } else {
-                unchanged++;
+                voided += ids.length;
+                // Close out any open ownership_log windows for the voided rows.
+                const now = new Date().toISOString();
+                await supabase
+                    .from("nft_ownership_log")
+                    .update({ released_at: now })
+                    .in("nft_token_id", ids)
+                    .is("released_at", null);
             }
+
+            unchanged += rows.length - toVoid.length;
+            report.push({
+                contract,
+                tokenId,
+                owner,
+                dbCount: rows.length,
+                onChainBalance: onChainBal.toString(),
+                voidedIds: ids,
+            });
         }
 
         return jsonResponse({
             success: true,
-            total: tokens?.length || 0,
-            updated,
+            total: tokens.length,
             voided,
             unchanged,
             errors,
-            report: report.slice(0, 50), // cap for response size
+            report: report.slice(0, 50),
         });
     } catch (e: any) {
         return jsonResponse({ error: e?.message || String(e) }, 500);

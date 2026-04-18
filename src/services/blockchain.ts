@@ -2,7 +2,7 @@
  * MU6 Blockchain Service
  *
  * Handles on-chain operations via Thirdweb SDK v5, wired to:
- *   - DropERC721 "MU6 Songs" (lazy mint + claim)
+ *   - DropERC1155 "MU6 Songs" (lazy mint + per-token claim conditions)
  *   - MarketplaceV3 (direct listings, offers)
  *   - Split (revenue distribution)
  *
@@ -12,10 +12,6 @@
 
 import { prepareContractCall, prepareTransaction, readContract, sendTransaction, waitForReceipt, getContract } from 'thirdweb';
 import type { Account } from 'thirdweb/wallets';
-import {
-    setClaimConditions as sdkSetClaimConditions,
-    getActiveClaimCondition as sdkGetActiveClaimCondition
-} from 'thirdweb/extensions/erc721';
 import {
     CONTRACTS,
     getSongNFTContract,
@@ -33,23 +29,6 @@ import { fetchErc1155ClaimState } from '../lib/thirdweb/erc1155';
 // ────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────
-
-export interface MintConfig {
-    songId: string;
-    tierName: string;
-    rarity: 'common' | 'rare' | 'legendary';
-    totalSupply: number;
-    allocatedRoyaltyPercent: number;
-    priceEth: number;
-    /** IPFS URI for the token metadata (uploaded before calling this) */
-    metadataUri: string;
-    /** Optional release description */
-    description?: string;
-    /** Optional custom cover image path (Supabase storage) */
-    coverImagePath?: string;
-    /** Optional benefits/perks list */
-    benefits?: { title: string; description: string }[];
-}
 
 export interface ListingConfig {
     nftTokenId: string; // DB UUID of the nft_token row
@@ -72,14 +51,6 @@ export interface BuyConfig {
 
 /** Native token address placeholder used by Thirdweb contracts */
 const NATIVE_TOKEN = NATIVE_TOKEN_ADDRESS;
-
-/**
- * max uint256 – used as "unlimited" maxClaimableSupply.
- * DropERC721 already enforces nextTokenIdToClaim < nextTokenIdToMint,
- * so setting maxClaimable to this value is safe and avoids stale caps
- * that cause the "!Tokens" revert.
- */
-const MAX_UINT256 = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
 
 /** Supabase URL for edge function calls */
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
@@ -211,33 +182,6 @@ export async function getTokenURI(tokenId: bigint): Promise<string> {
     });
 }
 
-/** Read the active claim condition from the DropERC721 contract */
-export async function getActiveClaimCondition(): Promise<{
-    pricePerToken: bigint;
-    currency: string;
-    maxClaimableSupply: bigint;
-    supplyClaimed: bigint;
-    quantityLimitPerWallet: bigint;
-}> {
-    const conditionId = await readContract({
-        contract: getSongNFTContract(),
-        method: 'function getActiveClaimConditionId() view returns (uint256)',
-        params: [],
-    });
-    const condition = await readContract({
-        contract: getSongNFTContract(),
-        method: 'function getClaimConditionById(uint256 _conditionId) view returns ((uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata))',
-        params: [conditionId],
-    });
-    return {
-        pricePerToken: condition.pricePerToken,
-        currency: condition.currency,
-        maxClaimableSupply: condition.maxClaimableSupply,
-        supplyClaimed: condition.supplyClaimed,
-        quantityLimitPerWallet: condition.quantityLimitPerWallet,
-    };
-}
-
 /** Get marketplace listing count */
 export async function getTotalListings(): Promise<bigint> {
     return readContract({
@@ -248,52 +192,8 @@ export async function getTotalListings(): Promise<bigint> {
 }
 
 // ────────────────────────────────────────────
-// WRITE: NFT Minting (DropERC721)
+// WRITE: NFT Minting (DropERC1155)
 // ────────────────────────────────────────────
-
-/**
- * Set claim conditions on the DropERC721 so that `claim()` does not revert
- * with "!Tokens".  DropERC721 requires at least one active claim-condition
- * phase before any tokens can be claimed.
- *
- * Uses the Thirdweb SDK v5 high-level `setClaimConditions` extension which
- * handles ABI encoding, price conversion, and currency resolution correctly.
- *
- * NOTE: DropERC721 has ONE global set of claim conditions (not per-token).
- * Every call here replaces the previous conditions (resetClaimEligibility = true).
- *
- * @param account        The admin/minter account that can set claim conditions
- * @param priceEth       Price in ETH/MATIC (human-readable, e.g. 0.01)
- * @param maxClaimable   Maximum number of tokens that can be claimed under this phase
- */
-export async function setClaimConditionsForRelease(
-    account: Account,
-    priceEth: number,
-    maxClaimable: bigint,
-): Promise<{ success: boolean; error?: string }> {
-    try {
-        const tx = sdkSetClaimConditions({
-            contract: getSongNFTContract(),
-            phases: [
-                {
-                    maxClaimableSupply: maxClaimable,
-                    maxClaimablePerWallet: maxClaimable, // no per-wallet limit
-                    price: priceEth,
-                    currencyAddress: NATIVE_TOKEN,
-                    startTime: new Date(0), // active immediately
-                },
-            ],
-            resetClaimEligibility: true,
-        });
-
-        const result = await sendTransaction({ account, transaction: tx });
-        console.log('[blockchain] setClaimConditions tx:', result.transactionHash);
-        return { success: true };
-    } catch (err: any) {
-        console.error('[blockchain] setClaimConditions error:', err);
-        return { success: false, error: err.message };
-    }
-}
 
 /**
  * Step 1: Lazy mint NFTs (creator uploads metadata, we register tokens on-chain).
@@ -356,43 +256,6 @@ export async function serverLazyMint(
         return { success: true };
     } catch (err: any) {
         console.error('[blockchain] serverLazyMint error:', err);
-        return { success: false, error: err.message };
-    }
-}
-
-/**
- * Server-side set claim conditions via the Supabase Edge Function `nft-admin`.
- * Sets the price and supply limits for claiming NFTs on the DropERC721 contract.
- * Uses the server wallet so the buyer doesn't need admin permissions.
- */
-export async function serverSetClaimConditions(
-    priceWei: string,
-    contractAddress?: string,
-): Promise<{ success: boolean; error?: string }> {
-    try {
-        const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
-        console.log('[blockchain] serverSetClaimConditions: calling edge function', { priceWei });
-
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: await nftAdminHeaders(),
-            body: JSON.stringify({
-                action: 'setClaimConditions',
-                priceWei,
-                contractAddress: contractAddress || CONTRACTS.SONG_NFT,
-            }),
-        });
-
-        const result = await response.json();
-        console.log('[blockchain] serverSetClaimConditions response:', JSON.stringify(result));
-
-        if (!response.ok || !result.success) {
-            return { success: false, error: result.error || `HTTP ${response.status}` };
-        }
-
-        return { success: true };
-    } catch (err: any) {
-        console.error('[blockchain] serverSetClaimConditions error:', err);
         return { success: false, error: err.message };
     }
 }
@@ -725,108 +588,6 @@ export async function distributeSplitERC20(
     }
 }
 
-// ────────────────────────────────────────────
-// HIGH-LEVEL: Combined on-chain + off-chain flows
-// ────────────────────────────────────────────
-
-/**
- * Create an NFT release tier for a song.
- * 1. Stores the release in Supabase
- * 2. If account provided, lazy-mints on-chain
- *
- * The DB trigger enforces SUM(allocated_royalty_percent) <= 50 per song.
- */
-export async function createNFTRelease(
-    config: MintConfig,
-    account?: Account,
-): Promise<{
-    success: boolean;
-    releaseId?: string;
-    error?: string;
-}> {
-    try {
-        // 1. Create the release record in Supabase
-        const { data: release, error: dbError } = await supabase
-            .from('nft_releases')
-            .insert({
-                song_id: config.songId,
-                chain_id: CHAIN_ID.toString(),
-                contract_address: CONTRACTS.SONG_NFT,
-                tier_name: config.tierName,
-                rarity: config.rarity,
-                total_supply: config.totalSupply,
-                allocated_royalty_percent: config.allocatedRoyaltyPercent,
-                price_eth: config.priceEth,
-                minted_count: 0,
-                is_active: true,
-                description: config.description || null,
-                cover_image_path: config.coverImagePath || null,
-                // JSONB columns accept JS arrays/objects directly via supabase-js; double-stringifying
-                // previously caused benefits to round-trip as an encoded string and not render.
-                benefits: config.benefits && config.benefits.length > 0 ? config.benefits : [],
-            })
-            .select()
-            .single();
-
-        if (dbError) {
-            // Pass through listing-limit + tier errors verbatim (set by the
-            // enforce_nft_listing_limits trigger in migration 023).
-            if (dbError.message?.includes('NFT listing limit reached')
-                || dbError.message?.includes('NFT rarity')) {
-                return { success: false, error: dbError.message };
-            }
-            if (dbError.message?.includes('50')) {
-                return { success: false, error: 'Total NFT royalty allocation would exceed 50% for this song.' };
-            }
-            return { success: false, error: dbError.message };
-        }
-
-        // 2. Lazy-mint on-chain via server wallet (edge function)
-        //    The server wallet has MINTER_ROLE on the contract, so it can
-        //    lazy-mint tokens on behalf of any artist.
-        if (isContractReady()) {
-            const mintResult = await serverLazyMint(
-                config.totalSupply,
-                config.metadataUri,
-            );
-            if (!mintResult.success) {
-                console.warn('[blockchain] Server lazy mint failed, rolling back DB record:', mintResult.error);
-                // Rollback the DB record since the on-chain lazy mint failed
-                await supabase.from('nft_releases').delete().eq('id', release.id);
-                return { success: false, error: `On-chain lazy mint failed: ${mintResult.error}` };
-            } else {
-                console.log('[blockchain] Server lazy mint succeeded');
-            }
-
-            // 3. Set claim conditions with the correct price via server wallet.
-            //    BLOCKING: the on-chain price is the source of truth. If we
-            //    allow the release to exist with a DB price that doesn't match
-            //    the active claim condition, buyers get charged the wrong
-            //    amount (this is exactly what caused the 0.01-vs-0.2 POL drift
-            //    on the OULU tier before admin role was granted). Roll back
-            //    both the DB row and the on-chain lazy mint on failure is not
-            //    possible (lazy-minted batches can't be undone cheaply), so we
-            //    rely on admin to retry; the DB row is cleared so the artist
-            //    can re-submit without the "release already exists" conflict.
-            const priceWei = BigInt(Math.floor(config.priceEth * 1e18)).toString();
-            const ccResult = await serverSetClaimConditions(priceWei);
-            if (!ccResult.success) {
-                console.error('[blockchain] setClaimConditions FAILED, rolling back DB release:', ccResult.error);
-                await supabase.from('nft_releases').delete().eq('id', release.id);
-                return {
-                    success: false,
-                    error: `On-chain price setup failed: ${ccResult.error}. Release was rolled back; please retry.`,
-                };
-            }
-            console.log('[blockchain] Claim conditions set with price:', config.priceEth, 'POL');
-        }
-
-        return { success: true, releaseId: release.id };
-    } catch (err: any) {
-        console.error('[blockchain] createNFTRelease error:', err);
-        return { success: false, error: err.message };
-    }
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // ERC-1155 release creation
@@ -892,7 +653,7 @@ async function getErc1155NextTokenIdToMint(contractAddress: string): Promise<big
  * Steps:
  *  1. Read nextTokenIdToMint (determines the token_id this release will get)
  *  2. Call nft-admin lazyMint (amount=1, baseURI=metadataUri) via server wallet
- *  3. Insert nft_releases row with nft_standard='erc1155', token_id, contract_address
+ *  3. Insert nft_releases row with token_id + contract_address (DropERC1155)
  *  4. Call setClaimConditionForToken with price/supply
  *  5. Call setRoyaltyInfoForToken with artist's bps + recipient
  *
@@ -936,7 +697,6 @@ export async function createErc1155Release(
             song_id: config.songId,
             chain_id: CHAIN_ID.toString(),
             contract_address: erc1155ContractAddress,
-            nft_standard: 'erc1155',
             token_id: parseInt(tokenId, 10),
             tier_name: config.tierName,
             rarity: config.rarity,
@@ -1219,40 +979,25 @@ export async function mintToken(
             }
 
             // Read the active claim-condition price so serverClaim sends the
-            // EXACT matching value the contract requires. Route by nft_standard:
-            //   - erc1155 (new DropERC1155): per-token claim condition
-            //   - erc721 (legacy DropERC721): single claim condition per contract
+            // EXACT matching value the contract requires. DropERC1155 stores
+            // a per-token claim condition, so we look it up by tokenId.
             const contractAddrForClaim = release.contract_address || CONTRACTS.SONG_NFT;
-            const standard = (release.nft_standard || 'erc721').toLowerCase();
-            let conditionPriceWei: string;
-
-            if (standard === 'erc1155') {
-                const tokenId = release.token_id;
-                if (tokenId === null || tokenId === undefined) {
-                    throw new Error('ERC-1155 release missing token_id — release cannot be claimed');
-                }
-                const state = await fetchErc1155ClaimState(
-                    contractAddrForClaim,
-                    tokenId,
-                    release.chain_id || CHAIN_ID,
-                );
-                if (!state.success || !state.condition) {
-                    throw new Error(
-                        state.error || 'Claim condition not found for ERC-1155 token ' + tokenId
-                    );
-                }
-                conditionPriceWei = state.condition.pricePerToken.toString();
-                console.log('[blockchain] ERC-1155 condition price for token', tokenId, ':', conditionPriceWei);
-            } else {
-                const contractForClaim = getContract({
-                    client: thirdwebClient,
-                    chain: activeChain,
-                    address: contractAddrForClaim,
-                });
-                const condition = await sdkGetActiveClaimCondition({ contract: contractForClaim });
-                conditionPriceWei = condition.pricePerToken.toString();
-                console.log('[blockchain] ERC-721 condition price:', conditionPriceWei);
+            const tokenId = release.token_id;
+            if (tokenId === null || tokenId === undefined) {
+                throw new Error('Release missing token_id — release cannot be claimed');
             }
+            const state = await fetchErc1155ClaimState(
+                contractAddrForClaim,
+                tokenId,
+                release.chain_id || CHAIN_ID,
+            );
+            if (!state.success || !state.condition) {
+                throw new Error(
+                    state.error || 'Claim condition not found for ERC-1155 token ' + tokenId
+                );
+            }
+            const conditionPriceWei = state.condition.pricePerToken.toString();
+            console.log('[blockchain] ERC-1155 condition price for token', tokenId, ':', conditionPriceWei);
 
             // AWAITED — no more fire-and-forget
             const claimResult = await serverClaim(
@@ -1331,28 +1076,25 @@ export async function mintToken(
             ? pricePaidToken * eurRateAtSale
             : null;
 
-        // For ERC-1155, the edge function already inserts the nft_tokens ledger
-        // row (self-healing path in supabase/functions/nft-admin/index.ts). Skip
-        // the client-side insert to avoid a duplicate-key race; just look up the
-        // row the edge function created and continue.
-        const isErc1155 = release.nft_standard === 'erc1155';
-
+        // The edge function (supabase/functions/nft-admin) already inserts
+        // the nft_tokens ledger row for every DropERC1155 claim (self-healing
+        // path). Skip the client-side insert to avoid a duplicate-key race;
+        // just look up the row the edge function created and continue.
         let token: any = null;
-        let tokenErr: any = null;
+        const tokenErr: any = null;
 
-        if (isErc1155) {
-            // Edge function owns the insert for ERC-1155. Fetch the row it created.
-            const { data: erc1155Row, error: erc1155Err } = await supabase
+        {
+            const { data: ledgerRow, error: ledgerErr } = await supabase
                 .from('nft_tokens')
                 .select('*')
                 .eq('nft_release_id', releaseId)
                 .eq('token_id', dbTokenId)
                 .eq('owner_wallet_address', buyerWallet.toLowerCase())
                 .maybeSingle();
-            if (erc1155Err) {
-                console.warn('[blockchain] ERC-1155 post-mint row lookup failed:', erc1155Err.message);
+            if (ledgerErr) {
+                console.warn('[blockchain] post-mint ledger lookup failed:', ledgerErr.message);
             }
-            token = erc1155Row || null;
+            token = ledgerRow || null;
 
             // Backfill price fields if the edge function didn't write them.
             if (token && token.price_paid_eur_at_sale == null && pricePaidEurAtSale != null) {
@@ -1361,23 +1103,6 @@ export async function mintToken(
                     .update({ price_paid_eur_at_sale: pricePaidEurAtSale })
                     .eq('id', token.id);
             }
-        } else {
-            const result = await supabase
-                .from('nft_tokens')
-                .insert({
-                    nft_release_id: releaseId,
-                    token_id: dbTokenId,
-                    on_chain_token_id: onChainTokenId,
-                    owner_wallet_address: buyerWallet.toLowerCase(),
-                    mint_tx_hash: mintTxHash,
-                    price_paid_eth: pricePaidToken,
-                    price_paid_token: pricePaidToken,
-                    price_paid_eur_at_sale: pricePaidEurAtSale,
-                })
-                .select()
-                .maybeSingle();
-            token = result.data;
-            tokenErr = result.error;
         }
 
         if (tokenErr) {

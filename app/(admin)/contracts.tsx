@@ -16,7 +16,7 @@ interface ContractInfo {
 }
 
 const contracts: ContractInfo[] = [
-    { name: 'MU6 Songs (DropERC721)', subtitle: 'ERC-721 + ERC-2981', address: CONTRACT_ADDRESSES.SONG_NFT, network: CHAIN_NAME, status: 'Deployed' },
+    { name: 'MU6 Songs (DropERC1155)', subtitle: 'ERC-1155 + ERC-2981', address: CONTRACT_ADDRESSES.SONG_NFT, network: CHAIN_NAME, status: 'Deployed' },
     { name: 'Marketplace (MarketplaceV3)', subtitle: 'NFT Trading Contract', address: CONTRACT_ADDRESSES.MARKETPLACE, network: CHAIN_NAME, status: 'Deployed' },
     { name: 'Revenue Split', subtitle: 'Revenue Distribution', address: CONTRACT_ADDRESSES.SPLIT, network: CHAIN_NAME, status: 'Deployed' },
 ];

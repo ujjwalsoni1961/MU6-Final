@@ -105,7 +105,7 @@ export default function CreatorProfileScreen() {
 
                 if (!isMounted) return;
 
-                // Aggregate across all contracts (artist may have releases on both ERC-721 + ERC-1155)
+                // Aggregate across all ERC-1155 release contracts for this artist.
                 let totalVolumeWei = BigInt(0);
                 let mu6PrimaryVolumeWei = BigInt(0);
                 let mu6SecondaryVolumeWei = BigInt(0);

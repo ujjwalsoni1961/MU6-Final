@@ -30,24 +30,20 @@ import { NATIVE_TOKEN_ADDRESS } from '../config/network';
 import { supabase } from '../lib/supabase';
 import { getTokenToEurRate } from './fxRate';
 
-type NftStandard = 'erc721' | 'erc1155';
-
 /**
- * Resolve the NFT contract (address + standard + thirdweb handle) for a given
- * nft_tokens row. Post-Path-B, different releases live on different contracts:
- *   - Legacy DropERC721  (nft_standard = 'erc721') → CONTRACTS.SONG_NFT
- *   - New DropERC1155    (nft_standard = 'erc1155') → per-release contract_address
+ * Resolve the NFT contract (address + thirdweb handle) for a given
+ * nft_tokens row. Every release lives on a DropERC1155 contract identified
+ * by nft_releases.contract_address. Falls back to CONTRACTS.SONG_NFT if
+ * the column is NULL (shouldn't happen in practice post-migration 040).
  *
- * Every on-chain op (ownerOf / balanceOf / setApprovalForAll / createListing)
- * must be dispatched to the RIGHT contract for the token — otherwise we hit the
- * legacy ERC-721 and get completely wrong results (e.g. "current on-chain owner
- * is 0x406B..." when that address just happens to own token 0 on the legacy
- * contract).
+ * Every on-chain op (balanceOf / setApprovalForAll / createListing) must
+ * target the release's contract_address — the default SONG_NFT is just a
+ * safety net.
  */
 async function resolveNftContractForToken(
     nftTokenId: string,
 ): Promise<
-    | { ok: true; standard: NftStandard; address: string; contract: ReturnType<typeof getContractInstance>; onChainTokenId: string; tokenDbId: string; ownerWallet: string }
+    | { ok: true; address: string; contract: ReturnType<typeof getContractInstance>; onChainTokenId: string; tokenDbId: string; ownerWallet: string }
     | { ok: false; error: string }
 > {
     const { data, error } = await supabase
@@ -58,7 +54,6 @@ async function resolveNftContractForToken(
             on_chain_token_id,
             owner_wallet_address,
             release:nft_releases!nft_release_id (
-                nft_standard,
                 contract_address
             )
         `)
@@ -73,12 +68,10 @@ async function resolveNftContractForToken(
     }
 
     const release: any = (data as any).release;
-    const standard: NftStandard = release?.nft_standard === 'erc1155' ? 'erc1155' : 'erc721';
     const address: string = release?.contract_address || CONTRACTS.SONG_NFT;
 
     return {
         ok: true,
-        standard,
         address,
         contract: getContractInstance(address),
         onChainTokenId: String(chainTokenIdStr),
@@ -88,31 +81,20 @@ async function resolveNftContractForToken(
 }
 
 /**
- * Check on-chain ownership for either standard.
- * Returns { owned: true, currentOwner } — currentOwner is only meaningful for ERC-721.
+ * Check on-chain ERC-1155 ownership. Returns { owned, balance }.
  */
 async function checkOnChainOwnership(args: {
     contract: ReturnType<typeof getContractInstance>;
-    standard: NftStandard;
     tokenId: bigint;
     wallet: string;
-}): Promise<{ owned: boolean; currentOwner?: string; balance?: bigint }> {
-    if (args.standard === 'erc1155') {
-        const bal = await readContract({
-            contract: args.contract,
-            method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
-            params: [args.wallet as `0x${string}`, args.tokenId],
-        });
-        const balance = BigInt(bal as any);
-        return { owned: balance > 0n, balance };
-    }
-    const onChainOwner = await readContract({
+}): Promise<{ owned: boolean; balance: bigint }> {
+    const bal = await readContract({
         contract: args.contract,
-        method: 'function ownerOf(uint256 tokenId) view returns (address)',
-        params: [args.tokenId],
+        method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
+        params: [args.wallet as `0x${string}`, args.tokenId],
     });
-    const owner = String(onChainOwner);
-    return { owned: owner.toLowerCase() === args.wallet.toLowerCase(), currentOwner: owner };
+    const balance = BigInt(bal as any);
+    return { owned: balance > 0n, balance };
 }
 
 // ── Constants ──
@@ -157,13 +139,6 @@ async function callSetRoyalty(
 }
 
 /**
- * ERC-721 Transfer event topic0:
- *   keccak256("Transfer(address,address,uint256)")
- */
-const ERC721_TRANSFER_TOPIC =
-    '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
-
-/**
  * ERC-1155 TransferSingle event topic0:
  *   keccak256("TransferSingle(address,address,address,uint256,uint256)")
  * topics: [0]=sig, [1]=operator, [2]=from, [3]=to; data: tokenId (32b) || value (32b)
@@ -177,33 +152,23 @@ function addressToTopic(addr: string): string {
     return '0x' + clean.padStart(64, '0');
 }
 
-/** Normalize a hex tokenId topic to a BigInt for safe comparison. */
-function topicToBigInt(topic: string): bigint {
-    try {
-        return BigInt(topic);
-    } catch {
-        return BigInt(0);
-    }
-}
-
 /**
- * Verify an ERC-721 ownership transfer happened inside a tx receipt.
+ * Verify an ERC-1155 ownership transfer happened inside a tx receipt.
  *
  * Rationale: after a buy tx is mined, calling readContract(ownerOf) can hit
  * a stale RPC node that hasn't indexed the just-mined block yet, returning
  * the pre-transfer owner. The receipt logs, however, are definitive — they
  * ARE the events emitted in that exact tx. So we parse the receipt directly.
  *
- * Returns true iff we find at least one Transfer log where:
+ * Returns true iff we find at least one TransferSingle log where:
  *   - log.address   == the NFT contract
- *   - topics[0]     == ERC-721 Transfer signature
- *   - topics[3]     == tokenId
- *   - topics[2]     == buyer (padded)
+ *   - topics[0]     == ERC-1155 TransferSingle signature
+ *   - topics[3]     == buyer (padded)
+ *   - data[0..32]   == tokenId
  */
 async function verifyBuyOwnershipTransfer(args: {
     receipt: { logs: ReadonlyArray<{ address: string; topics: ReadonlyArray<string>; data?: string }> };
     nftContractAddress: string;
-    standard: NftStandard;
     tokenId: bigint;
     buyer: string;
 }): Promise<boolean> {
@@ -214,14 +179,6 @@ async function verifyBuyOwnershipTransfer(args: {
         if (!log?.address || log.address.toLowerCase() !== nftAddrLc) continue;
         const topics = log.topics || [];
         const topic0 = (topics[0] || '').toLowerCase();
-
-        if (args.standard === 'erc721') {
-            if (topics.length < 4) continue; // ERC-721 Transfer is indexed on all 3 params => 4 topics
-            if (topic0 !== ERC721_TRANSFER_TOPIC) continue;
-            if (topicToBigInt(topics[3]) !== args.tokenId) continue;
-            if ((topics[2] || '').toLowerCase() !== buyerTopic) continue;
-            return true;
-        }
 
         // ERC-1155 TransferSingle: topics [sig, operator, from, to]; data = tokenId || value
         if (topic0 !== ERC1155_TRANSFER_SINGLE_TOPIC) continue;
@@ -237,33 +194,21 @@ async function verifyBuyOwnershipTransfer(args: {
         }
     }
 
-    // Safety-net fallback: the receipt didn't contain a matching Transfer log
-    // (shouldn't happen for a successful buyFromListing, but be defensive).
-    // Retry on-chain ownership read with backoff to let RPC catch up.
+    // Safety-net fallback: the receipt didn't contain a matching TransferSingle
+    // log (shouldn't happen for a successful buyFromListing, but be defensive).
+    // Retry on-chain ownership via balanceOf with backoff to let RPC catch up.
     try {
         const contract = getContractInstance(args.nftContractAddress);
         for (let attempt = 0; attempt < 3; attempt++) {
             await new Promise((r) => setTimeout(r, 2000));
-            if (args.standard === 'erc721') {
-                const onChainOwner = await readContract({
-                    contract,
-                    method: 'function ownerOf(uint256 tokenId) view returns (address)',
-                    params: [args.tokenId],
-                });
-                if ((onChainOwner as string).toLowerCase() === args.buyer.toLowerCase()) {
-                    console.log('[marketplace] Ownership confirmed via fallback ownerOf after attempt', attempt + 1);
-                    return true;
-                }
-            } else {
-                const bal = await readContract({
-                    contract,
-                    method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
-                    params: [args.buyer as `0x${string}`, args.tokenId],
-                });
-                if (BigInt(bal as any) > 0n) {
-                    console.log('[marketplace] Ownership confirmed via fallback balanceOf after attempt', attempt + 1);
-                    return true;
-                }
+            const bal = await readContract({
+                contract,
+                method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
+                params: [args.buyer as `0x${string}`, args.tokenId],
+            });
+            if (BigInt(bal as any) > 0n) {
+                console.log('[marketplace] Ownership confirmed via fallback balanceOf after attempt', attempt + 1);
+                return true;
             }
         }
     } catch (err: any) {
@@ -295,7 +240,7 @@ export async function createMarketplaceListing(
     account: Account,
 ): Promise<{ success: boolean; listingId?: string; error?: string }> {
     try {
-        // 1. Resolve the correct NFT contract for this token (legacy ERC-721 OR per-release ERC-1155).
+        // 1. Resolve the ERC-1155 contract + tokenId for this NFT row.
         const resolved = await resolveNftContractForToken(config.nftTokenId);
         if (!resolved.ok) return { success: false, error: resolved.error };
 
@@ -306,25 +251,15 @@ export async function createMarketplaceListing(
         const chainTokenIdStr = resolved.onChainTokenId;
         const nftContract = resolved.contract;
         const nftAddress = resolved.address;
-        const standard = resolved.standard;
 
-        // CRITICAL — verify on-chain ownership against the correct contract.
-        // ERC-721: ownerOf(tokenId) must equal seller.
-        // ERC-1155: balanceOf(seller, tokenId) must be > 0.
+        // CRITICAL — verify on-chain ownership (ERC-1155 balanceOf(seller, tokenId) > 0).
         try {
             const check = await checkOnChainOwnership({
                 contract: nftContract,
-                standard,
                 tokenId: BigInt(chainTokenIdStr),
                 wallet: config.sellerWallet,
             });
             if (!check.owned) {
-                if (standard === 'erc721') {
-                    return {
-                        success: false,
-                        error: `You do not own this NFT on-chain. Current on-chain owner: ${check.currentOwner}. Please refresh your collection.`,
-                    };
-                }
                 return {
                     success: false,
                     error: 'You do not own any copies of this NFT on-chain. Please refresh your collection.',
@@ -346,8 +281,7 @@ export async function createMarketplaceListing(
             return { success: false, error: 'This NFT already has an active listing.' };
         }
 
-        // 2. Ensure marketplace approval on the CORRECT NFT contract.
-        // setApprovalForAll has the same signature for ERC-721 and ERC-1155.
+        // 2. Ensure marketplace approval on the release's ERC-1155 contract.
         const marketplaceAddr = CONTRACTS.MARKETPLACE as `0x${string}`;
         const isApproved = await readContract({
             contract: nftContract,
@@ -465,14 +399,14 @@ export async function buyMarketplaceListing(
     account: Account,
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
     try {
-        // 1. Fetch listing from DB (include release so we know the NFT contract + standard).
+        // 1. Fetch listing from DB (include release so we know the NFT contract).
         const { data: listing } = await supabase
             .from('marketplace_listings')
             .select(`
                 *,
                 nft_token:nft_tokens!nft_token_id (
                     id, token_id, on_chain_token_id,
-                    release:nft_releases!nft_release_id (nft_standard, contract_address)
+                    release:nft_releases!nft_release_id (contract_address)
                 )
             `)
             .eq('id', config.listingId)
@@ -484,53 +418,34 @@ export async function buyMarketplaceListing(
 
         const tokenRowInit: any = listing.nft_token;
         const releaseMeta: any = tokenRowInit?.release || {};
-        const listingStandard: NftStandard = releaseMeta?.nft_standard === 'erc1155' ? 'erc1155' : 'erc721';
         const listingNftAddress: string = releaseMeta?.contract_address || CONTRACTS.SONG_NFT;
         const listingNftContract = getContractInstance(listingNftAddress);
 
         // ------------------------------------------------------------------
         // Buy-side self-heal preflight.
         //
-        // If the listing is stale (token already moved on-chain) the
-        // marketplace contract will revert 'invalid listing' and we waste
-        // gas. For ERC-721: if ownerOf isn't seller or marketplace, it's
-        // dead. For ERC-1155: if seller's balance is 0, they can't fulfill.
-        // Detect before sending and auto-heal the DB.
+        // If the listing is stale (seller no longer holds a copy on-chain)
+        // the marketplace contract will revert 'invalid listing' and we
+        // waste gas. Detect via ERC-1155 balanceOf and auto-heal the DB.
         // ------------------------------------------------------------------
         try {
             const chainTokenIdForCheck = tokenRowInit?.on_chain_token_id || tokenRowInit?.token_id;
             if (chainTokenIdForCheck && /^\d+$/.test(String(chainTokenIdForCheck))) {
                 const sellerLc = String(listing.seller_wallet).toLowerCase();
-                const marketplaceLc = CONTRACTS.MARKETPLACE.toLowerCase();
                 const tokenIdBn = BigInt(chainTokenIdForCheck);
 
-                let stale = false;
-                let currentOwnerLc: string | null = null;
-
-                if (listingStandard === 'erc721') {
-                    const currentOwner = await readContract({
-                        contract: listingNftContract,
-                        method: 'function ownerOf(uint256 tokenId) view returns (address)',
-                        params: [tokenIdBn],
-                    });
-                    currentOwnerLc = String(currentOwner).toLowerCase();
-                    stale = currentOwnerLc !== sellerLc && currentOwnerLc !== marketplaceLc;
-                } else {
-                    const bal = await readContract({
-                        contract: listingNftContract,
-                        method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
-                        params: [listing.seller_wallet as `0x${string}`, tokenIdBn],
-                    });
-                    stale = BigInt(bal as any) === 0n;
-                }
+                const bal = await readContract({
+                    contract: listingNftContract,
+                    method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
+                    params: [listing.seller_wallet as `0x${string}`, tokenIdBn],
+                });
+                const stale = BigInt(bal as any) === 0n;
 
                 if (stale) {
                     console.warn(
                         '[marketplace] buy self-heal: listing', config.listingId,
                         'token', chainTokenIdForCheck,
-                        'standard', listingStandard,
                         'seller', sellerLc,
-                        'currentOwner', currentOwnerLc,
                         '— marking DB listing inactive (already sold).',
                     );
                     await supabase
@@ -538,7 +453,6 @@ export async function buyMarketplaceListing(
                         .update({
                             is_active: false,
                             sold_at: new Date().toISOString(),
-                            buyer_wallet: currentOwnerLc || undefined,
                         })
                         .eq('id', config.listingId);
                     return {
@@ -551,7 +465,7 @@ export async function buyMarketplaceListing(
             // RPC hiccup — fall through and let the marketplace contract be
             // the final arbiter. Don't block a legitimate buy because of a
             // transient RPC error.
-            console.warn('[marketplace] buy preflight ownerOf failed (non-fatal):', preflightErr?.message);
+            console.warn('[marketplace] buy preflight balanceOf failed (non-fatal):', preflightErr?.message);
         }
 
         const chainListingId = BigInt(listing.chain_listing_id);
@@ -597,11 +511,11 @@ export async function buyMarketplaceListing(
         // This catches edge cases where the tx succeeds but the NFT didn't
         // transfer (e.g. contract has a custom hook that silently skips).
         //
-        // We parse the ERC-721 Transfer event directly from the receipt logs.
-        // This is the source of truth for the transfer that just happened in
-        // this specific tx — whereas a follow-up readContract(ownerOf) call
-        // can hit a stale RPC node that hasn't indexed the just-mined block
-        // yet and return the pre-transfer owner (RPC indexing race).
+        // We parse the ERC-1155 TransferSingle event directly from the receipt
+        // logs. This is the source of truth for the transfer that just happened
+        // in this specific tx — whereas a follow-up readContract(balanceOf) call
+        // can hit a stale RPC node that hasn't indexed the just-mined block yet
+        // and return the pre-transfer balance (RPC indexing race).
         try {
             const tokenRow: any = listing.nft_token;
             const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
@@ -609,7 +523,6 @@ export async function buyMarketplaceListing(
                 const ownershipOk = await verifyBuyOwnershipTransfer({
                     receipt: buyReceipt,
                     nftContractAddress: listingNftAddress,
-                    standard: listingStandard,
                     tokenId: BigInt(chainTokenId),
                     buyer: config.buyerWallet,
                 });
@@ -753,7 +666,7 @@ export async function cancelMarketplaceListing(
                 chain_listing_id,
                 nft_token:nft_tokens!nft_token_id (
                     id, token_id, on_chain_token_id,
-                    release:nft_releases!nft_release_id (nft_standard, contract_address)
+                    release:nft_releases!nft_release_id (contract_address)
                 )
             `)
             .eq('id', listingId)
@@ -782,44 +695,27 @@ export async function cancelMarketplaceListing(
         const tokenRow: any = listing.nft_token;
         const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
         const cancelReleaseMeta: any = tokenRow?.release || {};
-        const cancelStandard: NftStandard = cancelReleaseMeta?.nft_standard === 'erc1155' ? 'erc1155' : 'erc721';
         const cancelNftAddress: string = cancelReleaseMeta?.contract_address || CONTRACTS.SONG_NFT;
         const cancelNftContract = getContractInstance(cancelNftAddress);
 
         if (chainTokenId && /^\d+$/.test(String(chainTokenId))) {
             try {
                 const sellerLc = sellerWallet.toLowerCase();
-                const marketplaceLc = CONTRACTS.MARKETPLACE.toLowerCase();
                 const tokenIdBn = BigInt(chainTokenId);
 
-                let stale = false;
-                let ownerLc: string | null = null;
-
-                if (cancelStandard === 'erc721') {
-                    const onChainOwner = await readContract({
-                        contract: cancelNftContract,
-                        method: 'function ownerOf(uint256 tokenId) view returns (address)',
-                        params: [tokenIdBn],
-                    });
-                    ownerLc = String(onChainOwner).toLowerCase();
-                    stale = ownerLc !== sellerLc && ownerLc !== marketplaceLc;
-                } else {
-                    const bal = await readContract({
-                        contract: cancelNftContract,
-                        method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
-                        params: [sellerWallet as `0x${string}`, tokenIdBn],
-                    });
-                    stale = BigInt(bal as any) === 0n;
-                }
+                const bal = await readContract({
+                    contract: cancelNftContract,
+                    method: 'function balanceOf(address account, uint256 id) view returns (uint256)',
+                    params: [sellerWallet as `0x${string}`, tokenIdBn],
+                });
+                const stale = BigInt(bal as any) === 0n;
 
                 if (stale) {
                     // Seller no longer has the NFT. Listing is effectively dead — auto-heal.
                     console.warn(
                         '[marketplace] self-heal: listing', listingId,
                         'token', chainTokenId,
-                        'standard', cancelStandard,
                         'seller', sellerLc,
-                        'currentOwner', ownerLc,
                         '— marking DB listing inactive.',
                     );
                     await supabase
@@ -827,7 +723,6 @@ export async function cancelMarketplaceListing(
                         .update({
                             is_active: false,
                             sold_at: new Date().toISOString(),
-                            buyer_wallet: ownerLc || undefined,
                         })
                         .eq('id', listingId);
                     return {

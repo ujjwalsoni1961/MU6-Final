@@ -3,7 +3,7 @@
  *
  * Gives admins a unified view of every wallet on the platform with:
  *  - DB-recorded NFT count and marketplace listings
- *  - Live on-chain balanceOf(wallet) from the DropERC721 contract
+ *  - Live on-chain balanceOfBatch summed across every DropERC1155 tokenId
  *  - A sync-status indicator when the two disagree
  *  - Quick links to Polygonscan for full transaction history
  *

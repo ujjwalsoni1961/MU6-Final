@@ -27,7 +27,6 @@ export default function AllNFTsScreen() {
                 artist={item.artistName}
                 price={item.price}
                 editionNumber={item.editionNumber}
-                nftStandard={item.nftStandard}
                 mintedCount={item.mintedCount}
                 totalEditions={item.totalEditions}
                 rarity={item.rarity}

@@ -9,11 +9,11 @@
  *
  * MAINNET TRANSITION CHECKLIST
  * ----------------------------
- *  1. Deploy DropERC721 + MarketplaceV3 on Polygon mainnet (chain 137).
+ *  1. Deploy DropERC1155 + MarketplaceV3 on Polygon mainnet (chain 137).
  *  2. Set the following environment variables:
  *
  *      EXPO_PUBLIC_NETWORK=mainnet
- *      EXPO_PUBLIC_SONG_NFT_ADDRESS=<mainnet DropERC721 address>
+ *      EXPO_PUBLIC_SONG_NFT_ADDRESS=<mainnet DropERC1155 address>
  *      EXPO_PUBLIC_MARKETPLACE_ADDRESS=<mainnet Marketplace address>
  *      EXPO_PUBLIC_SPLIT_ADDRESS=<mainnet Split address (optional)>
  *
@@ -91,7 +91,9 @@ export const RPC_URL = CHAIN.rpc;
 // EXPO_PUBLIC_*_ADDRESS env vars to override (required for mainnet).
 
 const AMOY_DEFAULTS = {
-    SONG_NFT: '0xACF1145AdE250D356e1B2869E392e6c748c14C0E',
+    // DropERC1155 (lazy mint + claim). Replaced the old DropERC721
+    // (0xACF1145A...) in migration 040 — see commit history.
+    SONG_NFT: '0x10450d990a0Fb50d00Aa5D304846b8421d3cB5Ad',
     MARKETPLACE: '0x141Fc79b7F1EB7b393A5DC5f257678c3cD30506a',
     SPLIT: '0xb757e188B8A126A6D975514F3a05049a87209c2D',
 } as const;
@@ -127,7 +129,7 @@ export function addressUrl(address: string): string {
 }
 
 /**
- * Build an explorer URL for a specific ERC-721 token instance.
+ * Build an explorer URL for a specific token instance on a drop contract.
  *  - With tokenId: deep-links to the token page (Polygonscan supports `?a=<id>`).
  *  - Without tokenId: links to the contract overview.
  */

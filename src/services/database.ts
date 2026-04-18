@@ -64,9 +64,7 @@ export interface NFTRelease {
     description: string | null;
     coverImagePath: string | null;
     benefits: { title: string; description: string }[];
-    /** 'erc721' (legacy DropERC721) or 'erc1155' (new DropERC1155). Defaults to 'erc721'. */
-    nftStandard: 'erc721' | 'erc1155';
-    /** On-chain token id for ERC-1155 releases (one release = one tokenId). Null for ERC-721. */
+    /** On-chain token id for this ERC-1155 release (one release = one tokenId). */
     tokenId: number | null;
     // Joined
     song?: Song;
@@ -1555,7 +1553,6 @@ export async function getErc1155OwnedTokens(walletAddress: string): Promise<NFTT
 
     const out: NFTToken[] = [];
     for (const row of data as any[]) {
-        if (row.release?.nft_standard !== 'erc1155') continue;
         if (row.release?.song?.deleted_at) continue;
         out.push(mapNFTTokenRow(row));
     }
@@ -1863,7 +1860,6 @@ function mapArtistRow(row: any): ArtistProfile {
 }
 
 function mapNFTReleaseRow(row: any): NFTRelease {
-    const standard = row.nft_standard === 'erc1155' ? 'erc1155' : 'erc721';
     return {
         id: row.id,
         songId: row.song_id,
@@ -1880,7 +1876,6 @@ function mapNFTReleaseRow(row: any): NFTRelease {
         description: row.description || null,
         coverImagePath: row.cover_image_path || null,
         benefits: row.benefits || [],
-        nftStandard: standard,
         tokenId: row.token_id != null ? Number(row.token_id) : null,
         song: row.song ? mapSongRow(row.song) : undefined,
     };

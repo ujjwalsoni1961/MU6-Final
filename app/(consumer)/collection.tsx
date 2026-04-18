@@ -427,9 +427,7 @@ export default function CollectionScreen() {
                                         <Text style={{ color: modalMode === 'manage' ? '#10b981' : colors.text.secondary, fontSize: 13, marginTop: 2, fontWeight: modalMode === 'manage' ? '600' : '400' }}>
                                             {modalMode === 'manage'
                                                 ? `Listed at ${selectedNFT.activeListingPrice} POL`
-                                                : selectedNFT.nftStandard === 'erc1155'
-                                                    ? `${selectedNFT.mintedCount} of ${selectedNFT.totalEditions} minted · ${selectedNFT.rarity}`
-                                                    : `Edition ${selectedNFT.editionNumber} of ${selectedNFT.totalEditions} · ${selectedNFT.rarity}`}
+                                                : `${selectedNFT.mintedCount} of ${selectedNFT.totalEditions} minted · ${selectedNFT.rarity}`}
                                         </Text>
                                     </View>
                                 </GlassCard>
@@ -604,7 +602,6 @@ export default function CollectionScreen() {
                                                 artist={item.artistName}
                                                 price={item.activeListingPrice || item.price}
                                                 editionNumber={item.editionNumber}
-                                                nftStandard={item.nftStandard}
                                                 mintedCount={item.mintedCount}
                                                 totalEditions={item.totalEditions}
                                                 rarity={item.rarity}

@@ -24,32 +24,33 @@ const SERVER_WALLET = Deno.env.get("MU6_SERVER_WALLET")
 // Falls back to SERVER_WALLET for contracts where the server wallet was granted admin.
 const ADMIN_WALLET = Deno.env.get("MU6_ADMIN_WALLET") || SERVER_WALLET;
 
-// DEFAULT_CONTRACT: the legacy DropERC721 — used only as a fallback for
-// legacy ERC-721 actions. All new ERC-1155 actions must read contract_address
-// from nft_releases. This fallback is gated behind the NETWORK env flag.
+// DEFAULT_CONTRACT: the DropERC1155 song contract. All release rows should
+// carry their own contract_address; this is only used as a fallback for
+// admin actions that operate on the canonical drop (lazyMint, setRoyalty,
+// setPrimarySaleRecipient, setPlatformFee). Mainnet requires an explicit
+// MU6_SONG_NFT_ADDRESS — no hardcoded default.
 const DEFAULT_CONTRACT = Deno.env.get("MU6_SONG_NFT_ADDRESS")
     || (NETWORK === "mainnet"
-        ? "" // no mainnet default — must be set explicitly
-        : "0xACF1145AdE250D356e1B2869E392e6c748c14C0E");
+        ? ""
+        : "0x10450d990a0Fb50d00Aa5D304846b8421d3cB5Ad");
 
-// Default ERC-1155 contract — testnet only. For mainnet set MU6_SONG_NFT_ERC1155_ADDRESS.
-const DEFAULT_ERC1155_CONTRACT = Deno.env.get("MU6_SONG_NFT_ERC1155_ADDRESS")
-    || (NETWORK !== "mainnet"
-        ? "0x10450d990a0Fb50d00Aa5D304846b8421d3cB5Ad"
-        : "");
+// Back-compat alias — some action handlers read DEFAULT_ERC1155_CONTRACT.
+// Both names resolve to the same DropERC1155 address now that legacy
+// DropERC721 is retired.
+const DEFAULT_ERC1155_CONTRACT = DEFAULT_CONTRACT;
 
 const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 // ── Primary-sale forwarding (Option B) ──
-// On DropERC721/DropERC1155 the primarySaleRecipient is the server wallet.
-// After every confirmed claim() the edge function forwards the artist's share
-// to nft_releases.primary_sale_recipient.
+// On DropERC1155 the primarySaleRecipient is the server wallet. After every
+// confirmed claim() the edge function forwards the artist's share to
+// nft_releases.primary_sale_recipient.
 //
 // Fee model on claim (total paid by buyer):
-//   1. thirdweb protocol fee — per-release bps (200 for new DropERC1155,
-//      50 for legacy DropERC721). Hardcoded in the contract bytecode, routed
-//      to a thirdweb-controlled constant recipient. Cannot be disabled or
-//      redirected. Read from nft_releases.thirdweb_fee_bps (function below).
+//   1. thirdweb protocol fee — 200 bps (2%) on DropERC1155, hardcoded in the
+//      contract bytecode, routed to a thirdweb-controlled constant recipient.
+//      Cannot be disabled or redirected. Read from nft_releases.thirdweb_fee_bps
+//      (function below) so per-release overrides are still respected.
 //   2. PLATFORM_FEE_BPS_PRIMARY — MU6's configurable platform fee, set on-chain
 //      via setPlatformFeeInfo and read back in this function. Default 500 bps
 //      (5%) landing in the server wallet (same place as the artist-bound
@@ -67,7 +68,7 @@ const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 /**
  * Returns the thirdweb drop fee in bps for a given release row.
- * Defaults to 200 (new DropERC1155 rate) when not set on the release.
+ * Defaults to 200 (DropERC1155 rate) when not set on the release.
  */
 function getThirdwebFeeBps(release: { thirdweb_fee_bps?: number | null } | null): number {
     return release?.thirdweb_fee_bps ?? 200;
@@ -85,52 +86,8 @@ const DEFAULT_ARTIST_ROYALTY_BPS = 500;
 const RPC_URL = NETWORK === "mainnet"
     ? (Deno.env.get("MU6_RPC_URL") || "https://polygon-rpc.com")
     : (Deno.env.get("MU6_RPC_URL") || "https://rpc-amoy.polygon.technology");
-// keccak256("Transfer(address,address,uint256)") — ERC-721 Transfer event topic0
-const ERC721_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-const ZERO_ADDRESS_TOPIC = "0x" + "00".repeat(32); // Transfer.from == 0x0 ⇒ mint
-
-/**
- * Fetch the on-chain transaction receipt and parse the minted token ID from
- * the ERC-721 Transfer log (from = 0x0 indicates a mint).
- * Returns null if the receipt isn't available yet or no mint log is found.
- */
-async function fetchMintedTokenId(txHash: string, contractAddress: string): Promise<string | null> {
-    try {
-        const resp = await fetch(RPC_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                jsonrpc: "2.0",
-                id: 1,
-                method: "eth_getTransactionReceipt",
-                params: [txHash],
-            }),
-        });
-        const data = await resp.json();
-        const logs: Array<{ address: string; topics: string[]; data: string }> =
-            data?.result?.logs || [];
-        const target = contractAddress.toLowerCase();
-        for (const log of logs) {
-            if ((log.address || "").toLowerCase() !== target) continue;
-            if (!log.topics || log.topics.length < 4) continue;
-            if (log.topics[0]?.toLowerCase() !== ERC721_TRANSFER_TOPIC) continue;
-            // from must be the zero-address for a mint
-            if (log.topics[1]?.toLowerCase() !== ZERO_ADDRESS_TOPIC) continue;
-            // topics[3] is tokenId (32-byte hex)
-            const tokenIdHex = log.topics[3];
-            if (!tokenIdHex) continue;
-            try {
-                return BigInt(tokenIdHex).toString();
-            } catch {
-                return null;
-            }
-        }
-        return null;
-    } catch (err) {
-        console.warn("[nft-admin] fetchMintedTokenId error:", err);
-        return null;
-    }
-}
+// (Legacy ERC-721 Transfer-log parser removed — DropERC1155 mints carry a
+//  fixed tokenId per release, so we no longer parse receipts to discover it.)
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -736,41 +693,40 @@ Deno.serve(async (req: Request) => {
             return jsonResponse({ success: true, transactionId: txId, result });
         }
 
-        // ── Server Claim ──
-        // Routes by nft_standard:
-        //   erc1155 → DropERC1155 claim ABI (tokenId + allowlistProof tuple)
-        //   erc721  → legacy DropERC721 claim ABI (back-compat preserved)
+        // ── Server Claim (DropERC1155) ──
         //
-        // For ERC-1155: reads release row by release_id to get contract_address
-        // and token_id. For ERC-721: falls back to contractAddress param.
+        // Reads the release row by release_id to get contract_address + token_id,
+        // then calls DropERC1155.claim(...) with an empty allowlist tuple. Legacy
+        // DropERC721 support is retired — all releases must be ERC-1155.
         if (action === "serverClaim") {
             const { receiverAddress, contractAddress, onChainPriceWei, release_id } = body;
             if (!receiverAddress) return jsonResponse({ error: "Missing receiverAddress" }, 400);
+            if (!release_id) return jsonResponse({ error: "Missing release_id" }, 400);
 
             const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
-            // ── Resolve release row (for ERC-1155 routing) ──
+            // ── Resolve release row ──
             let releaseRow: any = null;
-            if (release_id) {
-                try {
-                    const supaAdminForRelease = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
-                    const { data } = await supaAdminForRelease
-                        .from("nft_releases")
-                        .select("id, contract_address, token_id, nft_standard, thirdweb_fee_bps, price_wei, currency_address")
-                        .eq("id", release_id)
-                        .maybeSingle() as { data: any };
-                    releaseRow = data;
-                } catch (e) {
-                    console.warn("[nft-admin] serverClaim: release lookup failed:", String(e));
-                }
+            try {
+                const supaAdminForRelease = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+                const { data } = await supaAdminForRelease
+                    .from("nft_releases")
+                    .select("id, contract_address, token_id, thirdweb_fee_bps, price_wei, currency_address")
+                    .eq("id", release_id)
+                    .maybeSingle() as { data: any };
+                releaseRow = data;
+            } catch (e) {
+                console.warn("[nft-admin] serverClaim: release lookup failed:", String(e));
             }
 
-            const nftStandard: string = releaseRow?.nft_standard || "erc721";
-            const targetContract: string = releaseRow?.contract_address || contractAddress || DEFAULT_CONTRACT;
+            if (!releaseRow) {
+                return jsonResponse({ error: `Release ${release_id} not found` }, 404);
+            }
 
-            // ── ERC-1155 claim path ──
-            if (nftStandard === "erc1155") {
-                if (!releaseRow?.token_id && releaseRow?.token_id !== 0) {
+            const targetContract: string = releaseRow.contract_address || contractAddress || DEFAULT_CONTRACT;
+
+            {
+                if (releaseRow.token_id === null || releaseRow.token_id === undefined) {
                     return jsonResponse({ error: "Release token_id not set — lazy mint required before claiming" }, 400);
                 }
                 const tokenId: string = releaseRow.token_id.toString();
@@ -934,268 +890,6 @@ Deno.serve(async (req: Request) => {
                     primarySalePayout: payoutResult,
                 });
             }
-
-            // ── ERC-721 legacy claim path (preserved for back-compat) ──
-            // Read active claim condition on-chain (source of truth).
-            // The contract's verifyClaim rejects any call whose _pricePerToken /
-            // _currency args don't exactly match the active claim condition.
-            let pricePerToken = (onChainPriceWei ?? "0").toString();
-            let currencyOnChain = NATIVE_TOKEN;
-            try {
-                // claimCondition() returns (currentStartId, count)
-                const ccHex = (await ethCall(targetContract, "0xd637ed59")).slice(2);
-                const currentStartId = BigInt("0x" + (ccHex.slice(0, 64) || "0"));
-                // getClaimConditionById(currentStartId) selector 0x6f8934f4
-                const idHex = currentStartId.toString(16).padStart(64, "0");
-                const condHex = (await ethCall(targetContract, "0x6f8934f4" + idHex)).slice(2);
-                // Struct layout starting at word 1 (word 0 is the tuple offset 0x20):
-                //   [1]=startTimestamp [2]=maxClaimableSupply [3]=supplyClaimed
-                //   [4]=quantityLimitPerWallet [5]=merkleRoot [6]=pricePerToken
-                //   [7]=currency [8..]=metadata(string)
-                if (condHex.length >= 64 * 8) {
-                    const onChainPrice = BigInt("0x" + condHex.slice(64 * 6, 64 * 7)).toString();
-                    const onChainCurrency = "0x" + condHex.slice(64 * 7 + 24, 64 * 8);
-                    if (onChainPrice && onChainPrice !== "0") pricePerToken = onChainPrice;
-                    if (onChainCurrency && /^0x[a-fA-F0-9]{40}$/.test(onChainCurrency)) currencyOnChain = onChainCurrency;
-                    if (onChainPriceWei && onChainPriceWei.toString() !== onChainPrice) {
-                        console.warn(
-                            `[nft-admin] serverClaim ERC-721: client price ${onChainPriceWei} ≠ on-chain ${onChainPrice}; using on-chain (source of truth).`,
-                        );
-                    }
-                }
-            } catch (e) {
-                console.warn("[nft-admin] serverClaim ERC-721: failed to read claim condition, falling back to client price:", String(e));
-            }
-
-            // DropERC721.claim(receiver, quantity, currency, pricePerToken,
-            //                  (proof, qtyLimitPerWallet, pricePerToken, currency), data)
-            // For a public (no-allowlist) claim: proof = [], and the allowlist
-            // tuple's qtyLimit/price/currency must match the active condition —
-            // using MAX_UINT256/pricePerToken/currency is the standard
-            // "no override" form Thirdweb SDK sends.
-            const allowlistProof721: [string[], string, string, string] = [
-                [],
-                MAX_UINT256,
-                pricePerToken,
-                currencyOnChain,
-            ];
-
-            const erc721RequestBody = {
-                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
-                params: [{
-                    contractAddress: targetContract,
-                    method: "function claim(address _receiver, uint256 _quantity, address _currency, uint256 _pricePerToken, (bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
-                    params: [
-                        receiverAddress,
-                        "1",
-                        currencyOnChain,
-                        pricePerToken,
-                        allowlistProof721,
-                        "0x",
-                    ],
-                    // Server wallet forwards the claim price as msg.value so the
-                    // contract accepts the payment. Payment from buyer → server
-                    // wallet already happened before this call (confirmed on-chain
-                    // client-side); server wallet is just relaying.
-                    // Only set value when currency is NATIVE_TOKEN; ERC20 claims
-                    // do not send native value (they rely on allowance).
-                    value: currencyOnChain.toLowerCase() === NATIVE_TOKEN.toLowerCase() ? pricePerToken : "0",
-                }],
-            };
-
-            console.log("[nft-admin] serverClaim ERC-721 v1/write/contract receiver:", receiverAddress, "price:", pricePerToken);
-            const { ok, status, result } = await callEngine(erc721RequestBody);
-            console.log("[nft-admin] serverClaim ERC-721 engine response:", status, JSON.stringify(result));
-            if (!ok) {
-                const errMsg = typeof result === "string"
-                    ? result
-                    : (result?.error?.message || result?.message || JSON.stringify(result));
-                return jsonResponse({ success: false, error: errMsg }, status);
-            }
-
-            const txId = result?.result?.transactions?.[0]?.id
-                || result?.result?.queueId
-                || result?.result?.id;
-            if (!txId) {
-                return jsonResponse({ success: false, error: "Engine did not return a transaction id" }, 500);
-            }
-
-            const { confirmed, hash, error } = await waitForTx(txId);
-            if (!confirmed) {
-                const errMsg = typeof error === "string" ? error : (error || "serverClaim tx did not confirm");
-                return jsonResponse({ success: false, error: errMsg }, 500);
-            }
-            console.log("[nft-admin] serverClaim ERC-721 confirmed, hash:", hash);
-
-            // Parse real on-chain tokenId from the Transfer event log.
-            // Best-effort: if the receipt isn't available yet we return null —
-            // the mobile reconciler will fill it in on retry.
-            let onChainTokenId: string | null = null;
-            if (hash) {
-                onChainTokenId = await fetchMintedTokenId(hash, targetContract);
-                console.log("[nft-admin] parsed on-chain tokenId:", onChainTokenId);
-            }
-
-            // ── Self-healing nft_tokens insert (Option B hardening) ──
-            // Before Option B the client was solely responsible for writing the
-            // nft_tokens row after a successful mint. That works for the real
-            // purchase path (purchaseAndMintNFT), but leaves a gap when any
-            // other caller (admin ops, reconciliation, tests) invokes
-            // serverClaim directly — the NFT exists on-chain with no DB row,
-            // so it shows up in the buyer's collection as a "ghost" card
-            // with 'Unknown (off-chain metadata missing)' and is absent from
-            // the admin NFT Tokens screen.
-            //
-            // Making the edge function itself write a minimal row closes that
-            // gap. The client path still does its richer upsert (price_paid_eur,
-            // mint_tx_hash, intent linkage) right after serverClaim returns;
-            // its .insert hits the existing row, triggers the duplicate branch
-            // at blockchain.ts:1108, and proceeds normally. Net effect: the DB
-            // row is guaranteed whether the caller is the app, a test curl,
-            // or a future backend job.
-            if (hash && onChainTokenId) {
-                try {
-                    const supaAdminForToken = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
-                    // Resolve release via contract_address + an active row so we
-                    // don't guess. If multiple active releases share the contract
-                    // (common: each tier is its own release on the same drop),
-                    // prefer the one whose price_eth matches the paid price.
-                    const priceEthStr = (Number(pricePerToken) / 1e18).toString();
-                    const { data: releaseCandidates } = await supaAdminForToken
-                        .from("nft_releases")
-                        .select("id, price_eth, is_active")
-                        .eq("contract_address", targetContract)
-                        .eq("is_active", true) as { data: any[] };
-                    let matchedReleaseId: string | null = null;
-                    if (Array.isArray(releaseCandidates) && releaseCandidates.length > 0) {
-                        // Exact-price match first; fall back to single-active-release.
-                        const exact = releaseCandidates.find(
-                            (r) => r && Number(r.price_eth).toString() === Number(priceEthStr).toString(),
-                        );
-                        matchedReleaseId = exact?.id
-                            || (releaseCandidates.length === 1 ? releaseCandidates[0].id : null);
-                    }
-                    if (matchedReleaseId) {
-                        // Idempotent: only insert if no row exists yet for this
-                        // on_chain_token_id (unique index nft_tokens_onchain_unique).
-                        const { data: existing } = await supaAdminForToken
-                            .from("nft_tokens")
-                            .select("id")
-                            .eq("on_chain_token_id", onChainTokenId)
-                            .maybeSingle();
-                        if (!existing) {
-                            const priceEth = Number(pricePerToken) / 1e18;
-                            const { error: insErr } = await supaAdminForToken
-                                .from("nft_tokens")
-                                .insert({
-                                    nft_release_id: matchedReleaseId,
-                                    token_id: onChainTokenId,
-                                    on_chain_token_id: onChainTokenId,
-                                    owner_wallet_address: receiverAddress.toLowerCase(),
-                                    mint_tx_hash: hash,
-                                    price_paid_eth: priceEth,
-                                    price_paid_token: priceEth,
-                                });
-                            if (insErr) {
-                                // Race with the client's own insert — benign.
-                                console.log("[nft-admin] self-healing nft_tokens insert skipped:", insErr.message);
-                            } else {
-                                console.log("[nft-admin] self-healing nft_tokens inserted for token", onChainTokenId);
-                            }
-                        }
-                    } else {
-                        console.warn("[nft-admin] self-healing insert: no matching release for contract", targetContract, "price", priceEthStr);
-                    }
-                } catch (e: any) {
-                    // Non-fatal — the buyer has the NFT on-chain and the client
-                    // may still write the row itself. We just log.
-                    console.error("[nft-admin] self-healing nft_tokens insert threw (non-fatal):", e?.message || e);
-                }
-            }
-
-            // ── Primary-sale forwarding (Option B) ──
-            // Claim confirmed → server wallet holds the sale proceeds. Forward
-            // the artist's share now, inline, while we still have the claim tx
-            // context. A failure here is non-fatal for the NFT: the buyer
-            // keeps the token and the payout row sits in pending_retry for
-            // the retry sweep to settle. This is only attempted for
-            // native-currency claims (ERC-20 ignored for now — the flow was
-            // not originally in scope for Option B).
-            let payoutResult: any = null;
-            if (hash && currencyOnChain.toLowerCase() === NATIVE_TOKEN.toLowerCase() && BigInt(pricePerToken) > 0n) {
-                try {
-                    // Service-role client bypasses RLS (the ledger table denies
-                    // all user-role writes). Safe because the edge function is
-                    // itself the authorization boundary for these writes.
-                    const supaAdminForPayout = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
-                    payoutResult = await forwardPrimarySalePayout(supaAdminForPayout, {
-                        contractAddress: targetContract,
-                        buyerWallet: receiverAddress,
-                        claimTxHash: hash,
-                        grossWei: pricePerToken,
-                        tokenId: onChainTokenId,
-                    });
-                    console.log("[nft-admin] primary-sale payout:", JSON.stringify({
-                        status: payoutResult?.status,
-                        recipient: payoutResult?.recipient,
-                        artistWei: payoutResult?.artistWei,
-                        forwardTxHash: payoutResult?.forwardTxHash,
-                    }));
-                } catch (e: any) {
-                    // Intentionally non-throwing — NFT was delivered; payout
-                    // error surfaces via the retry sweep and admin ledger.
-                    console.error("[nft-admin] forwardPrimarySale threw (non-fatal):", e?.message || e);
-                    payoutResult = { status: "pending_retry", error: e?.message || String(e) };
-                }
-            }
-
-            return jsonResponse({
-                success: true,
-                transactionId: txId,
-                txHash: hash,
-                onChainTokenId,
-                // Price actually paid to the contract (in wei), read from
-                // on-chain claim condition. May differ from onChainPriceWei the
-                // client sent; the client should reconcile its records to this.
-                pricePaidWei: pricePerToken,
-                currency: currencyOnChain,
-                nftStandard: "erc721",
-                // Primary-sale forwarding result (Option B). Contains status,
-                // payoutId, forwardTxHash, artistWei, platformWei, recipient.
-                // null when the claim was not native-currency or price == 0.
-                primarySalePayout: payoutResult,
-            });
-        }
-
-        // ── Set Claim Conditions (ERC-721, requires ADMIN role) ──
-        if (action === "setClaimConditions") {
-            const { priceWei, contractAddress } = body;
-            const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
-            const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
-
-            const conditionsArray = [["0", MAX_UINT256, "0", MAX_UINT256, ZERO_BYTES32, priceWei || "0", NATIVE_TOKEN, ""]];
-
-            const requestBody = {
-                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
-                params: [{
-                    contractAddress: contractAddress || DEFAULT_CONTRACT,
-                    method: "function setClaimConditions((uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata)[] _conditions, bool _resetClaimEligibility)",
-                    params: [conditionsArray, true],
-                }],
-            };
-
-            console.log("[nft-admin] setClaimConditions price:", priceWei);
-            const { ok, status, result } = await callEngine(requestBody);
-            console.log("[nft-admin] setClaimConditions response:", status, JSON.stringify(result));
-            if (!ok) return jsonResponse({ success: false, error: result }, status);
-
-            const txId = result?.result?.transactions?.[0]?.id;
-            if (txId) {
-                const { confirmed, hash, error } = await waitForTx(txId);
-                if (!confirmed) return jsonResponse({ success: false, error: error || "setClaimConditions tx did not confirm" }, 500);
-                return jsonResponse({ success: true, transactionId: txId, txHash: hash });
-            }
-            return jsonResponse({ success: true, transactionId: txId, result });
         }
 
         // ── Set Claim Condition For Token (ERC-1155) ──
@@ -1338,10 +1032,10 @@ Deno.serve(async (req: Request) => {
 
         // ── Verify Contract Config ──
         // Read-only: returns primarySaleRecipient, defaultRoyaltyInfo, and
-        // platformFeeInfo from a contract. Supports both DropERC721 and DropERC1155.
+        // platformFeeInfo from a DropERC1155 contract.
         //
         // Royalty query strategy:
-        //   For DropERC1155 (and DropERC721): use EIP-2981 royaltyInfo(tokenId, salePrice)
+        //   EIP-2981 royaltyInfo(tokenId, salePrice)
         //   selector 0x2a55205a with tokenId=0, salePrice=10000 (1 bps unit).
         //   This is universally supported. The "bps" returned is
         //   royaltyAmount * 10000 / salePrice.
@@ -1652,21 +1346,6 @@ Deno.serve(async (req: Request) => {
             });
         }
 
-        // ── Deploy NFT Drop (DropERC721) — RETIRED ──
-        //
-        // The legacy Thirdweb Engine v1 /deploy/prebuilt/nft-drop endpoint
-        // returns 404 as of 2026-04. We no longer need this action: the
-        // existing drop contract 0xACF1145A... now has server wallet granted
-        // DEFAULT_ADMIN_ROLE so setClaimConditions works without a redeploy.
-        // If we ever need a fresh drop, redeploy via the thirdweb dashboard UI
-        // (web.thirdweb.com/polygon-amoy-testnet/deploy/DropERC721) manually.
-        if (action === "deployNftDrop") {
-            return jsonResponse({
-                success: false,
-                error: "deployNftDrop is retired. Deploy a new DropERC721 manually via thirdweb dashboard and update platform_settings.song_nft_contract_address.",
-            }, 410);
-        }
-
 
         // ── Set Default Royalty Info (EIP-2981) ──
         if (action === "setRoyalty") {
@@ -1702,7 +1381,7 @@ Deno.serve(async (req: Request) => {
         // Option B — Primary-sale admin + retry surfaces
         // ═══════════════════════════════════════════════════════════════════
 
-        // ── setPrimarySaleRecipient on DropERC721 (admin) ──
+        // ── setPrimarySaleRecipient on DropERC1155 (admin) ──
         // Server wallet holds DEFAULT_ADMIN_ROLE on the drop so it can call
         // this function itself. Idempotent: reads the current value first and
         // short-circuits when already correct.
@@ -1745,8 +1424,8 @@ Deno.serve(async (req: Request) => {
             return jsonResponse({ success: true, transactionId: txId, result });
         }
 
-        // ── setPlatformFeeInfo on DropERC721 (admin) ──
-        // Sets the configurable platform fee on a thirdweb DropERC721. This is
+        // ── setPlatformFeeInfo on DropERC1155 (admin) ──
+        // Sets the configurable platform fee on a thirdweb DropERC1155. This is
         // distinct from the hardcoded thirdweb protocol fee (DEFAULT_FEE_BPS /
         // DEFAULT_FEE_RECIPIENT, not settable). The server wallet holds
         // DEFAULT_ADMIN_ROLE so it can call setPlatformFeeInfo itself.

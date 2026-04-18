@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/database';
 import * as blockchain from '../services/blockchain';
-import { filterOnChainOwned, enumerateOwnedTokenIds, readErc1155Balance } from './useOnChainNFT';
+import { readErc1155Balance } from './useOnChainNFT';
 import type {
     Song as DbSong,
     ArtistProfile as DbArtist,
@@ -212,7 +212,6 @@ export function adaptListing(l: DbListing, editionNum?: number): NFT & { listing
         allocatedRoyaltyPercent: release?.allocatedRoyaltyPercent,
         onChainTokenId: token?.onChainTokenId || undefined,
         ownerWallet: l.sellerWallet,
-        nftStandard: release?.nftStandard,
     };
 }
 
@@ -908,27 +907,18 @@ interface MutationState {
     success: boolean;
 }
 
-/** Create an NFT release (creator) */
+/**
+ * Legacy NFT-release hook (DropERC721 path). The ERC-1155 flow uses
+ * `createErc1155Release` directly; this hook is retained only as a
+ * state placeholder for existing UI that still reads .loading/.error/.reset.
+ * Calling execute() is a no-op and always returns null.
+ */
 export function useCreateNFTRelease() {
     const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
 
-    const execute = useCallback(async (
-        config: blockchain.MintConfig,
-        account?: any, // thirdweb Account
-    ) => {
-        setState({ loading: true, error: null, success: false });
-        try {
-            const result = await blockchain.createNFTRelease(config, account);
-            if (!result.success) {
-                setState({ loading: false, error: result.error || 'Failed to create NFT release', success: false });
-                return null;
-            }
-            setState({ loading: false, error: null, success: true });
-            return result.releaseId;
-        } catch (err: any) {
-            setState({ loading: false, error: err.message, success: false });
-            return null;
-        }
+    const execute = useCallback(async (): Promise<string | null> => {
+        setState({ loading: false, error: 'Legacy ERC-721 release path is retired — use ERC-1155 flow.', success: false });
+        return null;
     }, []);
 
     const reset = useCallback(() => setState({ loading: false, error: null, success: false }), []);
@@ -1076,72 +1066,6 @@ export function useOwnedNFTsWithStatus() {
             if (!walletAddress) return [];
 
             const out: OwnedNFT[] = [];
-
-            // ── Part A: Legacy ERC-721 (DropERC721) ──
-            // On-chain-first discovery: totalSupply + ownerOf scan.
-            const rawOnChainTokenIds = await enumerateOwnedTokenIds(walletAddress);
-            if (rawOnChainTokenIds.length > 0) {
-                // Filter out ghost tokens (pre-prod / legacy junk — migration 030).
-                const ghostIds = await db.getGhostTokenIds();
-                const onChainTokenIds = rawOnChainTokenIds.filter((id) => !ghostIds.has(id));
-
-                if (onChainTokenIds.length > 0) {
-                    const dbTokensByOnChainId = await db.getTokensByOnChainIds(onChainTokenIds);
-                    const dbTokenIds = Object.values(dbTokensByOnChainId).map((t) => t.id);
-
-                    const [editionMap, activeListingsByTokenId] = await Promise.all([
-                        dbTokenIds.length > 0 ? db.getEditionNumbers(dbTokenIds) : Promise.resolve({} as Record<string, number>),
-                        dbTokenIds.length > 0 ? db.getActiveListingsForTokens(dbTokenIds) : Promise.resolve({} as Record<string, DbListing>),
-                    ]);
-
-                    for (const onChainId of onChainTokenIds) {
-                        const dbToken = dbTokensByOnChainId[onChainId];
-                        if (dbToken) {
-                            // Skip ERC-1155 rows that might share a low numeric id with legacy
-                            // ERC-721 tokens. They're handled by Part B below.
-                            if (dbToken.release?.nftStandard === 'erc1155') continue;
-                            const baseNFT = adaptNFTToken(dbToken, editionMap[dbToken.id]);
-                            const activeListing = activeListingsByTokenId[dbToken.id];
-                            out.push({
-                                ...baseNFT,
-                                tokenDbId: dbToken.id,
-                                onChainTokenId: onChainId,
-                                ownershipStatus: activeListing ? 'listed' : 'unlisted',
-                                activeListingId: activeListing?.id,
-                                activeListingPrice: activeListing?.priceEth,
-                                chainListingId: activeListing?.chainListingId || undefined,
-                            });
-                        } else {
-                            // No DB row — NFT exists on-chain but isn't tracked. Placeholder.
-                            out.push({
-                                id: `onchain-${onChainId}`,
-                                songId: '',
-                                creatorId: '',
-                                songTitle: `Token #${onChainId}`,
-                                artistName: 'Unknown (off-chain metadata missing)',
-                                coverImage: 'https://placehold.co/400x400/1e293b/94a3b8?text=♪',
-                                price: 0,
-                                editionNumber: 0,
-                                totalEditions: 0,
-                                mintedCount: 0,
-                                owner: walletAddress,
-                                rarity: 'common',
-                                tierName: undefined,
-                                description: undefined,
-                                benefits: undefined,
-                                allocatedRoyaltyPercent: undefined,
-                                onChainTokenId: onChainId,
-                                ownerWallet: walletAddress,
-                                tokenDbId: '',
-                                ownershipStatus: 'unlisted',
-                                activeListingId: undefined,
-                                activeListingPrice: undefined,
-                                chainListingId: undefined,
-                            });
-                        }
-                    }
-                }
-            }
 
             // ── Part B: ERC-1155 (DropERC1155) ──
             // DB-first: nft_tokens has one ledger row per claim (per holder).

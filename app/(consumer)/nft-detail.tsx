@@ -26,7 +26,7 @@ import {
 import { getNFTTradeHistory } from '../../src/services/database';
 import { convertTokenToFiat, formatFiat, formatToken } from '../../src/services/fxRate';
 import { useCurrency } from '../../src/hooks/useCurrency';
-import { useOnChainOwnership } from '../../src/hooks/useOnChainNFT';
+
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
@@ -141,10 +141,10 @@ export default function NFTDetailScreen() {
     const [fiatPrice, setFiatPrice] = useState<string | null>(null);
 
     // Secondary Market / ERC-1155 state
-    // Holds raw release fields (nft_standard, token_id, contract_address)
-    // fetched directly from nft_releases to avoid adapter loss.
+    // Holds raw release fields (token_id, contract_address) fetched directly
+    // from nft_releases to drive ERC-1155 claim-state reads and OpenSea
+    // deep-links. The UI adapter strips these fields so we refetch them here.
     const [releaseOnChain, setReleaseOnChain] = useState<{
-        nftStandard: string;
         tokenId: string | null;      // ERC-1155 token ID from nft_releases.token_id
         contractAddress: string | null;
     } | null>(null);
@@ -165,16 +165,10 @@ export default function NFTDetailScreen() {
     // More NFTs (mix of releases and listings)
     const moreNFTs = allNFTs.filter((n) => n.id !== id).slice(0, 10);
 
-    // Determine owner wallet for display — ON-CHAIN IS SOURCE OF TRUTH (PDF #17).
-    // DB ownerWallet is a lagging index; prefer live on-chain ownerOf read.
-    //
-    // This hook MUST be called before any conditional early returns (loading /
-    // !nft) below. React enforces a consistent hook call order across renders
-    // (https://react.dev/link/rules-of-hooks) — placing it after `if (loading)`
-    // or `if (!nft)` caused the "Rendered more hooks than during the previous
-    // render" error when the NFT loaded on the second pass.
+    // DropERC1155 ledgers a copy per holder; there is no single on-chain
+    // "owner" like ERC-721 had. The DB nft_tokens row's owner_wallet_address
+    // is the source of truth for the holder of this specific ledger entry.
     const onChainTokenId = nft?.onChainTokenId || '';
-    const { owner: onChainOwner } = useOnChainOwnership(onChainTokenId || null);
 
     // ─── Action handlers ───
 
@@ -233,7 +227,7 @@ export default function NFTDetailScreen() {
         return () => { isMounted = false; };
     }, [nft, listing, fiatCurrency]);
 
-    // ── Fetch raw release fields (nft_standard, token_id, contract_address) ──
+    // ── Fetch raw release fields (token_id, contract_address) ──
     // The UI adapter strips these fields; we re-fetch them directly to drive
     // ERC-1155 claim state reads and OpenSea deep-links.
     useEffect(() => {
@@ -242,14 +236,13 @@ export default function NFTDetailScreen() {
         if (!releaseId) return;
         supabase
             .from('nft_releases')
-            .select('nft_standard, token_id, contract_address')
+            .select('token_id, contract_address')
             .eq('id', releaseId)
             .maybeSingle()
             .then(({ data, error }) => {
                 if (!isMounted || error || !data) return;
                 if (isMounted) {
                     setReleaseOnChain({
-                        nftStandard: (data as any).nft_standard || 'erc721',
                         tokenId: (data as any).token_id != null ? String((data as any).token_id) : null,
                         contractAddress: (data as any).contract_address || null,
                     });
@@ -262,9 +255,9 @@ export default function NFTDetailScreen() {
     useEffect(() => {
         let isMounted = true;
         if (!releaseOnChain) return;
-        const { nftStandard, tokenId, contractAddress } = releaseOnChain;
-        // Only ERC-1155 releases with a known token_id have per-token claim conditions
-        if (nftStandard !== 'erc1155' || tokenId == null || !contractAddress) return;
+        const { tokenId, contractAddress } = releaseOnChain;
+        // Only releases with a known token_id + contract have per-token claim conditions
+        if (tokenId == null || !contractAddress) return;
 
         setClaimStateLoading(true);
         fetchErc1155ClaimState(
@@ -443,10 +436,8 @@ export default function NFTDetailScreen() {
         }
     };
 
-    // Owner wallet — on-chain read happens above (before early returns) to obey
-    // the Rules of Hooks. Fall back to DB columns only if on-chain read hasn't
-    // resolved yet.
-    const ownerWallet = onChainOwner || nft.ownerWallet || nft.owner || '';
+    // Owner wallet — the DB ledger row owns the truth for ERC-1155 holders.
+    const ownerWallet = nft.ownerWallet || nft.owner || '';
 
     // Get the first trade event as mint price reference
     const mintEvent = tradeHistory.find(t => t.type === 'mint');
@@ -551,11 +542,7 @@ export default function NFTDetailScreen() {
                                 paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
                             }}>
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary }}>
-                                    {isPrimary || nft.nftStandard === 'erc1155'
-                                        ? `${mintedCount} of ${nft.totalEditions} minted`
-                                        : nft.editionNumber > 0
-                                            ? `Edition ${nft.editionNumber} of ${nft.totalEditions}`
-                                            : `${nft.totalEditions} Editions`}
+                                    {`${mintedCount} of ${nft.totalEditions} minted`}
                                 </Text>
                             </View>
                             {/* Tier Name */}
@@ -824,7 +811,7 @@ export default function NFTDetailScreen() {
                         )}
 
                         {/* Secondary Market & ERC-1155 Claim State */}
-                        {isPrimary && releaseOnChain?.nftStandard === 'erc1155' && (
+                        {isPrimary && releaseOnChain?.tokenId != null && (
                             <GlassCard intensity="light" style={{ marginBottom: 16 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                                     <TrendingUp size={16} color="#38b4ba" />
@@ -1038,7 +1025,6 @@ export default function NFTDetailScreen() {
                                         artist={n.artistName}
                                         price={n.price}
                                         editionNumber={n.editionNumber}
-                                        nftStandard={n.nftStandard}
                                         mintedCount={n.mintedCount}
                                         totalEditions={n.totalEditions}
                                         rarity={n.rarity}

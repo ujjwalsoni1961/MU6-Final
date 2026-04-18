@@ -5,7 +5,7 @@
  * owner_wallet_address from nft_tokens) with:
  *   - DB-recorded NFT tokens they own
  *   - DB-recorded marketplace activity (listings, sales)
- *   - Live on-chain ERC-721 balance from `balanceOf(wallet)`
+ *   - Live on-chain ERC-1155 balance summed across all known tokenIds
  *   - Sync discrepancy flag when DB count ≠ on-chain count
  *
  * Administrators can then drill in to reconcile ghost rows vs real NFTs.
@@ -41,8 +41,9 @@ export interface OnChainWalletRow {
     dbPrimarySpendPol: number;
 
     /**
-     * On-chain ERC-721 balance. `null` means we haven't fetched yet
-     * (or the fetch failed — see `onChainError`).
+     * On-chain ERC-1155 balance, summed across every known tokenId on
+     * the MU6 song contract. `null` means we haven't fetched yet (or the
+     * fetch failed — see `onChainError`).
      */
     onChainBalance: number | null;
     onChainError: string | null;
@@ -63,7 +64,14 @@ interface RawCountResult {
 const ON_CHAIN_CACHE = new Map<string, { balance: number; at: number }>();
 const CACHE_TTL_MS = 30_000;
 
-async function readOnChainBalance(wallet: string): Promise<number> {
+/**
+ * ERC-1155 balanceOfBatch(accounts[], ids[]) sums the holdings of a single
+ * wallet across every known tokenId. We pass [wallet, wallet, ...] and
+ * [id0, id1, ...] because balanceOfBatch zips the two arrays pairwise.
+ */
+async function readOnChainBalance(wallet: string, tokenIds: bigint[]): Promise<number> {
+    if (tokenIds.length === 0) return 0;
+
     const cached = ON_CHAIN_CACHE.get(wallet.toLowerCase());
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
         return cached.balance;
@@ -75,14 +83,14 @@ async function readOnChainBalance(wallet: string): Promise<number> {
         address: CONTRACT_ADDRESSES.SONG_NFT,
     });
 
-    // ERC-721 balanceOf returns a bigint for the uint256 response.
+    const accounts = tokenIds.map(() => wallet as `0x${string}`);
     const raw = await readContract({
         contract,
-        method: 'function balanceOf(address owner) view returns (uint256)',
-        params: [wallet as `0x${string}`],
-    });
+        method: 'function balanceOfBatch(address[] accounts, uint256[] ids) view returns (uint256[])',
+        params: [accounts, tokenIds],
+    }) as readonly bigint[];
 
-    const balance = Number(raw);
+    const balance = raw.reduce((sum, n) => sum + Number(n), 0);
     ON_CHAIN_CACHE.set(wallet.toLowerCase(), { balance, at: Date.now() });
     return balance;
 }
@@ -92,6 +100,7 @@ export function useAdminOnChainActivity() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [onChainFetching, setOnChainFetching] = useState(false);
+    const [tokenIds, setTokenIds] = useState<bigint[]>([]);
 
     const loadBaseData = useCallback(async () => {
         setLoading(true);
@@ -108,10 +117,23 @@ export function useAdminOnChainActivity() {
             // 2. Active (non-voided) NFT tokens for a quick per-wallet count
             const { data: tokens, error: tokenErr } = await supabase
                 .from('nft_tokens')
-                .select('owner_wallet_address, price_paid_eth, is_voided')
+                .select('owner_wallet_address, price_paid_eth, is_voided, on_chain_token_id')
                 .or('is_voided.is.null,is_voided.eq.false');
 
             if (tokenErr) throw tokenErr;
+
+            // Collect distinct on-chain token IDs so we can query ERC-1155
+            // balanceOfBatch for each wallet.
+            const idSet = new Set<string>();
+            for (const t of tokens || []) {
+                if (t.on_chain_token_id !== null && t.on_chain_token_id !== undefined) {
+                    idSet.add(String(t.on_chain_token_id));
+                }
+            }
+            const distinctIds: bigint[] = Array.from(idSet).map((s) => {
+                try { return BigInt(s); } catch { return null; }
+            }).filter((x): x is bigint => x !== null);
+            setTokenIds(distinctIds);
 
             // 3. Active marketplace listings per wallet.
             // NOTE: canonical schema (migration 001) uses `seller_wallet` and
@@ -215,7 +237,7 @@ export function useAdminOnChainActivity() {
             for (let i = 0; i < batched.length; i += BATCH) {
                 const slice = batched.slice(i, i + BATCH);
                 const results = await Promise.allSettled(
-                    slice.map((r) => readOnChainBalance(r.wallet)),
+                    slice.map((r) => readOnChainBalance(r.wallet, tokenIds)),
                 );
                 results.forEach((res, idx) => {
                     const row = slice[idx];
@@ -235,7 +257,7 @@ export function useAdminOnChainActivity() {
         } finally {
             setOnChainFetching(false);
         }
-    }, [rows]);
+    }, [rows, tokenIds]);
 
     const summary = useMemo(() => {
         const totalWallets = rows.length;
