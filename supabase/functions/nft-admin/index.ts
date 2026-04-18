@@ -26,10 +26,29 @@ const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 // ── Primary-sale forwarding (Option B) ──
 // On DropERC721 the primarySaleRecipient is the server wallet. After every
 // confirmed claim() the edge function forwards the artist's share to
-// nft_releases.primary_sale_recipient. Platform fee is retained on the server
-// wallet (currently 0 bps — all revenue goes to the artist).
+// nft_releases.primary_sale_recipient.
+//
+// Fee model on claim (total paid by buyer):
+//   1. THIRDWEB_DROP_FEE_BPS — hardcoded 50 bps (0.5%) inside the DropERC721
+//      bytecode, routed to a thirdweb-controlled constant recipient. Cannot
+//      be disabled or redirected (no setter exists in the contract).
+//   2. PLATFORM_FEE_BPS_PRIMARY — MU6's configurable platform fee, set on-chain
+//      via setPlatformFeeInfo and read back in this function. Default 500 bps
+//      (5%) landing in the server wallet (same place as the artist-bound
+//      share, because primarySaleRecipient is the server wallet too).
+//
+// The edge function therefore:
+//   * Reads gross_wei = pricePerToken
+//   * Computes thirdweb_fee_wei = gross * 50 / 10000
+//   * Computes platform_wei    = gross * mu6Bps / 10000   (MU6 retention)
+//   * Forwards artist_wei = gross - thirdweb_fee_wei - platform_wei to the
+//     artist. Logs all three in the primary_sale_payouts ledger.
+//
+// This keeps the server wallet float neutral: it receives gross - thirdweb_fee
+// from the claim and sends artist_wei onward, keeping exactly platform_wei.
+const THIRDWEB_DROP_FEE_BPS = 50; // hardcoded in DropERC721 (DEFAULT_FEE_BPS)
 const PLATFORM_FEE_BPS_PRIMARY = parseInt(
-    Deno.env.get("MU6_PLATFORM_FEE_BPS_PRIMARY") || "0",
+    Deno.env.get("MU6_PLATFORM_FEE_BPS_PRIMARY") || "500",
     10,
 );
 // Public RPC — chain-switch aware. Used for parsing receipts / Transfer logs.
@@ -203,17 +222,29 @@ async function sendNativeTransfer(recipient: string, amountWei: string): Promise
 }
 
 /**
- * Compute artist/platform split from the claim price and platform fee bps.
- * Uses BigInt arithmetic; rounding follows integer division (any remainder
- * goes to the platform, which is the conventional fee-safe direction).
+ * Compute the three-way split applied to every DropERC721 primary sale:
+ *   thirdwebFeeWei = gross * THIRDWEB_DROP_FEE_BPS / 10000 (protocol, hardcoded)
+ *   platformWei    = gross * platformBps / 10000           (MU6, retained)
+ *   artistWei      = gross - thirdwebFeeWei - platformWei  (forwarded)
+ *
+ * Uses BigInt arithmetic. Integer division rounds toward zero; any sub-wei
+ * remainder flows into artistWei (since it's computed by subtraction). This
+ * is the fee-safe direction — we never over-charge the buyer or ourselves.
  */
-function splitPrimarySale(grossWei: string, platformBps: number): { artistWei: string; platformWei: string } {
+function splitPrimarySale(grossWei: string, platformBps: number): {
+    artistWei: string;
+    platformWei: string;
+    thirdwebFeeWei: string;
+} {
     const gross = BigInt(grossWei);
-    const bps = BigInt(platformBps);
-    // artist share = gross * (10000 - bps) / 10000
-    const artist = (gross * (10000n - bps)) / 10000n;
-    const platform = gross - artist;
-    return { artistWei: artist.toString(), platformWei: platform.toString() };
+    const tw = (gross * BigInt(THIRDWEB_DROP_FEE_BPS)) / 10000n;
+    const platform = (gross * BigInt(platformBps)) / 10000n;
+    const artist = gross - tw - platform;
+    return {
+        artistWei: artist.toString(),
+        platformWei: platform.toString(),
+        thirdwebFeeWei: tw.toString(),
+    };
 }
 
 /**
@@ -331,7 +362,7 @@ async function forwardPrimarySalePayout(
     }
 
     const { releaseId, recipient } = await resolvePrimarySaleRecipient(supa, contractAddress, tokenId);
-    const { artistWei, platformWei } = splitPrimarySale(grossWei, PLATFORM_FEE_BPS_PRIMARY);
+    const { artistWei, platformWei, thirdwebFeeWei } = splitPrimarySale(grossWei, PLATFORM_FEE_BPS_PRIMARY);
 
     // If no recipient resolvable, write a `failed` row so it shows up in the
     // admin ledger for manual settlement.
@@ -347,6 +378,7 @@ async function forwardPrimarySalePayout(
                 artist_wallet: "0x0000000000000000000000000000000000000000", // placeholder
                 server_wallet: SERVER_WALLET,
                 gross_wei: grossWei,
+                thirdweb_fee_wei: thirdwebFeeWei,
                 artist_wei: artistWei,
                 platform_wei: platformWei,
                 platform_fee_bps: PLATFORM_FEE_BPS_PRIMARY,
@@ -382,6 +414,7 @@ async function forwardPrimarySalePayout(
             artist_wallet: recipient,
             server_wallet: SERVER_WALLET,
             gross_wei: grossWei,
+            thirdweb_fee_wei: thirdwebFeeWei,
             artist_wei: artistWei,
             platform_wei: platformWei,
             platform_fee_bps: PLATFORM_FEE_BPS_PRIMARY,
@@ -1260,6 +1293,71 @@ Deno.serve(async (req: Request) => {
                 const { confirmed, hash, error } = await waitForTx(txId, 60000);
                 if (!confirmed) return jsonResponse({ success: false, error: error || "setPrimarySaleRecipient did not confirm" }, 500);
                 return jsonResponse({ success: true, transactionId: txId, txHash: hash, recipient: target });
+            }
+            return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ── setPlatformFeeInfo on DropERC721 (admin) ──
+        // Sets the configurable platform fee on a thirdweb DropERC721. This is
+        // distinct from the hardcoded thirdweb protocol fee (DEFAULT_FEE_BPS /
+        // DEFAULT_FEE_RECIPIENT, not settable). The server wallet holds
+        // DEFAULT_ADMIN_ROLE so it can call setPlatformFeeInfo itself.
+        // Idempotent: reads current on-chain state via getPlatformFeeInfo()
+        // (selector 0xe57553da) and short-circuits when already correct.
+        if (action === "setPlatformFee") {
+            const { recipient, bps, contractAddress } = body;
+            const target = (recipient || SERVER_WALLET) as string;
+            const targetBps = typeof bps === "number" ? bps : PLATFORM_FEE_BPS_PRIMARY;
+            const contract = (contractAddress || DEFAULT_CONTRACT) as string;
+            if (!/^0x[a-fA-F0-9]{40}$/.test(target)) {
+                return jsonResponse({ error: "Invalid recipient address" }, 400);
+            }
+            if (!Number.isInteger(targetBps) || targetBps < 0 || targetBps > 10000) {
+                return jsonResponse({ error: "bps must be an integer in [0, 10000]" }, 400);
+            }
+
+            // Read current on-chain fee info (selector 0xd45573f6 = getPlatformFeeInfo())
+            // Returns (address, uint16) ABI-encoded as (address, uint256).
+            // NB: 0xe57553da is getFlatPlatformFeeInfo() — a sibling mechanism,
+            // unrelated to the bps fee we set here.
+            try {
+                const cur = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: contract, data: "0xd45573f6" }, "latest"] }),
+                });
+                const curData = await cur.json();
+                const hx = (curData?.result || "").replace(/^0x/, "");
+                if (hx.length >= 128) {
+                    const curRecipient = "0x" + hx.slice(24, 64);
+                    const curBps = parseInt(hx.slice(64, 128), 16);
+                    if (
+                        curRecipient.toLowerCase() === target.toLowerCase() &&
+                        curBps === targetBps
+                    ) {
+                        return jsonResponse({ success: true, unchanged: true, currentRecipient: curRecipient, currentBps: curBps });
+                    }
+                    console.log(`[nft-admin] setPlatformFee: ${curRecipient}/${curBps} -> ${target}/${targetBps}`);
+                }
+            } catch (e) {
+                console.warn("[nft-admin] setPlatformFee: current-value read failed, proceeding:", String(e));
+            }
+
+            const requestBody = {
+                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: contract,
+                    method: "function setPlatformFeeInfo(address _platformFeeRecipient, uint256 _platformFeeBps)",
+                    params: [target, targetBps.toString()],
+                }],
+            };
+            const { ok, status, result } = await callEngine(requestBody);
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (txId) {
+                const { confirmed, hash, error } = await waitForTx(txId, 60000);
+                if (!confirmed) return jsonResponse({ success: false, error: error || "setPlatformFee did not confirm" }, 500);
+                return jsonResponse({ success: true, transactionId: txId, txHash: hash, recipient: target, bps: targetBps });
             }
             return jsonResponse({ success: true, transactionId: txId, result });
         }
