@@ -551,7 +551,7 @@ export default function NFTDetailScreen() {
                                 paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
                             }}>
                                 <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary }}>
-                                    {isPrimary
+                                    {isPrimary || nft.nftStandard === 'erc1155'
                                         ? `${mintedCount} of ${nft.totalEditions} minted`
                                         : nft.editionNumber > 0
                                             ? `Edition ${nft.editionNumber} of ${nft.totalEditions}`
@@ -1038,6 +1038,8 @@ export default function NFTDetailScreen() {
                                         artist={n.artistName}
                                         price={n.price}
                                         editionNumber={n.editionNumber}
+                                        nftStandard={n.nftStandard}
+                                        mintedCount={n.mintedCount}
                                         totalEditions={n.totalEditions}
                                         rarity={n.rarity}
                                         fiatCurrency={fiatCurrency}

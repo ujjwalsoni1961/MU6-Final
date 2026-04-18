@@ -291,6 +291,8 @@ export default function ProfileScreen() {
                                     artist={nft.artistName}
                                     price={nft.price}
                                     editionNumber={nft.editionNumber}
+                                    nftStandard={nft.nftStandard}
+                                    mintedCount={nft.mintedCount}
                                     totalEditions={nft.totalEditions}
                                     rarity={nft.rarity}
                                     fiatCurrency={fiatCurrency}

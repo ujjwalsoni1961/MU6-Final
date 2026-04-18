@@ -289,6 +289,8 @@ export default function MarketplaceScreen() {
                                                 artist={item.artistName}
                                                 price={item.price}
                                                 editionNumber={item.editionNumber}
+                                                nftStandard={item.nftStandard}
+                                                mintedCount={item.mintedCount}
                                                 totalEditions={item.totalEditions}
                                                 rarity={item.rarity}
                                                 fiatCurrency={fiatCurrency}

@@ -212,6 +212,7 @@ export function adaptListing(l: DbListing, editionNum?: number): NFT & { listing
         allocatedRoyaltyPercent: release?.allocatedRoyaltyPercent,
         onChainTokenId: token?.onChainTokenId || undefined,
         ownerWallet: l.sellerWallet,
+        nftStandard: release?.nftStandard,
     };
 }
 

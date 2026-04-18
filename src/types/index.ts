@@ -74,6 +74,8 @@ export interface NFT {
     onChainTokenId?: string;
     /** Owner wallet address */
     ownerWallet?: string;
+    /** NFT standard — drives UI labels (ERC-721 = "Edition N of X", ERC-1155 = "X copies"). */
+    nftStandard?: 'erc721' | 'erc1155';
 }
 
 export interface Transaction {

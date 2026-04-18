@@ -19,6 +19,10 @@ interface NFTCardProps {
     editionNumber: number;
     totalEditions: number;
     rarity: 'common' | 'rare' | 'legendary';
+    /** NFT standard — drives edition label (ERC-721 = "Edition N of X", ERC-1155 = "N of X minted"). */
+    nftStandard?: 'erc721' | 'erc1155';
+    /** Copies already claimed/sold — used for ERC-1155 label. */
+    mintedCount?: number;
     /** 'collect' (default) for consumer marketplace, 'manage' for artist NFT Manager, 'collection' for owned NFTs (no bottom button) */
     variant?: 'collect' | 'manage' | 'collection';
     /** Optional: pass user's preferred fiat currency to show fiat prices on the tag */
@@ -29,7 +33,7 @@ interface NFTCardProps {
 import { useTheme } from '../../context/ThemeContext';
 
 export default function NFTCard({
-    cover, title, artist, price, editionNumber, totalEditions, rarity, variant = 'collect', fiatCurrency, onPress,
+    cover, title, artist, price, editionNumber, totalEditions, rarity, nftStandard, mintedCount, variant = 'collect', fiatCurrency, onPress,
 }: NFTCardProps) {
     const { isDark, colors } = useTheme();
 
@@ -86,7 +90,9 @@ export default function NFTCard({
                     textTransform: 'uppercase',
                     letterSpacing: 1.5,
                 }}>
-                    {editionNumber > 0 ? `Edition ${editionNumber} of ${totalEditions}` : `${totalEditions} Editions`}
+                    {nftStandard === 'erc1155'
+                        ? `${mintedCount ?? 0} of ${totalEditions} minted`
+                        : (editionNumber > 0 ? `Edition ${editionNumber} of ${totalEditions}` : `${totalEditions} Editions`)}
                 </Text>
                 {variant !== 'collection' && (
                     <AnimatedPressable
