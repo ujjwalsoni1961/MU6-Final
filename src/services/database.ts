@@ -8,6 +8,12 @@
 
 import { supabase } from '../lib/supabase';
 import { sendSongPublishedEmail, sendStreamMilestoneEmail } from './email';
+import {
+    computeSecondarySaleBreakdown,
+    computeSecondaryPurchaseBreakdown,
+    computePrimaryPurchaseBreakdown,
+    type FeeBreakdown,
+} from '../constants/fees';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -1709,7 +1715,23 @@ export interface UserActivity {
     type: 'purchase' | 'sale' | 'mint' | 'listing';
     songTitle: string;
     coverPath: string | null;
+    /**
+     * Net amount relevant to the wallet that owns this activity row:
+     *   - sale:     POL received by seller (gross × 92.5%, fees already deducted)
+     *   - purchase: POL spent by buyer (equals gross listing price)
+     *   - mint:     POL the minter paid (equals gross claim price)
+     *   - listing:  gross listing price (no money moved yet)
+     * Kept as `price` for backward compat with other consumers (e.g. profile.tsx).
+     */
     price: number | null;
+    /** Gross listing / claim price at the moment of the event — source of truth for fee math. */
+    grossPriceEth: number | null;
+    /** Actual POL movement in the owning wallet (same as `price`, explicit name for clarity). */
+    netPriceEth: number | null;
+    /** Itemized fee breakdown (lines deducted / distribution) ready for UI rendering. */
+    feeBreakdown: FeeBreakdown | null;
+    /** On-chain tx hash for deep-link to explorer. Null for listings (no sale tx yet). */
+    txHash: string | null;
     date: string;
     status: 'completed' | 'pending' | 'active';
 }
@@ -1717,6 +1739,17 @@ export interface UserActivity {
 /**
  * Get activity feed for a specific wallet address.
  * Combines purchases, sales, listings, and mints into one sorted list.
+ *
+ * Amount semantics (per row):
+ *   - purchase: buyer paid `grossPriceEth` (net = gross, buyer also paid gas off-row)
+ *   - sale:     seller received `netPriceEth` = gross × 92.5% (fees deducted atomically on-chain)
+ *   - mint:     minter paid `grossPriceEth` (primary claim; 93/5/2 split enforced on-chain)
+ *   - listing:  no money moved — gross is the asking price
+ *
+ * Mints are attributed to the ORIGINAL minter wallet (nft_tokens.minter_wallet_address),
+ * not the current owner. If minter_wallet_address is null (pre-migration 042 rows where
+ * backfill couldn't locate the mint event), we fall back to owner_wallet_address AND
+ * require last_sale_tx_hash IS NULL so we don't mis-attribute a resold token.
  */
 export async function getUserActivity(
     walletAddress: string,
@@ -1731,7 +1764,7 @@ export async function getUserActivity(
         const { data: purchases } = await supabase
             .from('marketplace_listings')
             .select(`
-                id, price_eth, listed_at, sold_at, buyer_wallet, is_active,
+                id, price_eth, listed_at, sold_at, buyer_wallet, is_active, sale_tx_hash,
                 nft_token:nft_tokens!nft_token_id (
                     release:nft_releases!nft_release_id (
                         song:songs!song_id ( title, cover_path )
@@ -1739,17 +1772,24 @@ export async function getUserActivity(
                 )
             `)
             .eq('buyer_wallet', wallet)
+            .not('sold_at', 'is', null)
             .order('sold_at', { ascending: false })
             .limit(limit);
 
         (purchases || []).forEach((row: any) => {
             const song = row.nft_token?.release?.song;
+            const gross = row.price_eth ? parseFloat(row.price_eth) : null;
+            const breakdown = gross != null ? computeSecondaryPurchaseBreakdown(gross) : null;
             activities.push({
                 id: `purchase-${row.id}`,
                 type: 'purchase',
                 songTitle: song?.title || 'Unknown Song',
                 coverPath: song?.cover_path || null,
-                price: row.price_eth ? parseFloat(row.price_eth) : null,
+                price: gross,          // buyer pays gross (equals netPriceEth from their side)
+                grossPriceEth: gross,
+                netPriceEth: gross,    // buyer's wallet decreased by gross (+ gas, not tracked here)
+                feeBreakdown: breakdown,
+                txHash: row.sale_tx_hash || null,
                 date: row.sold_at || row.listed_at,
                 status: 'completed',
             });
@@ -1761,7 +1801,7 @@ export async function getUserActivity(
         const { data: sales } = await supabase
             .from('marketplace_listings')
             .select(`
-                id, price_eth, listed_at, sold_at, seller_wallet, is_active,
+                id, price_eth, listed_at, sold_at, seller_wallet, is_active, sale_tx_hash,
                 nft_token:nft_tokens!nft_token_id (
                     release:nft_releases!nft_release_id (
                         song:songs!song_id ( title, cover_path )
@@ -1774,41 +1814,85 @@ export async function getUserActivity(
 
         (sales || []).forEach((row: any) => {
             const song = row.nft_token?.release?.song;
+            const gross = row.price_eth ? parseFloat(row.price_eth) : null;
+            const isSale = !!row.sold_at;
+            const breakdown = gross != null && isSale ? computeSecondarySaleBreakdown(gross) : null;
+            const netForSeller = breakdown ? breakdown.netEth : gross; // listing rows: no movement yet, show gross
             activities.push({
-                id: `${row.sold_at ? 'sale' : 'listing'}-${row.id}`,
-                type: row.sold_at ? 'sale' : 'listing',
+                id: `${isSale ? 'sale' : 'listing'}-${row.id}`,
+                type: isSale ? 'sale' : 'listing',
                 songTitle: song?.title || 'Unknown Song',
                 coverPath: song?.cover_path || null,
-                price: row.price_eth ? parseFloat(row.price_eth) : null,
+                price: netForSeller,   // sales: net received. listings: gross asking price.
+                grossPriceEth: gross,
+                netPriceEth: netForSeller,
+                feeBreakdown: breakdown,
+                txHash: row.sale_tx_hash || null,
                 date: row.sold_at || row.listed_at,
-                status: row.sold_at ? 'completed' : (row.is_active ? 'active' : 'completed'),
+                status: isSale ? 'completed' : (row.is_active ? 'active' : 'completed'),
             });
         });
     }
 
-    // ── Mints (NFT tokens owned by this wallet) ──
+    // ── Mints (original mint by this wallet — attributed via minter_wallet_address) ──
     if (!filter || filter === 'all' || filter === 'mints') {
-        const { data: mints } = await supabase
+        // Primary query: rows where this wallet was the on-chain mint recipient.
+        const { data: mintsByMinter } = await supabase
             .from('nft_tokens')
             .select(`
-                id, minted_at, last_sale_price_eth,
+                id, minted_at, mint_tx_hash, price_paid_eth, minter_wallet_address,
+                owner_wallet_address, last_sale_tx_hash,
                 release:nft_releases!nft_release_id (
                     price_eth,
                     song:songs!song_id ( title, cover_path )
                 )
             `)
+            .eq('minter_wallet_address', wallet)
+            .order('minted_at', { ascending: false })
+            .limit(limit);
+
+        // Fallback: legacy rows where minter_wallet_address is still NULL AND the token
+        // has never been resold (so owner_wallet_address still equals the minter).
+        const { data: mintsLegacy } = await supabase
+            .from('nft_tokens')
+            .select(`
+                id, minted_at, mint_tx_hash, price_paid_eth, minter_wallet_address,
+                owner_wallet_address, last_sale_tx_hash,
+                release:nft_releases!nft_release_id (
+                    price_eth,
+                    song:songs!song_id ( title, cover_path )
+                )
+            `)
+            .is('minter_wallet_address', null)
+            .is('last_sale_tx_hash', null)
             .eq('owner_wallet_address', wallet)
             .order('minted_at', { ascending: false })
             .limit(limit);
 
-        (mints || []).forEach((row: any) => {
+        const seen = new Set<string>();
+        const allMints = [...(mintsByMinter || []), ...(mintsLegacy || [])].filter((r: any) => {
+            if (seen.has(r.id)) return false;
+            seen.add(r.id);
+            return true;
+        });
+
+        allMints.forEach((row: any) => {
             const song = row.release?.song;
+            // Prefer the actual price paid (recorded at mint time); fall back to release list price.
+            const gross = row.price_paid_eth != null
+                ? parseFloat(row.price_paid_eth)
+                : (row.release?.price_eth != null ? parseFloat(row.release.price_eth) : null);
+            const breakdown = gross != null ? computePrimaryPurchaseBreakdown(gross) : null;
             activities.push({
                 id: `mint-${row.id}`,
                 type: 'mint',
                 songTitle: song?.title || 'Unknown Song',
                 coverPath: song?.cover_path || null,
-                price: row.release?.price_eth ? parseFloat(row.release.price_eth) : null,
+                price: gross,
+                grossPriceEth: gross,
+                netPriceEth: gross,
+                feeBreakdown: breakdown,
+                txHash: row.mint_tx_hash || null,
                 date: row.minted_at,
                 status: 'completed',
             });

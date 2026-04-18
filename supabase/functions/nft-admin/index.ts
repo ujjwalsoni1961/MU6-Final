@@ -847,6 +847,11 @@ Deno.serve(async (req: Request) => {
                                 token_id: tokenId,
                                 on_chain_token_id: tokenId,
                                 owner_wallet_address: receiverAddress.toLowerCase(),
+                                // Stable attribution: the receiver of a claim tx IS the original
+                                // on-chain minter (TransferSingle from=0x0 → to=receiverAddress).
+                                // This column is set ONCE at mint and never mutated on resale,
+                                // so the "Mints" tab survives future ownership transfers.
+                                minter_wallet_address: receiverAddress.toLowerCase(),
                                 mint_tx_hash: hash,
                                 price_paid_eth: priceEth,
                                 price_paid_token: priceEth,

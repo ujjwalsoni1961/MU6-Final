@@ -10,6 +10,7 @@ import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { useTheme } from '../../src/context/ThemeContext';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import TabPill from '../../src/components/shared/TabPill';
+import ActivityDetailModal from '../../src/components/shared/ActivityDetailModal';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/context/AuthContext';
 import { useUserActivity } from '../../src/hooks/useData';
@@ -18,6 +19,7 @@ import ErrorState from '../../src/components/shared/ErrorState';
 import { useWalletBalance } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 import { CHAIN_ID, CHAIN_NAME, IS_MAINNET } from '../../src/config/network';
+import { formatPol } from '../../src/constants/fees';
 
 const isWeb = Platform.OS === 'web';
 
@@ -62,14 +64,46 @@ function getActivityConfig(type: UserActivity['type'], colors: any) {
 }
 
 /* ─── Activity Row ─── */
-function ActivityRow({ activity, isDark, colors }: { activity: UserActivity; isDark: boolean; colors: any }) {
+function ActivityRow({
+    activity, isDark, colors, onPress,
+}: {
+    activity: UserActivity;
+    isDark: boolean;
+    colors: any;
+    onPress: (activity: UserActivity) => void;
+}) {
     const config = getActivityConfig(activity.type, colors);
     const IconComp = config.icon;
     const coverUri = activity.coverPath
         ? (activity.coverPath.startsWith('http') ? activity.coverPath : getPublicUrl('covers', activity.coverPath))
         : null;
 
-    return (
+    // Amount displayed on the row:
+    //   - sale:     net received (POL after fees) — same number that moved on-chain
+    //   - purchase: gross paid
+    //   - mint:     gross paid
+    //   - listing:  gross asking price
+    const primaryAmount = activity.netPriceEth ?? activity.price;
+    const grossAmount = activity.grossPriceEth;
+    const showGrossSubtitle =
+        activity.type === 'sale'
+        && grossAmount != null
+        && primaryAmount != null
+        && grossAmount !== primaryAmount;
+
+    const sign =
+        activity.type === 'purchase' ? '−'
+        : activity.type === 'sale' ? '+'
+        : '';
+    const amountColor =
+        activity.type === 'purchase' ? '#22c55e'
+        : activity.type === 'sale' ? '#8b5cf6'
+        : colors.text.primary;
+
+    // Tappable only if there's something more to show (breakdown or tx).
+    const canExpand = !!activity.feeBreakdown || !!activity.txHash;
+
+    const content = (
         <View style={{
             flexDirection: 'row', alignItems: 'center',
             paddingVertical: 14, paddingHorizontal: 16,
@@ -119,14 +153,17 @@ function ActivityRow({ activity, isDark, colors }: { activity: UserActivity; isD
 
             {/* Price + time */}
             <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
-                {activity.price != null && (
+                {primaryAmount != null && (
                     <Text style={{
                         fontSize: 14, fontWeight: '700',
-                        color: activity.type === 'purchase' ? '#22c55e'
-                            : activity.type === 'sale' ? '#8b5cf6'
-                            : colors.text.primary,
+                        color: amountColor,
                     }}>
-                        {activity.type === 'purchase' ? '-' : activity.type === 'sale' ? '+' : ''}{activity.price} POL
+                        {sign}{formatPol(primaryAmount)} POL
+                    </Text>
+                )}
+                {showGrossSubtitle && grossAmount != null && (
+                    <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>
+                        from {formatPol(grossAmount)} POL listed
                     </Text>
                 )}
                 <Text style={{ fontSize: 11, color: colors.text.tertiary, marginTop: 2 }}>
@@ -134,6 +171,13 @@ function ActivityRow({ activity, isDark, colors }: { activity: UserActivity; isD
                 </Text>
             </View>
         </View>
+    );
+
+    if (!canExpand) return content;
+    return (
+        <AnimatedPressable preset="button" onPress={() => onPress(activity)}>
+            {content}
+        </AnimatedPressable>
     );
 }
 
@@ -145,6 +189,7 @@ export default function WalletScreen() {
     const { walletAddress } = useAuth();
     const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
     const [refreshing, setRefreshing] = useState(false);
+    const [detailActivity, setDetailActivity] = useState<UserActivity | null>(null);
 
     // Fetch real on-chain balance
     const { data: balanceData, isLoading: balanceLoading, refetch: refetchBalance } = useWalletBalance({
@@ -321,6 +366,7 @@ export default function WalletScreen() {
                                     activity={activity}
                                     isDark={isDark}
                                     colors={colors}
+                                    onPress={setDetailActivity}
                                 />
                             ))}
                         </View>
@@ -346,6 +392,11 @@ export default function WalletScreen() {
                     )}
                 </ScrollView>
             </View>
+            <ActivityDetailModal
+                visible={!!detailActivity}
+                onClose={() => setDetailActivity(null)}
+                activity={detailActivity}
+            />
         </ScreenScaffold>
     );
 }

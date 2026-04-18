@@ -4,17 +4,15 @@
  * On-chain secondary sale operations via MarketplaceV3 (direct listings).
  * Replaces the old DB-only marketplace flow with on-chain listing, buying, and cancellation.
  *
- * Revenue split on secondary sales:
- * Actual on-chain split (verified from Amoy tx
- * 0x27e6133517e28ffc37ca5d042cee87a30b76475aee70151d99f0f2cb776a61c6):
- *   - 92.5% → seller
- *   -  5.0% → artist royalty via EIP-2981 (set per-token on the NFT contract)
- *   -  2.0% → MU6 platform fee (configured on MarketplaceV3, recipient = server wallet)
- *   -  0.5% → thirdweb protocol fee (hardcoded in MarketplaceV3 implementation,
- *              NOT configurable — applies to all thirdweb marketplaces)
+ * Revenue split on secondary sales (single source of truth: src/constants/fees.ts):
+ *   - SECONDARY_SELLER_BPS    = 9250 (92.5%) → seller
+ *   - SECONDARY_ROYALTY_BPS   =  500 (5.0%)  → artist royalty via EIP-2981 (per-token)
+ *   - SECONDARY_MU6_BPS       =  200 (2.0%)  → MU6 platform fee (MarketplaceV3 config)
+ *   - SECONDARY_THIRDWEB_BPS  =   50 (0.5%)  → thirdweb protocol fee (hardcoded in impl)
  *
- * The sum (92.5 + 5 + 2 + 0.5) = 100%, and MarketplaceV3 distributes funds
- * atomically within the buyFromListing tx — no post-buy payout step on our side.
+ * The sum = 10000 bps, and MarketplaceV3 distributes funds atomically within the
+ * buyFromListing tx — no post-buy payout step on our side. Verified on Amoy tx
+ * 0x27e6133517e28ffc37ca5d042cee87a30b76475aee70151d99f0f2cb776a61c6.
  */
 
 import { prepareContractCall, readContract, sendTransaction, waitForReceipt } from 'thirdweb';
@@ -29,6 +27,7 @@ import {
 import { NATIVE_TOKEN_ADDRESS } from '../config/network';
 import { supabase } from '../lib/supabase';
 import { getTokenToEurRate } from './fxRate';
+import { SECONDARY_ROYALTY_BPS } from '../constants/fees';
 
 /**
  * Resolve the NFT contract (address + thirdweb handle) for a given
@@ -110,7 +109,7 @@ const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 /** Call the nft-admin edge function for setRoyalty action */
 async function callSetRoyalty(
     royaltyRecipient: string,
-    royaltyBps: string = '500',
+    royaltyBps: string = String(SECONDARY_ROYALTY_BPS),
     contractAddress?: string,
 ): Promise<{ success: boolean; error?: string }> {
     try {
@@ -802,6 +801,6 @@ export async function setRoyaltyForSong(
         return { success: false, error: "Creator has no linked wallet — cannot set royalty recipient." };
     }
 
-    // 5% royalty to the creator wallet
-    return callSetRoyalty(creator.wallet_address, '500');
+    // Secondary-sale royalty to the creator wallet (bps from src/constants/fees.ts)
+    return callSetRoyalty(creator.wallet_address, String(SECONDARY_ROYALTY_BPS));
 }
