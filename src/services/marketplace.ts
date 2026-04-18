@@ -348,6 +348,55 @@ export async function buyMarketplaceListing(
         if (!listing) return { success: false, error: 'Listing not found or inactive' };
         if (!listing.chain_listing_id) return { success: false, error: 'Listing has no on-chain ID' };
 
+        // ------------------------------------------------------------------
+        // Buy-side self-heal preflight.
+        //
+        // If the listing is stale (token already moved on-chain) the
+        // marketplace contract will revert 'invalid listing' and we waste
+        // gas. Detect before sending and auto-heal the DB so the user gets a
+        // clean 'already sold' message and the ghost listing disappears.
+        // ------------------------------------------------------------------
+        try {
+            const tokenRow: any = listing.nft_token;
+            const chainTokenIdForCheck = tokenRow?.on_chain_token_id || tokenRow?.token_id;
+            if (chainTokenIdForCheck && /^\d+$/.test(String(chainTokenIdForCheck))) {
+                const currentOwner = await readContract({
+                    contract: getSongNFTContract(),
+                    method: 'function ownerOf(uint256 tokenId) view returns (address)',
+                    params: [BigInt(chainTokenIdForCheck)],
+                });
+                const currentOwnerLc = String(currentOwner).toLowerCase();
+                const sellerLc = String(listing.seller_wallet).toLowerCase();
+                const marketplaceLc = CONTRACTS.MARKETPLACE.toLowerCase();
+                if (currentOwnerLc !== sellerLc && currentOwnerLc !== marketplaceLc) {
+                    console.warn(
+                        '[marketplace] buy self-heal: listing', config.listingId,
+                        'token', chainTokenIdForCheck,
+                        'on-chain owner', currentOwnerLc,
+                        'seller', sellerLc,
+                        '— marking DB listing inactive (already sold).',
+                    );
+                    await supabase
+                        .from('marketplace_listings')
+                        .update({
+                            is_active: false,
+                            sold_at: new Date().toISOString(),
+                            buyer_wallet: currentOwnerLc,
+                        })
+                        .eq('id', config.listingId);
+                    return {
+                        success: false,
+                        error: 'This listing is no longer available — the NFT was already sold. The marketplace has been refreshed.',
+                    };
+                }
+            }
+        } catch (preflightErr: any) {
+            // RPC hiccup — fall through and let the marketplace contract be
+            // the final arbiter. Don't block a legitimate buy because of a
+            // transient RPC error.
+            console.warn('[marketplace] buy preflight ownerOf failed (non-fatal):', preflightErr?.message);
+        }
+
         const chainListingId = BigInt(listing.chain_listing_id);
         const pricePol = parseFloat(listing.price_token || listing.price_eth);
         const totalPriceWei = BigInt(Math.floor(pricePol * 1e18));
@@ -521,13 +570,71 @@ export async function cancelMarketplaceListing(
     try {
         const { data: listing } = await supabase
             .from('marketplace_listings')
-            .select('chain_listing_id')
+            .select('chain_listing_id, nft_token:nft_tokens!nft_token_id (id, token_id, on_chain_token_id)')
             .eq('id', listingId)
             .eq('seller_wallet', sellerWallet.toLowerCase())
             .eq('is_active', true)
             .maybeSingle();
 
         if (!listing) return { success: false, error: 'Listing not found' };
+
+        // ------------------------------------------------------------------
+        // Self-heal preflight:
+        //
+        // If the seller no longer owns the NFT on-chain (e.g. the listing
+        // was already fulfilled by a buyer but an earlier buy-flow run
+        // failed to deactivate the DB row), the MarketplaceV3 contract will
+        // revert the cancelListing tx with 'invalid listing' — wasting gas
+        // and giving the user a confusing error.
+        //
+        // Detect that case here: read ownerOf(tokenId) on-chain. If the owner
+        // is neither the seller nor the marketplace contract, the listing is
+        // dead on-chain. Deactivate the DB row so the Manage UI stops
+        // showing it, and return a clear, honest error message.
+        //
+        // On-chain is source of truth (rule #3).
+        // ------------------------------------------------------------------
+        const tokenRow: any = listing.nft_token;
+        const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
+        if (chainTokenId && /^\d+$/.test(String(chainTokenId))) {
+            try {
+                const onChainOwner = await readContract({
+                    contract: getSongNFTContract(),
+                    method: 'function ownerOf(uint256 tokenId) view returns (address)',
+                    params: [BigInt(chainTokenId)],
+                });
+                const ownerLc = String(onChainOwner).toLowerCase();
+                const sellerLc = sellerWallet.toLowerCase();
+                const marketplaceLc = CONTRACTS.MARKETPLACE.toLowerCase();
+
+                if (ownerLc !== sellerLc && ownerLc !== marketplaceLc) {
+                    // Seller doesn't own it and it isn't held in escrow on the
+                    // marketplace. Listing is effectively dead — auto-heal DB.
+                    console.warn(
+                        '[marketplace] self-heal: listing', listingId,
+                        'token', chainTokenId,
+                        'on-chain owner', ownerLc,
+                        'seller', sellerLc,
+                        '— marking DB listing inactive.',
+                    );
+                    await supabase
+                        .from('marketplace_listings')
+                        .update({
+                            is_active: false,
+                            sold_at: new Date().toISOString(),
+                            buyer_wallet: ownerLc,
+                        })
+                        .eq('id', listingId);
+                    return {
+                        success: false,
+                        error: 'This listing has already been fulfilled on-chain — the NFT was transferred to another wallet. Your collection has been refreshed.',
+                    };
+                }
+            } catch (preflightErr: any) {
+                // RPC hiccup — fall through and try the on-chain cancel anyway.
+                console.warn('[marketplace] cancel preflight ownerOf failed (non-fatal):', preflightErr?.message);
+            }
+        }
 
         // Cancel on-chain if we have a valid chain listing ID
         if (listing.chain_listing_id && /^\d+$/.test(listing.chain_listing_id)) {

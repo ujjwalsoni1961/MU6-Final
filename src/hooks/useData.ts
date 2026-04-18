@@ -1075,7 +1075,16 @@ export function useOwnedNFTsWithStatus() {
             if (!walletAddress) return [];
 
             // Step 1: on-chain discovery — authoritative list of what the wallet owns
-            const onChainTokenIds = await enumerateOwnedTokenIds(walletAddress);
+            const rawOnChainTokenIds = await enumerateOwnedTokenIds(walletAddress);
+            if (rawOnChainTokenIds.length === 0) return [];
+
+            // Step 1a: filter out ghost tokens (pre-prod / legacy junk from before
+            // the atomic mint flow — see migration 030 / nft_ghost_tokens table).
+            // We do this in-hook rather than in enumerateOwnedTokenIds so that
+            // enumeration stays a pure on-chain read — admin tools that want the
+            // full raw set (e.g. for reconciliation) can still get it.
+            const ghostIds = await db.getGhostTokenIds();
+            const onChainTokenIds = rawOnChainTokenIds.filter((id) => !ghostIds.has(id));
             if (onChainTokenIds.length === 0) return [];
 
             // Step 2: pull DB rows for every on-chain tokenId (if they exist) plus

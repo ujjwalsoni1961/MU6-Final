@@ -1494,6 +1494,30 @@ export async function getTokensByOnChainIds(
 }
 
 /**
+ * Get the set of on-chain token ids that the UI must treat as non-existent.
+ *
+ * These are legacy / pre-production tokens that live on the drop contract
+ * but have no real metadata and no owner we care about. Hidden from
+ * enumeration, listings, and admin aggregates. Managed via the
+ * nft_ghost_tokens table (migration 030).
+ *
+ * Returns a plain Set<string> of on_chain_token_ids for O(1) lookup.
+ * On any DB error we return an empty set — fail-open so a transient DB
+ * hiccup never silently hides real tokens.
+ */
+export async function getGhostTokenIds(): Promise<Set<string>> {
+    const { data, error } = await supabase
+        .from('nft_ghost_tokens')
+        .select('on_chain_token_id');
+
+    if (error || !data) {
+        if (error) console.warn('[db] getGhostTokenIds failed (fail-open):', error.message);
+        return new Set<string>();
+    }
+    return new Set<string>((data as any[]).map((r) => String(r.on_chain_token_id)));
+}
+
+/**
  * Batch version of getActiveListingForToken.
  *
  * Returns a map keyed by nft_token_id (the DB UUID, NOT the on-chain tokenId).
