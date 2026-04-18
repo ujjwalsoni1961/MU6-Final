@@ -5,9 +5,16 @@
  * Replaces the old DB-only marketplace flow with on-chain listing, buying, and cancellation.
  *
  * Revenue split on secondary sales:
- *   - 90% → seller (handled by MarketplaceV3)
- *   - 5% → platform fee (configured on MarketplaceV3)
- *   - 5% → artist royalty via EIP-2981 (set on NFT contract)
+ * Actual on-chain split (verified from Amoy tx
+ * 0x27e6133517e28ffc37ca5d042cee87a30b76475aee70151d99f0f2cb776a61c6):
+ *   - 92.5% → seller
+ *   -  5.0% → artist royalty via EIP-2981 (set per-token on the NFT contract)
+ *   -  2.0% → MU6 platform fee (configured on MarketplaceV3, recipient = server wallet)
+ *   -  0.5% → thirdweb protocol fee (hardcoded in MarketplaceV3 implementation,
+ *              NOT configurable — applies to all thirdweb marketplaces)
+ *
+ * The sum (92.5 + 5 + 2 + 0.5) = 100%, and MarketplaceV3 distributes funds
+ * atomically within the buyFromListing tx — no post-buy payout step on our side.
  */
 
 import { prepareContractCall, readContract, sendTransaction, waitForReceipt } from 'thirdweb';
@@ -448,7 +455,7 @@ export async function createMarketplaceListing(
  *
  * On-chain flow — MarketplaceV3 handles:
  *   - NFT transfer: seller → buyer
- *   - Payment: buyer pays → seller (90%) + platform (5%) + royalty (5%)
+ *   - Payment: buyer pays → seller (92.5%) + royalty (5%) + MU6 platform (2%) + thirdweb protocol (0.5%)
  *
  * After tx confirms, update DB records as cache/index of on-chain state.
  * NO royalty_events/royalty_shares created — the Split contract handles artist royalties.
@@ -631,15 +638,35 @@ export async function buyMarketplaceListing(
         const now = new Date().toISOString();
 
         // 4. Update DB records (cache of on-chain state)
-        // Mark listing as sold
-        await supabase
-            .from('marketplace_listings')
-            .update({
-                is_active: false,
-                sold_at: now,
-                buyer_wallet: config.buyerWallet.toLowerCase(),
-            })
-            .eq('id', config.listingId);
+        // Mark listing as sold.
+        //
+        // sale_tx_hash is the authoritative link between this DB row and the
+        // on-chain buy that funded it — without it, reconciliation against
+        // on-chain fund distribution (artist royalty, platform fee, seller
+        // payout) requires a full log scan of MarketplaceV3. Always persist.
+        {
+            const { error: listingUpdateErr } = await supabase
+                .from('marketplace_listings')
+                .update({
+                    is_active: false,
+                    sold_at: now,
+                    buyer_wallet: config.buyerWallet.toLowerCase(),
+                    sale_tx_hash: txHash,
+                })
+                .eq('id', config.listingId);
+            if (listingUpdateErr) {
+                // Non-fatal: the buy succeeded on-chain. Log loudly so ops can
+                // backfill if this path starts failing.
+                console.error(
+                    '[marketplace] FAILED to persist sale_tx_hash on listing',
+                    config.listingId,
+                    '— tx is',
+                    txHash,
+                    'error:',
+                    listingUpdateErr.message,
+                );
+            }
+        }
 
         // Transfer token ownership in DB (cache of on-chain truth)
         await supabase
@@ -696,10 +723,11 @@ export async function buyMarketplaceListing(
         }
 
         // NOTE: NO royalty_events/royalty_shares creation here.
-        // The MarketplaceV3 contract handles fund distribution:
-        //   - 90% to seller
-        //   - 5% platform fee (configured on marketplace contract)
-        //   - 5% royalty via EIP-2981 to the Split contract / royalty recipient
+        // MarketplaceV3 handles fund distribution atomically inside buyFromListing:
+        //   - 92.5% to seller
+        //   -  5.0% royalty via EIP-2981 to the royalty recipient set per-token
+        //   -  2.0% platform fee to the MU6 server wallet
+        //   -  0.5% thirdweb protocol fee (hardcoded, non-configurable)
 
         return { success: true, txHash };
     } catch (err: any) {
