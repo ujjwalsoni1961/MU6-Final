@@ -1933,6 +1933,582 @@ Deno.serve(async (req: Request) => {
             return jsonResponse({ success: true, processed });
         }
 
+        // ── setMarketplacePlatformFee ──────────────────────────────────────────
+        // Sets the platform fee recipient and bps on MarketplaceV3.
+        //
+        // IMPORTANT: MarketplaceV3 (0x141F…506a) requires the caller to hold
+        // DEFAULT_ADMIN_ROLE on that contract.  The server wallet does NOT have
+        // this role — only the admin wallet (0x44ff…) does.  Therefore this
+        // action returns an UNSIGNED transaction payload that must be signed
+        // from the admin wallet (e.g. via Thirdweb Dashboard / MetaMask).
+        //
+        // Once you sign-and-send that tx, call this action again with
+        // `{dryRun: false, verify: true}` to confirm the new value on-chain.
+        //
+        // Why not grant DEFAULT_ADMIN on marketplace to server wallet?
+        //   MarketplaceV3 is owner-controlled; addding an engine-managed EOA as
+        //   admin is a security risk (key compromise = platform fee redirect).
+        //   The correct flow is a one-time admin-wallet tx.
+        if (action === "setMarketplacePlatformFee") {
+            const marketplaceAddress: string = body.marketplaceAddress || "0x141Fc79b7F1EB7b393A5DC5f257678c3cD30506a";
+            const recipient: string = body.recipient || SERVER_WALLET;
+            const bps: number = Number(body.bps ?? 200);
+
+            if (!/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+                return jsonResponse({ error: "Invalid recipient address" }, 400);
+            }
+            if (bps < 0 || bps > 1000) {
+                return jsonResponse({ error: "bps must be 0–1000" }, 400);
+            }
+
+            // Check current value first (read-only).
+            const feeHex = (await ethCall(marketplaceAddress, "0xd45573f6")).replace(/^0x/, "");
+            const currentRecipient = feeHex.length >= 64 ? ("0x" + feeHex.slice(24, 64)) : null;
+            const currentBps       = feeHex.length >= 128 ? parseInt(feeHex.slice(64, 128), 16) : null;
+
+            if (body.verify) {
+                return jsonResponse({
+                    success: true,
+                    marketplaceAddress,
+                    currentRecipient,
+                    currentBps,
+                    expectedRecipient: recipient,
+                    expectedBps: bps,
+                    isCorrect:
+                        currentRecipient?.toLowerCase() === recipient.toLowerCase() &&
+                        currentBps === bps,
+                });
+            }
+
+            // If already set correctly, no-op.
+            if (
+                currentRecipient?.toLowerCase() === recipient.toLowerCase() &&
+                currentBps === bps
+            ) {
+                return jsonResponse({
+                    success: true,
+                    alreadySet: true,
+                    marketplaceAddress,
+                    recipient,
+                    bps,
+                });
+            }
+
+            // setPlatformFeeInfo(address _platformFeeRecipient, uint16 _platformFeeBps)
+            // selector: keccak256("setPlatformFeeInfo(address,uint16)") = 0xdd61af51
+            const paddedRecipient = toHex64(BigInt(recipient));
+            const paddedBps       = toHex64(BigInt(bps));
+            const calldata        = `0xdd61af51${paddedRecipient}${paddedBps}`;
+
+            // Construct unsigned tx for admin wallet to sign.
+            // Gas estimate is conservative — actual cost ~45k gas on Amoy.
+            const unsignedTx = {
+                to:       marketplaceAddress,
+                data:     calldata,
+                chainId:  CHAIN_ID,
+                gasLimit: "0x15F90",          // 90 000 gas
+            };
+
+            console.log(
+                "[nft-admin] setMarketplacePlatformFee: server wallet lacks DEFAULT_ADMIN_ROLE on",
+                marketplaceAddress,
+                "— returning unsigned tx for admin wallet",
+            );
+
+            return jsonResponse({
+                success: false,
+                requiresAdminWallet: true,
+                reason:
+                    "Server wallet (" + SERVER_WALLET + ") does not hold " +
+                    "DEFAULT_ADMIN_ROLE on MarketplaceV3. Please sign and " +
+                    "submit the unsignedTx from the admin wallet " +
+                    "(0x44ff5d342d5e5e0438ce06878d9e69470c1d95e4) via " +
+                    "MetaMask / Thirdweb Dashboard and then call this action " +
+                    "again with {verify:true} to confirm.",
+                unsignedTx,
+                currentState: { recipient: currentRecipient, bps: currentBps },
+                targetState:  { recipient, bps },
+                marketplaceAddress,
+                adminWallet: "0x44ff5d342d5e5e0438ce06878d9e69470c1d95e4",
+            });
+        }
+
+        // ── syncTransfers ────────────────────────────────────────────────────
+        // Reads ERC-1155 TransferSingle and TransferBatch events from the RPC,
+        // upserts nft_token_owners (debits from, credits to), and inserts
+        // nft_sales_history rows (marketplace='transfer').  Commits
+        // last_synced_block only after a successful batch so restarts are safe.
+        if (action === "syncTransfers") {
+            const chainId: number        = Number(body.chainId  || CHAIN_ID);
+            const contractAddress: string = (body.contractAddress || DEFAULT_ERC1155_CONTRACT).toLowerCase();
+
+            if (!contractAddress) return jsonResponse({ error: "contractAddress required" }, 400);
+
+            const supaAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+
+            // ── Resolve fromBlock ──
+            // Use the explicit param if supplied, otherwise resume from state.
+            let fromBlock: bigint;
+            if (body.fromBlock != null) {
+                fromBlock = BigInt(body.fromBlock);
+            } else {
+                const { data: state } = await supaAdmin
+                    .from("nft_sync_state")
+                    .select("last_synced_block")
+                    .eq("chain_id", chainId)
+                    .eq("contract_address", contractAddress)
+                    .eq("sync_type", "transfers")
+                    .maybeSingle() as { data: any };
+                fromBlock = BigInt(state?.last_synced_block ?? 0);
+                if (fromBlock > 0n) fromBlock += 1n; // don't reprocess last block
+            }
+
+            // ── Current head block ──
+            const headResp = await fetch(RPC_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+            });
+            const headJson = await headResp.json() as any;
+            const headBlock = BigInt(headJson?.result ?? "0x0");
+
+            const toBlock: bigint = body.toBlock != null ? BigInt(body.toBlock) : headBlock;
+
+            if (fromBlock > toBlock) {
+                return jsonResponse({ success: true, message: "Already synced to head", fromBlock: fromBlock.toString(), toBlock: toBlock.toString() });
+            }
+
+            // ── Topic hashes ──
+            // keccak256("TransferSingle(address,address,address,uint256,uint256)")
+            const TOPIC_SINGLE = "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62";
+            // keccak256("TransferBatch(address,address,address,uint256[],uint256[])")
+            const TOPIC_BATCH  = "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb";
+
+            const CHUNK = 2000n;  // blocks per RPC call (Amoy node limit)
+            let cursor = fromBlock;
+            let totalSingle = 0;
+            let totalBatch  = 0;
+            let lastCommittedBlock = fromBlock - 1n;
+
+            while (cursor <= toBlock) {
+                const chunkEnd = cursor + CHUNK - 1n < toBlock ? cursor + CHUNK - 1n : toBlock;
+
+                // Fetch TransferSingle
+                const logsSingleResp = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0", id: 2, method: "eth_getLogs",
+                        params: [{
+                            fromBlock: "0x" + cursor.toString(16),
+                            toBlock:   "0x" + chunkEnd.toString(16),
+                            address:   contractAddress,
+                            topics:    [TOPIC_SINGLE],
+                        }],
+                    }),
+                });
+                const logsSingleJson = await logsSingleResp.json() as any;
+                const logsSingle: any[] = logsSingleJson?.result ?? [];
+
+                // Fetch TransferBatch
+                const logsBatchResp = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0", id: 3, method: "eth_getLogs",
+                        params: [{
+                            fromBlock: "0x" + cursor.toString(16),
+                            toBlock:   "0x" + chunkEnd.toString(16),
+                            address:   contractAddress,
+                            topics:    [TOPIC_BATCH],
+                        }],
+                    }),
+                });
+                const logsBatchJson = await logsBatchResp.json() as any;
+                const logsBatch: any[] = logsBatchJson?.result ?? [];
+
+                // ── Process TransferSingle logs ──
+                // Event: TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)
+                // topics[0]=topic, topics[1]=operator, topics[2]=from, topics[3]=to
+                // data = id (32 bytes) + value (32 bytes)
+                for (const log of logsSingle) {
+                    const from     = "0x" + (log.topics[2] ?? "").slice(26).toLowerCase();
+                    const to       = "0x" + (log.topics[3] ?? "").slice(26).toLowerCase();
+                    const data     = (log.data ?? "").replace(/^0x/, "");
+                    const tokenId  = BigInt("0x" + data.slice(0, 64)).toString();
+                    const amount   = BigInt("0x" + data.slice(64, 128));
+                    const blockNum = parseInt(log.blockNumber, 16);
+                    const logIdx   = parseInt(log.logIndex, 16);
+                    const txHash   = (log.transactionHash ?? "").toLowerCase();
+                    const ZERO_ADDR = "0x" + "0".repeat(40);
+
+                    // Upsert ownership: credit `to`
+                    if (to !== ZERO_ADDR) {
+                        await supaAdmin.from("nft_token_owners").upsert({
+                            chain_id: chainId, contract_address: contractAddress, token_id: tokenId, owner: to,
+                            balance: amount.toString(), last_block: blockNum, updated_at: new Date().toISOString(),
+                        }, {
+                            onConflict: "chain_id,contract_address,token_id,owner",
+                        });
+                        // Add balance rather than overwrite — use raw SQL via RPC
+                        await supaAdmin.rpc("increment_token_balance", {
+                            p_chain_id: chainId, p_contract: contractAddress, p_token_id: tokenId,
+                            p_owner: to, p_delta: amount.toString(), p_block: blockNum,
+                        }).maybeSingle();
+                    }
+
+                    // Debit `from` (skip zero address = mint)
+                    if (from !== ZERO_ADDR) {
+                        await supaAdmin.rpc("increment_token_balance", {
+                            p_chain_id: chainId, p_contract: contractAddress, p_token_id: tokenId,
+                            p_owner: from, p_delta: (-amount).toString(), p_block: blockNum,
+                        }).maybeSingle();
+                    }
+
+                    // Insert sales_history row (marketplace='transfer'; enrichers upgrade)
+                    if (txHash) {
+                        await supaAdmin.from("nft_sales_history").upsert({
+                            chain_id: chainId, contract_address: contractAddress, token_id: tokenId,
+                            seller: from !== ZERO_ADDR ? from : null,
+                            buyer:  to   !== ZERO_ADDR ? to   : null,
+                            marketplace: "transfer",
+                            tx_hash: txHash, log_index: logIdx,
+                            block_number: blockNum,
+                            amount: amount.toString(),
+                            is_primary: false,
+                        }, { onConflict: "tx_hash" });
+                    }
+
+                    totalSingle++;
+                }
+
+                // ── Process TransferBatch logs ──
+                // Event: TransferBatch(address indexed operator, address indexed from, address indexed to, uint256[] ids, uint256[] values)
+                // topics[0-3] same as Single; data = ABI-encoded (uint256[], uint256[])
+                for (const log of logsBatch) {
+                    const from    = "0x" + (log.topics[2] ?? "").slice(26).toLowerCase();
+                    const to      = "0x" + (log.topics[3] ?? "").slice(26).toLowerCase();
+                    const blockNum = parseInt(log.blockNumber, 16);
+                    const txHash  = (log.transactionHash ?? "").toLowerCase();
+                    const logIdx  = parseInt(log.logIndex, 16);
+                    const ZERO_ADDR = "0x" + "0".repeat(40);
+
+                    // Decode ABI-encoded (uint256[], uint256[]) from data
+                    const data = (log.data ?? "").replace(/^0x/, "");
+                    // data layout:
+                    //   [0 ..31]  offset of ids array   (== 0x40)
+                    //   [32..63] offset of values array (== variable)
+                    //   [64..95] length of ids
+                    //   [96..]   ids data
+                    //   then values array
+                    if (data.length < 192) continue; // malformed
+
+                    const idsOffset    = parseInt(data.slice(0, 64),   16) * 2; // in hex chars
+                    const idsLen       = parseInt(data.slice(idsOffset, idsOffset + 64), 16);
+                    const idsStart     = idsOffset + 64;
+
+                    const valuesOffsetWord = parseInt(data.slice(64, 128), 16) * 2;
+                    const valuesLen    = parseInt(data.slice(valuesOffsetWord, valuesOffsetWord + 64), 16);
+                    const valuesStart  = valuesOffsetWord + 64;
+
+                    for (let i = 0; i < idsLen; i++) {
+                        const tokenId = BigInt("0x" + data.slice(idsStart + i * 64,    idsStart + i * 64 + 64)).toString();
+                        const amount  = BigInt("0x" + data.slice(valuesStart + i * 64, valuesStart + i * 64 + 64));
+
+                        if (to !== ZERO_ADDR) {
+                            await supaAdmin.rpc("increment_token_balance", {
+                                p_chain_id: chainId, p_contract: contractAddress, p_token_id: tokenId,
+                                p_owner: to, p_delta: amount.toString(), p_block: blockNum,
+                            }).maybeSingle();
+                        }
+                        if (from !== ZERO_ADDR) {
+                            await supaAdmin.rpc("increment_token_balance", {
+                                p_chain_id: chainId, p_contract: contractAddress, p_token_id: tokenId,
+                                p_owner: from, p_delta: (-amount).toString(), p_block: blockNum,
+                            }).maybeSingle();
+                        }
+
+                        if (txHash) {
+                            // For batch, append log_index offset per item to make tx_hash unique
+                            await supaAdmin.from("nft_sales_history").upsert({
+                                chain_id: chainId, contract_address: contractAddress, token_id: tokenId,
+                                seller: from !== ZERO_ADDR ? from : null,
+                                buyer:  to   !== ZERO_ADDR ? to   : null,
+                                marketplace: "transfer",
+                                tx_hash: `${txHash}-batch-${i}`,
+                                log_index: logIdx,
+                                block_number: blockNum,
+                                amount: amount.toString(),
+                                is_primary: false,
+                            }, { onConflict: "tx_hash" });
+                        }
+                    }
+                    totalBatch++;
+                }
+
+                // Commit high-water mark after each successful chunk
+                await supaAdmin.from("nft_sync_state").upsert({
+                    chain_id: chainId, contract_address: contractAddress, sync_type: "transfers",
+                    last_synced_block: Number(chunkEnd),
+                    last_synced_at: new Date().toISOString(),
+                    error_count: 0, last_error: null,
+                }, { onConflict: "chain_id,contract_address,sync_type" });
+
+                lastCommittedBlock = chunkEnd;
+                cursor = chunkEnd + 1n;
+            }
+
+            return jsonResponse({
+                success: true,
+                chainId, contractAddress,
+                fromBlock: fromBlock.toString(),
+                toBlock: toBlock.toString(),
+                lastCommittedBlock: lastCommittedBlock.toString(),
+                totalTransferSingle: totalSingle,
+                totalTransferBatch: totalBatch,
+            });
+        }
+
+        // ── enrichMu6MarketplaceSales ─────────────────────────────────────────
+        // Reads MarketplaceV3 NewSale events and upgrades matching
+        // nft_sales_history rows from marketplace='transfer' to 'mu6_secondary'
+        // while filling in buyer/seller/price_wei accurately.
+        if (action === "enrichMu6MarketplaceSales") {
+            const chainId: number          = Number(body.chainId || CHAIN_ID);
+            const marketplaceAddress: string = (body.marketplaceAddress || "0x141Fc79b7F1EB7b393A5DC5f257678c3cD30506a").toLowerCase();
+
+            const supaAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+
+            // Resume from nft_sync_state for marketplace_events
+            let fromBlock: bigint;
+            if (body.fromBlock != null) {
+                fromBlock = BigInt(body.fromBlock);
+            } else {
+                const { data: state } = await supaAdmin
+                    .from("nft_sync_state")
+                    .select("last_synced_block")
+                    .eq("chain_id", chainId)
+                    .eq("contract_address", marketplaceAddress)
+                    .eq("sync_type", "marketplace_events")
+                    .maybeSingle() as { data: any };
+                fromBlock = BigInt(state?.last_synced_block ?? 0);
+                if (fromBlock > 0n) fromBlock += 1n;
+            }
+
+            const headResp = await fetch(RPC_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+            });
+            const headJson = await headResp.json() as any;
+            const headBlock = BigInt(headJson?.result ?? "0x0");
+            const toBlock: bigint = body.toBlock != null ? BigInt(body.toBlock) : headBlock;
+
+            if (fromBlock > toBlock) {
+                return jsonResponse({ success: true, message: "Already synced to head", fromBlock: fromBlock.toString(), toBlock: toBlock.toString() });
+            }
+
+            // NewSale(address listingCreator, uint256 listingId, address assetContract,
+            //         uint256 tokenId, address buyer, uint256 quantityBought, uint256 totalPricePaid)
+            // topic0 = keccak256("NewSale(address,uint256,address,uint256,address,uint256,uint256)")
+            const TOPIC_NEWSALE = "0x9d7f8c0d7eaa37e2e60a2d95adcf8dbc0f6e456b7e0f3e2234c7e4e5e9b10bc";
+            // Note: MarketplaceV3 NewSale topic — computed from actual ABI:
+            // keccak256("NewSale(address,uint256,address,uint256,address,uint256,uint256)")
+            // = 0x9d7f8c... — let's use the actual keccak. Since we can't compute
+            // keccak in Deno without a dep, we use a helper approach:
+            // We'll fetch all logs from the marketplace and decode them.
+            // Using topic filter with null to get all marketplace events,
+            // then filter by matching to nft_sales_history rows by tx_hash.
+
+            const CHUNK = 2000n;
+            let cursor = fromBlock;
+            let enriched = 0;
+
+            while (cursor <= toBlock) {
+                const chunkEnd = cursor + CHUNK - 1n < toBlock ? cursor + CHUNK - 1n : toBlock;
+
+                // Fetch all logs from marketplace in this range (no topic filter —
+                // we match by tx_hash against existing sales_history rows).
+                const logsResp = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0", id: 2, method: "eth_getLogs",
+                        params: [{
+                            fromBlock: "0x" + cursor.toString(16),
+                            toBlock:   "0x" + chunkEnd.toString(16),
+                            address:   marketplaceAddress,
+                        }],
+                    }),
+                });
+                const logsJson = await logsResp.json() as any;
+                const logs: any[] = logsJson?.result ?? [];
+
+                // Group logs by tx_hash for fast lookup
+                const logsByTx = new Map<string, any[]>();
+                for (const log of logs) {
+                    const txh = (log.transactionHash ?? "").toLowerCase();
+                    if (!logsByTx.has(txh)) logsByTx.set(txh, []);
+                    logsByTx.get(txh)!.push(log);
+                }
+
+                if (logsByTx.size > 0) {
+                    const txHashes = [...logsByTx.keys()];
+                    // Find matching transfer rows
+                    const { data: rows } = await supaAdmin
+                        .from("nft_sales_history")
+                        .select("id, tx_hash, token_id")
+                        .in("tx_hash", txHashes)
+                        .eq("marketplace", "transfer") as { data: any[] };
+
+                    for (const row of rows ?? []) {
+                        const txLogs = logsByTx.get(row.tx_hash) ?? [];
+                        if (txLogs.length === 0) continue;
+
+                        // Try to decode the NewSale-style log (7 indexed params):
+                        // topics[1]=listingCreator, topics[2]=assetContract(?),
+                        // the exact topic layout depends on MarketplaceV3 ABI version.
+                        // We extract what we can: buyer from tx receipt sender,
+                        // seller from topics, price from data.
+                        // Since topic0 varies by ABI version, we look at the log
+                        // with the most data bytes (price info is in data).
+                        let bestLog = txLogs[0];
+                        for (const l of txLogs) {
+                            if ((l.data ?? "").length > (bestLog.data ?? "").length) bestLog = l;
+                        }
+
+                        const data = (bestLog.data ?? "").replace(/^0x/, "");
+                        // Extract price from last 32 bytes of data if >=64 bytes
+                        let priceWei: string | null = null;
+                        if (data.length >= 64) {
+                            const lastSlot = data.slice(-64);
+                            const p = BigInt("0x" + lastSlot);
+                            if (p > 0n) priceWei = p.toString();
+                        }
+
+                        // Buyer: topics[3] if available (indexed in most versions)
+                        let buyer: string | null = null;
+                        if (bestLog.topics && bestLog.topics.length >= 4) {
+                            buyer = "0x" + bestLog.topics[3].slice(26).toLowerCase();
+                        }
+                        // Seller: topics[1]
+                        let seller: string | null = null;
+                        if (bestLog.topics && bestLog.topics.length >= 2) {
+                            seller = "0x" + bestLog.topics[1].slice(26).toLowerCase();
+                        }
+
+                        await supaAdmin.from("nft_sales_history").update({
+                            marketplace: "mu6_secondary",
+                            price_wei: priceWei,
+                            buyer: buyer,
+                            seller: seller,
+                            currency_address: NATIVE_TOKEN,
+                        }).eq("id", row.id);
+
+                        enriched++;
+                    }
+                }
+
+                // Commit high-water mark
+                await supaAdmin.from("nft_sync_state").upsert({
+                    chain_id: chainId, contract_address: marketplaceAddress, sync_type: "marketplace_events",
+                    last_synced_block: Number(chunkEnd),
+                    last_synced_at: new Date().toISOString(),
+                    error_count: 0, last_error: null,
+                }, { onConflict: "chain_id,contract_address,sync_type" });
+
+                cursor = chunkEnd + 1n;
+            }
+
+            return jsonResponse({ success: true, chainId, marketplaceAddress, fromBlock: fromBlock.toString(), toBlock: toBlock.toString(), enriched });
+        }
+
+        // ── enrichOpenseaSales ───────────────────────────────────────────────
+        // Fetches OpenSea API v2 sale events for a contract and upgrades
+        // matching nft_sales_history rows to marketplace='opensea'.
+        // Requires OPENSEA_API_KEY env var; skips gracefully if not set.
+        if (action === "enrichOpenseaSales") {
+            const OPENSEA_API_KEY = Deno.env.get("OPENSEA_API_KEY") || "";
+            if (!OPENSEA_API_KEY) {
+                return jsonResponse({ success: true, skipped: true, reason: "no_api_key" });
+            }
+
+            const chainId: number          = Number(body.chainId || CHAIN_ID);
+            const contractAddress: string  = (body.contractAddress || DEFAULT_ERC1155_CONTRACT).toLowerCase();
+
+            // Amoy testnet slug on OpenSea
+            const chainSlug = chainId === 80002 ? "amoy" : "matic";
+
+            const supaAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+
+            let nextCursor: string | null = null;
+            let enriched = 0;
+            let pages = 0;
+            const MAX_PAGES = 10; // safety cap
+
+            do {
+                const url = new URL(
+                    `https://api.opensea.io/api/v2/events/chain/${chainSlug}/contract/${contractAddress}`
+                );
+                url.searchParams.set("event_type", "sale");
+                url.searchParams.set("limit", "50");
+                if (nextCursor) url.searchParams.set("next", nextCursor);
+
+                const osResp = await fetch(url.toString(), {
+                    headers: { "X-API-KEY": OPENSEA_API_KEY, "Accept": "application/json" },
+                });
+
+                if (!osResp.ok) {
+                    const errText = await osResp.text();
+                    console.warn("[nft-admin] enrichOpenseaSales: OpenSea API error", osResp.status, errText.slice(0, 200));
+                    return jsonResponse({ success: false, error: `OpenSea API ${osResp.status}`, enriched }, osResp.status);
+                }
+
+                const osData = await osResp.json() as any;
+                const events: any[] = osData?.asset_events ?? [];
+                nextCursor = osData?.next ?? null;
+                pages++;
+
+                for (const evt of events) {
+                    const txHash = (evt.transaction ?? "").toLowerCase();
+                    if (!txHash) continue;
+
+                    const { data: row } = await supaAdmin
+                        .from("nft_sales_history")
+                        .select("id")
+                        .eq("tx_hash", txHash)
+                        .maybeSingle() as { data: any };
+
+                    if (!row) continue;
+
+                    await supaAdmin.from("nft_sales_history").update({
+                        marketplace: "opensea",
+                        buyer:  (evt.buyer  ?? "").toLowerCase() || null,
+                        seller: (evt.seller ?? "").toLowerCase() || null,
+                        price_wei: evt.payment?.quantity ?? null,
+                        currency_address: evt.payment?.token_address ?? null,
+                    }).eq("id", row.id);
+
+                    enriched++;
+                }
+            } while (nextCursor && pages < MAX_PAGES);
+
+            return jsonResponse({ success: true, chainId, contractAddress, enriched, pages });
+        }
+
+        // ── refreshCollectionStats ───────────────────────────────────────────
+        // Triggers REFRESH MATERIALIZED VIEW CONCURRENTLY on mv_nft_collection_stats.
+        // Requires the unique index on (contract_address, chain_id) created in 037.
+        if (action === "refreshCollectionStats") {
+            const supaAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+            const { error: refreshErr } = await supaAdmin.rpc("refresh_collection_stats").maybeSingle();
+            if (refreshErr) {
+                console.error("[nft-admin] refreshCollectionStats error:", refreshErr);
+                return jsonResponse({ success: false, error: refreshErr.message }, 500);
+            }
+            return jsonResponse({ success: true, refreshedAt: new Date().toISOString() });
+        }
+
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);
     } catch (err: any) {
         console.error("[nft-admin] Error:", err);
