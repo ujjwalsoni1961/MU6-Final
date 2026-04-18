@@ -81,6 +81,9 @@ export default function EditArtistProfileScreen() {
     const [displayName, setDisplayName] = useState('');
     const [bio, setBio] = useState('');
     const [country, setCountry] = useState('');
+    // Royalty config (migration 035)
+    const [royaltyBps, setRoyaltyBps] = useState('500');
+    const [royaltyRecipientWallet, setRoyaltyRecipientWallet] = useState('');
     
     // Image states
     const [avatarUri, setAvatarUri] = useState<string | null>(null);
@@ -98,6 +101,16 @@ export default function EditArtistProfileScreen() {
             }
             if (profile.coverPath) {
                 setCoverUri(`${SUPABASE_URL}/storage/v1/object/public/covers/${profile.coverPath}`);
+            }
+            // Royalty config — load from DB (migration 035 columns)
+            const anyProfile = profile as any;
+            if (anyProfile.royaltyBps !== undefined && anyProfile.royaltyBps !== null) {
+                setRoyaltyBps(String(anyProfile.royaltyBps));
+            } else {
+                setRoyaltyBps('500');
+            }
+            if (anyProfile.royaltyRecipientWallet) {
+                setRoyaltyRecipientWallet(anyProfile.royaltyRecipientWallet);
             }
         }
     }, [profile]);
@@ -146,6 +159,22 @@ export default function EditArtistProfileScreen() {
             return;
         }
 
+        // Validate royalty_bps (0–1000)
+        const royaltyBpsNum = parseInt(royaltyBps, 10);
+        if (isNaN(royaltyBpsNum) || royaltyBpsNum < 0 || royaltyBpsNum > 1000) {
+            const msg = 'Royalty % must be between 0 and 10 (0–1000 bps).';
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+            return;
+        }
+
+        // Validate royalty recipient wallet if provided (0x + 40 hex chars)
+        const walletTrimmed = royaltyRecipientWallet.trim();
+        if (walletTrimmed && !/^0x[0-9a-fA-F]{40}$/.test(walletTrimmed)) {
+            const msg = 'Royalty recipient wallet must be a valid 0x address (42 characters).';
+            Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
+            return;
+        }
+
         setSaving(true);
         try {
             let newAvatarPath = profile.avatarPath;
@@ -172,11 +201,14 @@ export default function EditArtistProfileScreen() {
             // Build update payload — only include fields that have values
             const updates: Record<string, any> = {
                 display_name: displayName.trim(),
+                royalty_bps: royaltyBpsNum,
             };
             if (bio.trim()) updates.bio = bio.trim();
             if (country) updates.country = country;
             if (newAvatarPath) updates.avatar_path = newAvatarPath;
             if (newCoverPath) updates.cover_path = newCoverPath;
+            // royalty_recipient_wallet: set to null if empty (DB accepts NULL)
+            updates.royalty_recipient_wallet = walletTrimmed || null;
 
             console.log('[edit-artist-profile] Updating profile:', profile.id, updates);
             const updated = await updateProfile(profile.id, updates);
@@ -388,6 +420,60 @@ export default function EditArtistProfileScreen() {
                                 Country can only be changed once every 30 days
                             </Text>
                         </View>
+                    </View>
+
+                    {/* Royalty Settings (migration 035) */}
+                    <View style={{
+                        backgroundColor: cardBg, borderRadius: 20, padding: isWeb ? 28 : 20,
+                        marginBottom: 16, borderWidth: 1, borderColor: cardBorder,
+                    }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text.primary, marginBottom: 4 }}>
+                            NFT Royalty Settings
+                        </Text>
+                        <Text style={{ fontSize: 12, color: colors.text.muted, marginBottom: 16 }}>
+                            Applied to new ERC-1155 releases. On-chain value is source of truth.
+                        </Text>
+
+                        {/* Royalty % */}
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text.primary, marginBottom: 8 }}>
+                            Secondary Sale Royalty %
+                        </Text>
+                        <TextInput
+                            value={royaltyBps}
+                            onChangeText={(v) => {
+                                // Only allow numeric input; clamp display to 0-1000 on blur
+                                if (/^\d*$/.test(v)) setRoyaltyBps(v);
+                            }}
+                            onBlur={() => {
+                                const n = parseInt(royaltyBps, 10);
+                                if (isNaN(n) || n < 0) setRoyaltyBps('0');
+                                else if (n > 1000) setRoyaltyBps('1000');
+                            }}
+                            placeholder="500 (= 5%)"
+                            placeholderTextColor={colors.text.muted}
+                            keyboardType="numeric"
+                            style={inputStyle}
+                        />
+                        <Text style={{ fontSize: 11, color: colors.text.muted, marginTop: 6 }}>
+                            Enter basis points: 500 = 5%, 0–1000 allowed (0–10%)
+                        </Text>
+
+                        {/* Royalty recipient wallet */}
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text.primary, marginTop: 16, marginBottom: 8 }}>
+                            Royalty Recipient Wallet (optional)
+                        </Text>
+                        <TextInput
+                            value={royaltyRecipientWallet}
+                            onChangeText={setRoyaltyRecipientWallet}
+                            placeholder="0x... (leave blank to use your primary wallet)"
+                            placeholderTextColor={colors.text.muted}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            style={inputStyle}
+                        />
+                        <Text style={{ fontSize: 11, color: colors.text.muted, marginTop: 6 }}>
+                            Leave blank to direct royalties to your connected wallet.
+                        </Text>
                     </View>
 
                     {/* Save Button */}

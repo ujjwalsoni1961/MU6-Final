@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
     View, Text, ScrollView, FlatList, Platform, useWindowDimensions,
-    ActivityIndicator, Modal, TextInput, Alert,
+    ActivityIndicator, Modal, TextInput, Alert, Linking,
 } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Gem, Plus, X, ChevronDown, ImagePlus, Trash2, AlertTriangle, Info } from 'lucide-react-native';
+import { Gem, Plus, X, ChevronDown, ImagePlus, Trash2, AlertTriangle, Info, ExternalLink, CheckCircle } from 'lucide-react-native';
 import NFTCard from '../../src/components/shared/NFTCard';
 import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import { NFT, Song } from '../../src/types';
@@ -26,6 +26,14 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { supabase } from '../../src/lib/supabase';
+import { createErc1155Release } from '../../src/services/blockchain';
+import { CONTRACT_ADDRESSES, CHAIN_ID } from '../../src/config/network';
+
+// ERC-1155 contract address — read from env; falls back to Amoy testnet default.
+// On mainnet set EXPO_PUBLIC_SONG_NFT_ERC1155_ADDRESS.
+const ERC1155_CONTRACT =
+    process.env.EXPO_PUBLIC_SONG_NFT_ERC1155_ADDRESS ||
+    '0x10450d990a0Fb50d00Aa5D304846b8421d3cB5Ad';
 
 const isWeb = Platform.OS === 'web';
 
@@ -89,6 +97,15 @@ export default function NFTManagerScreen() {
     const [newBenefitTitle, setNewBenefitTitle] = useState('');
     const [newBenefitDesc, setNewBenefitDesc] = useState('');
 
+    // ERC-1155 specific fields
+    const [maxSupply, setMaxSupply] = useState('1000000'); // default = unlimited
+    const [erc1155Creating, setErc1155Creating] = useState(false);
+    const [erc1155CreateError, setErc1155CreateError] = useState<string | null>(null);
+    const [erc1155Progress, setErc1155Progress] = useState<string | null>(null);
+    // Success state — shown in modal after successful ERC-1155 creation
+    const [erc1155Success, setErc1155Success] = useState<{ tokenId: string; releaseId: string; contractAddress: string } | null>(null);
+    const [showSuccessModal, setShowSuccessModal] = useState(false);
+
     // PDF Fix #9: artist NFT listing limits + "Request Higher Limit" flow.
     const [limits, setLimits] = useState<ArtistNFTLimits | null>(null);
     const [showLimitRequestModal, setShowLimitRequestModal] = useState(false);
@@ -146,11 +163,14 @@ export default function NFTManagerScreen() {
         setRarity('common');
         setTotalSupply('10');
         setPriceEth('0.01');
+        setMaxSupply('1000000');
         setDescription('');
         setCoverImageUri(null);
         setBenefits([]);
         setNewBenefitTitle('');
         setNewBenefitDesc('');
+        setErc1155CreateError(null);
+        setErc1155Progress(null);
         createRelease.reset();
     };
 
@@ -209,13 +229,15 @@ export default function NFTManagerScreen() {
             return;
         }
 
-        const supply = parseInt(totalSupply) || 0;
-        const price = parseFloat(priceEth) || 0;
-        // NFT-holder royalty allocation is disabled for this launch. Always 0.
-        const royalty = 0;
+        const price = parseFloat(priceEth);
+        if (isNaN(price) || price < 0) {
+            Alert.alert('Invalid', 'Please enter a valid price (POL)');
+            return;
+        }
 
-        if (supply < 1 || supply > 10000) {
-            Alert.alert('Invalid', 'Supply must be between 1 and 10,000');
+        const maxSupplyVal = parseInt(maxSupply, 10);
+        if (isNaN(maxSupplyVal) || maxSupplyVal < 1) {
+            Alert.alert('Invalid', 'Max supply must be at least 1');
             return;
         }
 
@@ -225,26 +247,65 @@ export default function NFTManagerScreen() {
             uploadedCoverPath = await uploadCoverImage();
         }
 
-        const releaseId = await createRelease.execute(
-            {
-                songId: selectedSong.id,
-                tierName: tierName.trim(),
-                rarity,
-                totalSupply: supply,
-                allocatedRoyaltyPercent: royalty,
-                priceEth: price,
-                metadataUri: selectedSong.coverImage || 'ipfs://QmWYNy1tmd2UvBQNE9mT1TfQCu85GzD9x237wDdf5ahcWk/', // Default IFPS fallback
-                description: description.trim() || undefined,
-                coverImagePath: uploadedCoverPath || undefined,
-                benefits: benefits.length > 0 ? benefits : undefined,
-            },
-            account || undefined,
-        );
+        // ── ERC-1155 path (new default) ──
+        setErc1155Creating(true);
+        setErc1155CreateError(null);
+        setErc1155Progress('Reading on-chain token counter…');
 
-        if (releaseId) {
+        try {
+            // Read artist royalty config from profile
+            const anyProfile = profile as any;
+            const royaltyBps: number = anyProfile?.royaltyBps ?? 500;
+            const royaltyRecipientWallet: string | null =
+                anyProfile?.royaltyRecipientWallet ||
+                anyProfile?.payoutWalletAddress ||
+                anyProfile?.walletAddress ||
+                null;
+
+            const metadataUri =
+                selectedSong.coverImage?.startsWith('ipfs://')
+                    ? selectedSong.coverImage
+                    : 'ipfs://QmWYNy1tmd2UvBQNE9mT1TfQCu85GzD9x237wDdf5ahcWk/';
+
+            setErc1155Progress('Lazy-minting token on-chain (server wallet)…');
+
+            const result = await createErc1155Release(
+                {
+                    songId: selectedSong.id,
+                    tierName: tierName.trim(),
+                    rarity,
+                    maxSupply: maxSupplyVal,
+                    pricePol: price,
+                    metadataUri,
+                    description: description.trim() || undefined,
+                    coverImagePath: uploadedCoverPath || undefined,
+                    benefits: benefits.length > 0 ? benefits : undefined,
+                    royaltyBps,
+                    royaltyRecipientWallet,
+                },
+                ERC1155_CONTRACT,
+            );
+
+            if (!result.success) {
+                setErc1155CreateError(result.error || 'Release creation failed');
+                return;
+            }
+
+            // Success!
+            setErc1155Success({
+                tokenId: result.tokenId!,
+                releaseId: result.releaseId!,
+                contractAddress: ERC1155_CONTRACT,
+            });
             setShowModal(false);
             resetForm();
             refreshNFTs();
+            setShowSuccessModal(true);
+        } catch (err: any) {
+            setErc1155CreateError(err?.message || 'Unexpected error');
+        } finally {
+            setErc1155Creating(false);
+            setErc1155Progress(null);
         }
     };
 
@@ -648,18 +709,21 @@ export default function NFTManagerScreen() {
                                 })}
                             </View>
 
-                            {/* Supply + Price */}
+                            {/* Supply + Price (ERC-1155) */}
                             <View style={{ flexDirection: 'row', gap: 12 }}>
                                 <View style={{ flex: 1 }}>
-                                    <Text style={labelStyle}>Total Supply</Text>
+                                    <Text style={labelStyle}>Max Supply</Text>
                                     <TextInput
-                                        value={totalSupply}
-                                        onChangeText={setTotalSupply}
+                                        value={maxSupply}
+                                        onChangeText={setMaxSupply}
                                         keyboardType="numeric"
-                                        placeholder="10"
+                                        placeholder="1000000"
                                         placeholderTextColor={colors.text.muted}
                                         style={inputStyle}
                                     />
+                                    <Text style={{ fontSize: 10, color: colors.text.muted, marginTop: 4 }}>
+                                        Default 1 000 000 = effectively unlimited
+                                    </Text>
                                 </View>
                                 <View style={{ flex: 1 }}>
                                     <Text style={labelStyle}>Price (POL)</Text>
@@ -671,7 +735,23 @@ export default function NFTManagerScreen() {
                                         placeholderTextColor={colors.text.muted}
                                         style={inputStyle}
                                     />
+                                    <Text style={{ fontSize: 10, color: colors.text.muted, marginTop: 4 }}>
+                                        Native POL (on-chain is source of truth)
+                                    </Text>
                                 </View>
+                            </View>
+
+                            {/* ERC-1155 badge */}
+                            <View style={{
+                                flexDirection: 'row', alignItems: 'center', gap: 8,
+                                padding: 10, borderRadius: 10, marginTop: 8,
+                                backgroundColor: isDark ? 'rgba(56,180,186,0.08)' : 'rgba(56,180,186,0.06)',
+                                borderWidth: 1, borderColor: 'rgba(56,180,186,0.2)',
+                            }}>
+                                <Info size={14} color="#38b4ba" />
+                                <Text style={{ color: '#38b4ba', fontSize: 12, fontWeight: '600', flex: 1 }}>
+                                    ERC-1155 — uses shared MU6 Music Collection contract
+                                </Text>
                             </View>
 
                             {/* Royalty Allocation — Coming Soon.
@@ -697,13 +777,26 @@ export default function NFTManagerScreen() {
                                 </View>
                             </View>
 
+                            {/* Progress indicator */}
+                            {erc1155Progress && (
+                                <View style={{
+                                    marginTop: 16, padding: 12, borderRadius: 10, gap: 8,
+                                    flexDirection: 'row', alignItems: 'center',
+                                    backgroundColor: 'rgba(56,180,186,0.08)',
+                                    borderWidth: 1, borderColor: 'rgba(56,180,186,0.2)',
+                                }}>
+                                    <ActivityIndicator size="small" color="#38b4ba" />
+                                    <Text style={{ color: '#38b4ba', fontSize: 13, flex: 1 }}>{erc1155Progress}</Text>
+                                </View>
+                            )}
+
                             {/* Error */}
-                            {createRelease.error && (
+                            {(erc1155CreateError || createRelease.error) && (
                                 <View style={{
                                     marginTop: 16, padding: 12, borderRadius: 10,
                                     backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)',
                                 }}>
-                                    <Text style={{ color: '#ef4444', fontSize: 13 }}>{createRelease.error}</Text>
+                                    <Text style={{ color: '#ef4444', fontSize: 13 }}>{erc1155CreateError || createRelease.error}</Text>
                                 </View>
                             )}
 
@@ -711,20 +804,21 @@ export default function NFTManagerScreen() {
                             <AnimatedPressable
                                 preset="button"
                                 onPress={handleCreate}
+                                disabled={erc1155Creating || createRelease.loading}
                                 style={{
                                     marginTop: 24,
-                                    backgroundColor: createRelease.loading ? '#6d48c7' : '#8b5cf6',
+                                    backgroundColor: (erc1155Creating || createRelease.loading) ? '#6d48c7' : '#8b5cf6',
                                     borderRadius: 14,
                                     paddingVertical: 16,
                                     alignItems: 'center' as const,
-                                    opacity: createRelease.loading ? 0.7 : 1,
+                                    opacity: (erc1155Creating || createRelease.loading) ? 0.7 : 1,
                                 }}
                             >
-                                {createRelease.loading ? (
+                                {(erc1155Creating || createRelease.loading) ? (
                                     <ActivityIndicator size="small" color="#fff" />
                                 ) : (
                                     <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
-                                        Create NFT Release
+                                        Create ERC-1155 Release
                                     </Text>
                                 )}
                             </AnimatedPressable>
@@ -962,6 +1056,88 @@ export default function NFTManagerScreen() {
                                 </AnimatedPressable>
                             </View>
                         </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+            {/* ── ERC-1155 Success Modal ── */}
+            <Modal visible={showSuccessModal} animationType="fade" transparent>
+                <View style={{
+                    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+                    justifyContent: 'center', alignItems: 'center', padding: 24,
+                }}>
+                    <View style={{
+                        width: '100%', maxWidth: 420,
+                        backgroundColor: isDark ? '#0f172a' : '#fff',
+                        borderRadius: 24, padding: 28,
+                        borderWidth: 1, borderColor: isDark ? 'rgba(56,180,186,0.3)' : 'rgba(56,180,186,0.2)',
+                    }}>
+                        <View style={{ alignItems: 'center', marginBottom: 20 }}>
+                            <CheckCircle size={48} color="#38b4ba" />
+                        </View>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, textAlign: 'center', marginBottom: 8 }}>
+                            Release Created!
+                        </Text>
+                        <Text style={{ fontSize: 14, color: colors.text.secondary, textAlign: 'center', marginBottom: 20, lineHeight: 20 }}>
+                            Your ERC-1155 release is live on-chain. Claim conditions and royalties have been set.
+                        </Text>
+
+                        {erc1155Success && (
+                            <>
+                                <View style={{
+                                    backgroundColor: isDark ? 'rgba(255,255,255,0.04)' : '#f8fafc',
+                                    borderRadius: 14, padding: 16, marginBottom: 20,
+                                    borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0',
+                                    gap: 8,
+                                }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                        <Text style={{ fontSize: 12, color: colors.text.muted, fontWeight: '600' }}>TOKEN ID</Text>
+                                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.primary }}>#{erc1155Success.tokenId}</Text>
+                                    </View>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                        <Text style={{ fontSize: 12, color: colors.text.muted, fontWeight: '600' }}>CONTRACT</Text>
+                                        <Text style={{ fontSize: 11, color: colors.text.secondary, fontFamily: 'monospace' }}>
+                                            {erc1155Success.contractAddress.slice(0, 10)}…{erc1155Success.contractAddress.slice(-6)}
+                                        </Text>
+                                    </View>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                        <Text style={{ fontSize: 12, color: colors.text.muted, fontWeight: '600' }}>STANDARD</Text>
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#38b4ba' }}>ERC-1155</Text>
+                                    </View>
+                                </View>
+
+                                <AnimatedPressable
+                                    preset="button"
+                                    onPress={() => {
+                                        const url = `https://testnets.opensea.io/assets/amoy/${erc1155Success.contractAddress}/${erc1155Success.tokenId}`;
+                                        Linking.openURL(url);
+                                    }}
+                                    style={{
+                                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                        paddingVertical: 14, borderRadius: 14,
+                                        borderWidth: 1, borderColor: '#38b4ba',
+                                        backgroundColor: 'transparent', marginBottom: 12,
+                                    }}
+                                >
+                                    <ExternalLink size={16} color="#38b4ba" />
+                                    <Text style={{ color: '#38b4ba', fontWeight: '700', fontSize: 15 }}>View on OpenSea Testnet</Text>
+                                </AnimatedPressable>
+                            </>
+                        )}
+
+                        <AnimatedPressable
+                            preset="button"
+                            onPress={() => {
+                                setShowSuccessModal(false);
+                                setErc1155Success(null);
+                            }}
+                            style={{
+                                paddingVertical: 14, borderRadius: 14,
+                                backgroundColor: '#8b5cf6',
+                                alignItems: 'center',
+                            }}
+                        >
+                            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Done</Text>
+                        </AnimatedPressable>
                     </View>
                 </View>
             </Modal>

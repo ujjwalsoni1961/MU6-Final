@@ -3,7 +3,7 @@ import { View, Text, ScrollView, Platform, ActivityIndicator, Alert } from 'reac
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, ExternalLink, ShoppingCart, Zap, Tag, Copy, Check, Shield, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ExternalLink, ShoppingCart, Zap, Tag, Copy, Check, Shield, ChevronRight, TrendingUp, Users } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import GlassCard from '../../src/components/shared/GlassCard';
 import RarityBadge from '../../src/components/shared/RarityBadge';
@@ -14,7 +14,7 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useActiveAccount, PayEmbed } from 'thirdweb/react';
 import { prepareTransaction } from 'thirdweb';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
-import { CONTRACT_ADDRESSES, EXPLORER_BASE, tokenUrl, txUrl, CHAIN_NAME, IS_MAINNET } from '../../src/config/network';
+import { CONTRACT_ADDRESSES, EXPLORER_BASE, tokenUrl, txUrl, CHAIN_NAME, IS_MAINNET, CHAIN_ID } from '../../src/config/network';
 import {
     useNFTReleases,
     useNFTReleaseById,
@@ -30,6 +30,9 @@ import { useOnChainOwnership } from '../../src/hooks/useOnChainNFT';
 import PriceChart from '../../src/components/shared/PriceChart';
 import TradeHistoryList from '../../src/components/shared/TradeHistoryList';
 import type { NFT, TradeEvent } from '../../src/types';
+import { fetchErc1155ClaimState, formatWeiAsPol } from '../../src/lib/thirdweb/erc1155';
+import type { Erc1155ClaimStateResult } from '../../src/lib/thirdweb/erc1155';
+import { supabase } from '../../src/lib/supabase';
 // Use navigator.clipboard on web, fallback for native
 const copyToClipboard = async (text: string) => {
     if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -137,6 +140,19 @@ export default function NFTDetailScreen() {
     // FX Price Display
     const [fiatPrice, setFiatPrice] = useState<string | null>(null);
 
+    // Secondary Market / ERC-1155 state
+    // Holds raw release fields (nft_standard, token_id, contract_address)
+    // fetched directly from nft_releases to avoid adapter loss.
+    const [releaseOnChain, setReleaseOnChain] = useState<{
+        nftStandard: string;
+        tokenId: string | null;      // ERC-1155 token ID from nft_releases.token_id
+        contractAddress: string | null;
+    } | null>(null);
+    const [claimState, setClaimState] = useState<Erc1155ClaimStateResult | null>(null);
+    const [claimStateLoading, setClaimStateLoading] = useState(false);
+    const [salesHistory, setSalesHistory] = useState<any[]>([]);
+    const [salesHistoryLoading, setSalesHistoryLoading] = useState(false);
+
     // Find the relevant NFT (try release ID first, then token ID as fallback from collection)
     const nft = viewMode === 'listing'
         ? allListings.find((l) => l.listingId === listingParam || l.id === id)
@@ -216,6 +232,81 @@ export default function NFTDetailScreen() {
         }
         return () => { isMounted = false; };
     }, [nft, listing, fiatCurrency]);
+
+    // ── Fetch raw release fields (nft_standard, token_id, contract_address) ──
+    // The UI adapter strips these fields; we re-fetch them directly to drive
+    // ERC-1155 claim state reads and OpenSea deep-links.
+    useEffect(() => {
+        let isMounted = true;
+        const releaseId = viewMode === 'release' ? id : null;
+        if (!releaseId) return;
+        supabase
+            .from('nft_releases')
+            .select('nft_standard, token_id, contract_address')
+            .eq('id', releaseId)
+            .maybeSingle()
+            .then(({ data, error }) => {
+                if (!isMounted || error || !data) return;
+                if (isMounted) {
+                    setReleaseOnChain({
+                        nftStandard: (data as any).nft_standard || 'erc721',
+                        tokenId: (data as any).token_id != null ? String((data as any).token_id) : null,
+                        contractAddress: (data as any).contract_address || null,
+                    });
+                }
+            });
+        return () => { isMounted = false; };
+    }, [id, viewMode]);
+
+    // ── Fetch ERC-1155 on-chain claim state ──
+    useEffect(() => {
+        let isMounted = true;
+        if (!releaseOnChain) return;
+        const { nftStandard, tokenId, contractAddress } = releaseOnChain;
+        // Only ERC-1155 releases with a known token_id have per-token claim conditions
+        if (nftStandard !== 'erc1155' || tokenId == null || !contractAddress) return;
+
+        setClaimStateLoading(true);
+        fetchErc1155ClaimState(
+            contractAddress,
+            BigInt(tokenId),
+            CHAIN_ID,
+            walletAddress || undefined,
+        ).then((result) => {
+            if (isMounted) {
+                setClaimState(result);
+                setClaimStateLoading(false);
+            }
+        }).catch(() => {
+            if (isMounted) setClaimStateLoading(false);
+        });
+        return () => { isMounted = false; };
+    }, [releaseOnChain, walletAddress]);
+
+    // ── Fetch nft_sales_history (last 10 sales for this contract + token) ──
+    useEffect(() => {
+        let isMounted = true;
+        if (!releaseOnChain) return;
+        const { tokenId, contractAddress } = releaseOnChain;
+        if (tokenId == null || !contractAddress) return;
+
+        setSalesHistoryLoading(true);
+        supabase
+            .from('nft_sales_history')
+            .select('id, marketplace, seller, buyer, price_wei, tx_hash, block_timestamp, amount')
+            .eq('contract_address', contractAddress)
+            .eq('token_id', tokenId)
+            .eq('chain_id', CHAIN_ID)
+            .neq('marketplace', 'transfer')
+            .order('block_timestamp', { ascending: false })
+            .limit(10)
+            .then(({ data, error }) => {
+                if (!isMounted) return;
+                setSalesHistory(error ? [] : (data || []));
+                setSalesHistoryLoading(false);
+            });
+        return () => { isMounted = false; };
+    }, [releaseOnChain]);
 
     useEffect(() => {
         let isMounted = true;
@@ -729,6 +820,144 @@ export default function NFTDetailScreen() {
                                         </Text>
                                     </View>
                                 )}
+                            </GlassCard>
+                        )}
+
+                        {/* Secondary Market & ERC-1155 Claim State */}
+                        {isPrimary && releaseOnChain?.nftStandard === 'erc1155' && (
+                            <GlassCard intensity="light" style={{ marginBottom: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                                    <TrendingUp size={16} color="#38b4ba" />
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                                        Secondary Market
+                                    </Text>
+                                </View>
+
+                                {/* ERC-1155 On-Chain Claim State */}
+                                {claimStateLoading ? (
+                                    <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                                        <ActivityIndicator size="small" color="#38b4ba" />
+                                    </View>
+                                ) : claimState?.success && claimState.condition ? (
+                                    <View style={{ marginBottom: 14 }}>
+                                        {/* On-chain price */}
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                            <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>On-Chain Price</Text>
+                                            <Text style={{ color: '#38b4ba', fontSize: 13, fontWeight: '700' }}>
+                                                {formatWeiAsPol(claimState.condition.pricePerToken)} POL
+                                            </Text>
+                                        </View>
+                                        {/* Supply remaining */}
+                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                            <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Supply Remaining</Text>
+                                            <Text style={{ color: colors.text.primary, fontSize: 13, fontWeight: '700' }}>
+                                                {claimState.condition.supplyRemaining === null
+                                                    ? 'Unlimited'
+                                                    : claimState.condition.supplyRemaining.toString()}
+                                            </Text>
+                                        </View>
+                                        {/* Holder balance */}
+                                        {claimState.holderBalance !== null && walletAddress && (
+                                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                    <Users size={12} color={colors.text.secondary} />
+                                                    <Text style={{ color: colors.text.secondary, fontSize: 12, fontWeight: '600' }}>Your Balance</Text>
+                                                </View>
+                                                <Text style={{ color: colors.text.primary, fontSize: 13, fontWeight: '700' }}>
+                                                    {claimState.holderBalance.toString()} token{claimState.holderBalance !== BigInt(1) ? 's' : ''}
+                                                </Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                ) : null}
+
+                                {/* Recent Sales from nft_sales_history */}
+                                {salesHistoryLoading ? (
+                                    <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+                                        <ActivityIndicator size="small" color="#38b4ba" />
+                                    </View>
+                                ) : salesHistory.length > 0 ? (
+                                    <View style={{ marginBottom: 14 }}>
+                                        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                                            Recent Sales
+                                        </Text>
+                                        {salesHistory.slice(0, 5).map((sale: any) => (
+                                            <View
+                                                key={sale.id}
+                                                style={{
+                                                    flexDirection: 'row',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    paddingVertical: 6,
+                                                    borderBottomWidth: 1,
+                                                    borderBottomColor: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                                                }}
+                                            >
+                                                <View>
+                                                    <Text style={{ color: colors.text.secondary, fontSize: 11, fontWeight: '600', textTransform: 'capitalize' }}>
+                                                        {sale.marketplace.replace('_', ' ')}
+                                                    </Text>
+                                                    {sale.block_timestamp && (
+                                                        <Text style={{ color: colors.text.secondary, fontSize: 10, marginTop: 1 }}>
+                                                            {new Date(sale.block_timestamp).toLocaleDateString()}
+                                                        </Text>
+                                                    )}
+                                                </View>
+                                                <Text style={{ color: colors.text.primary, fontSize: 13, fontWeight: '700' }}>
+                                                    {sale.price_wei
+                                                        ? `${formatWeiAsPol(BigInt(sale.price_wei))} POL`
+                                                        : '—'}
+                                                </Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ) : null}
+
+                                {/* Action buttons */}
+                                <View style={{ gap: 10 }}>
+                                    {/* View on OpenSea */}
+                                    {releaseOnChain?.contractAddress && releaseOnChain?.tokenId && (
+                                        <AnimatedPressable
+                                            preset="button"
+                                            onPress={() => {
+                                                const url = `https://testnets.opensea.io/assets/amoy/${releaseOnChain.contractAddress}/${releaseOnChain.tokenId}`;
+                                                if (Platform.OS === 'web') {
+                                                    window.open(url, '_blank');
+                                                } else {
+                                                    import('expo-linking').then(Linking => Linking.openURL(url));
+                                                }
+                                            }}
+                                            style={{
+                                                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                                paddingVertical: 11, borderRadius: 12,
+                                                backgroundColor: isDark ? 'rgba(56,180,186,0.1)' : 'rgba(56,180,186,0.06)',
+                                                borderWidth: 1,
+                                                borderColor: isDark ? 'rgba(56,180,186,0.25)' : 'rgba(56,180,186,0.15)',
+                                            }}
+                                        >
+                                            <ExternalLink size={14} color="#38b4ba" />
+                                            <Text style={{ color: '#38b4ba', fontWeight: '700', fontSize: 13 }}>View on OpenSea</Text>
+                                        </AnimatedPressable>
+                                    )}
+
+                                    {/* List on MU6 — only shown to token holders */}
+                                    {walletAddress && claimState?.holderBalance != null && claimState.holderBalance > BigInt(0) && (
+                                        <AnimatedPressable
+                                            preset="button"
+                                            onPress={() => router.push('/(consumer)/collection')}
+                                            style={{
+                                                flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                                paddingVertical: 11, borderRadius: 12,
+                                                backgroundColor: isDark ? 'rgba(139,92,246,0.1)' : 'rgba(139,92,246,0.06)',
+                                                borderWidth: 1,
+                                                borderColor: isDark ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.15)',
+                                            }}
+                                        >
+                                            <Tag size={14} color="#8b5cf6" />
+                                            <Text style={{ color: '#8b5cf6', fontWeight: '700', fontSize: 13 }}>List on MU6</Text>
+                                        </AnimatedPressable>
+                                    )}
+                                </View>
                             </GlassCard>
                         )}
 

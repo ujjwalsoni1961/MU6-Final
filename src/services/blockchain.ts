@@ -825,6 +825,221 @@ export async function createNFTRelease(
     }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// ERC-1155 release creation
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface Erc1155MintConfig {
+    /** UUID of the song in the DB */
+    songId: string;
+    /** Tier / release name */
+    tierName: string;
+    /** Rarity tag */
+    rarity: 'common' | 'rare' | 'legendary';
+    /** Max claimable supply (0 = unlimited / 1_000_000 default) */
+    maxSupply: number;
+    /** Price in native token (POL) */
+    pricePol: number;
+    /** Unix timestamp (seconds) when claim goes live — 0 = now */
+    startTime?: number;
+    /** IPFS metadata base URI */
+    metadataUri: string;
+    /** Optional description */
+    description?: string;
+    /** Optional cover image path in Supabase storage */
+    coverImagePath?: string;
+    /** Optional benefits/perks */
+    benefits?: { title: string; description: string }[];
+    /** Artist royalty in bps (from profile) */
+    royaltyBps?: number;
+    /** Royalty recipient address (from profile) */
+    royaltyRecipientWallet?: string | null;
+}
+
+/**
+ * Read the next token ID to be minted on the shared DropERC1155 contract.
+ * This is the token_id that the upcoming lazyMint will assign.
+ * Uses eth_call directly so it works without a connected wallet.
+ */
+async function getErc1155NextTokenIdToMint(contractAddress: string): Promise<bigint> {
+    const SUPABASE_URL_LOCAL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
+    const THIRDWEB_CLIENT_ID = process.env.EXPO_PUBLIC_THIRDWEB_CLIENT_ID || '';
+    const chainId = CHAIN_ID;
+    const rpcUrl = THIRDWEB_CLIENT_ID
+        ? `https://${chainId}.rpc.thirdweb.com/${THIRDWEB_CLIENT_ID}`
+        : (chainId === 137 ? 'https://polygon-rpc.com' : 'https://rpc-amoy.polygon.technology');
+
+    // nextTokenIdToMint() → bytes4: 0x5bc5da30 (DropERC1155)
+    const resp = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            jsonrpc: '2.0', id: 1,
+            method: 'eth_call',
+            params: [{ to: contractAddress, data: '0x5bc5da30' }, 'latest'],
+        }),
+    });
+    const json = await resp.json();
+    return BigInt(json.result || '0x0');
+}
+
+/**
+ * Create a new ERC-1155 release on the shared DropERC1155 contract.
+ *
+ * Steps:
+ *  1. Read nextTokenIdToMint (determines the token_id this release will get)
+ *  2. Call nft-admin lazyMint (amount=1, baseURI=metadataUri) via server wallet
+ *  3. Insert nft_releases row with nft_standard='erc1155', token_id, contract_address
+ *  4. Call setClaimConditionForToken with price/supply
+ *  5. Call setRoyaltyInfoForToken with artist's bps + recipient
+ *
+ * Returns releaseId, tokenId on success.
+ */
+export async function createErc1155Release(
+    config: Erc1155MintConfig,
+    erc1155ContractAddress: string,
+): Promise<{
+    success: boolean;
+    releaseId?: string;
+    tokenId?: string;
+    error?: string;
+}> {
+    // --- Step 1: Read next token ID before lazy-minting ---
+    let nextTokenId: bigint;
+    try {
+        nextTokenId = await getErc1155NextTokenIdToMint(erc1155ContractAddress);
+        console.log('[blockchain] ERC-1155 nextTokenIdToMint:', nextTokenId.toString());
+    } catch (err: any) {
+        console.error('[blockchain] getErc1155NextTokenIdToMint error:', err);
+        return { success: false, error: `Could not read on-chain token counter: ${err.message}` };
+    }
+
+    const tokenId = nextTokenId.toString();
+
+    // --- Step 2: Lazy mint 1 token on the shared DropERC1155 ---
+    const lazyMintResult = await serverLazyMint(1, config.metadataUri, erc1155ContractAddress);
+    if (!lazyMintResult.success) {
+        return { success: false, error: `Lazy mint failed: ${lazyMintResult.error}` };
+    }
+    console.log('[blockchain] ERC-1155 lazyMint succeeded for tokenId', tokenId);
+
+    // --- Step 3: Insert DB row ---
+    const priceWei = BigInt(Math.round(config.pricePol * 1e18)).toString();
+    const maxSupplyVal = config.maxSupply > 0 ? config.maxSupply : 1_000_000;
+
+    const { data: release, error: dbError } = await supabase
+        .from('nft_releases')
+        .insert({
+            song_id: config.songId,
+            chain_id: CHAIN_ID.toString(),
+            contract_address: erc1155ContractAddress,
+            nft_standard: 'erc1155',
+            token_id: parseInt(tokenId, 10),
+            tier_name: config.tierName,
+            rarity: config.rarity,
+            total_supply: maxSupplyVal,
+            max_supply: maxSupplyVal,
+            allocated_royalty_percent: 0,
+            price_eth: config.pricePol,
+            price_wei: priceWei,
+            minted_count: 0,
+            is_active: true,
+            description: config.description || null,
+            cover_image_path: config.coverImagePath || null,
+            benefits: config.benefits && config.benefits.length > 0 ? config.benefits : [],
+            thirdweb_fee_bps: 200,
+        })
+        .select()
+        .single();
+
+    if (dbError) {
+        console.error('[blockchain] createErc1155Release DB insert error:', dbError);
+        return { success: false, error: dbError.message };
+    }
+
+    const releaseId = release.id;
+    console.log('[blockchain] ERC-1155 release row created:', releaseId);
+
+    // --- Step 4: Set claim condition for this token ---
+    const claimResult = await callNftAdminAction('setClaimConditionForToken', {
+        tokenId,
+        pricePerToken: priceWei,
+        maxClaimableSupply: maxSupplyVal,
+        currency: NATIVE_TOKEN,
+        contractAddress: erc1155ContractAddress,
+        resetEligibility: true,
+    });
+
+    if (!claimResult.success) {
+        console.error('[blockchain] setClaimConditionForToken failed:', claimResult.error);
+        // Best-effort rollback DB row
+        await supabase.from('nft_releases').delete().eq('id', releaseId);
+        return {
+            success: false,
+            error: `setClaimConditionForToken failed: ${claimResult.error}. Release rolled back.`,
+        };
+    }
+    console.log('[blockchain] ERC-1155 setClaimConditionForToken succeeded, tokenId:', tokenId);
+
+    // --- Step 5: Set royalty info for this token (non-blocking, log on error) ---
+    if (config.royaltyBps !== undefined && config.royaltyBps >= 0) {
+        const { data: profileData } = await supabase
+            .from('profiles')
+            .select('wallet_address, payout_wallet_address')
+            .eq('id', release.creator_id ?? '')
+            .maybeSingle();
+
+        const royaltyRecipient =
+            config.royaltyRecipientWallet ||
+            (profileData as any)?.payout_wallet_address ||
+            (profileData as any)?.wallet_address ||
+            null;
+
+        if (royaltyRecipient && /^0x[0-9a-fA-F]{40}$/.test(royaltyRecipient)) {
+            const royaltyResult = await callNftAdminAction('setRoyaltyInfoForToken', {
+                tokenId,
+                recipient: royaltyRecipient,
+                bps: config.royaltyBps,
+                contractAddress: erc1155ContractAddress,
+            });
+            if (!royaltyResult.success) {
+                // Non-blocking — release is live, royalty can be set later via admin
+                console.warn('[blockchain] setRoyaltyInfoForToken failed (non-blocking):', royaltyResult.error);
+            } else {
+                console.log('[blockchain] ERC-1155 setRoyaltyInfoForToken succeeded');
+            }
+        } else {
+            console.warn('[blockchain] No valid royalty recipient, skipping setRoyaltyInfoForToken');
+        }
+    }
+
+    return { success: true, releaseId, tokenId };
+}
+
+/**
+ * Generic helper to call any nft-admin edge action and return {success, error}.
+ */
+async function callNftAdminAction(
+    action: string,
+    params: Record<string, unknown>,
+): Promise<{ success: boolean; error?: string; data?: unknown }> {
+    try {
+        const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: await nftAdminHeaders(),
+            body: JSON.stringify({ action, ...params }),
+        });
+        const result = await response.json();
+        if (!response.ok || result.success === false) {
+            return { success: false, error: result.error || `HTTP ${response.status}` };
+        }
+        return { success: true, data: result };
+    } catch (err: any) {
+        return { success: false, error: err?.message || String(err) };
+    }
+}
+
 /**
  * Mint (claim) a specific NFT token from a release.
  * 1. Calls claim on-chain
