@@ -19,19 +19,37 @@ const NETWORK = (Deno.env.get("MU6_NETWORK") || "amoy").toLowerCase();
 const CHAIN_ID = NETWORK === "mainnet" ? 137 : 80002;
 const SERVER_WALLET = Deno.env.get("MU6_SERVER_WALLET")
     || "0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39";
+// ADMIN_WALLET: wallet that holds DEFAULT_ADMIN_ROLE on new DropERC1155 contracts.
+// Used for role-restricted actions (setRoyaltyInfoForToken, setClaimConditionForToken).
+// Falls back to SERVER_WALLET for contracts where the server wallet was granted admin.
+const ADMIN_WALLET = Deno.env.get("MU6_ADMIN_WALLET") || SERVER_WALLET;
+
+// DEFAULT_CONTRACT: the legacy DropERC721 — used only as a fallback for
+// legacy ERC-721 actions. All new ERC-1155 actions must read contract_address
+// from nft_releases. This fallback is gated behind the NETWORK env flag.
 const DEFAULT_CONTRACT = Deno.env.get("MU6_SONG_NFT_ADDRESS")
-    || "0xACF1145AdE250D356e1B2869E392e6c748c14C0E";
+    || (NETWORK === "mainnet"
+        ? "" // no mainnet default — must be set explicitly
+        : "0xACF1145AdE250D356e1B2869E392e6c748c14C0E");
+
+// Default ERC-1155 contract — testnet only. For mainnet set MU6_SONG_NFT_ERC1155_ADDRESS.
+const DEFAULT_ERC1155_CONTRACT = Deno.env.get("MU6_SONG_NFT_ERC1155_ADDRESS")
+    || (NETWORK !== "mainnet"
+        ? "0x10450d990a0Fb50d00Aa5D304846b8421d3cB5Ad"
+        : "");
+
 const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 // ── Primary-sale forwarding (Option B) ──
-// On DropERC721 the primarySaleRecipient is the server wallet. After every
-// confirmed claim() the edge function forwards the artist's share to
-// nft_releases.primary_sale_recipient.
+// On DropERC721/DropERC1155 the primarySaleRecipient is the server wallet.
+// After every confirmed claim() the edge function forwards the artist's share
+// to nft_releases.primary_sale_recipient.
 //
 // Fee model on claim (total paid by buyer):
-//   1. THIRDWEB_DROP_FEE_BPS — hardcoded 50 bps (0.5%) inside the DropERC721
-//      bytecode, routed to a thirdweb-controlled constant recipient. Cannot
-//      be disabled or redirected (no setter exists in the contract).
+//   1. thirdweb protocol fee — per-release bps (200 for new DropERC1155,
+//      50 for legacy DropERC721). Hardcoded in the contract bytecode, routed
+//      to a thirdweb-controlled constant recipient. Cannot be disabled or
+//      redirected. Read from nft_releases.thirdweb_fee_bps (function below).
 //   2. PLATFORM_FEE_BPS_PRIMARY — MU6's configurable platform fee, set on-chain
 //      via setPlatformFeeInfo and read back in this function. Default 500 bps
 //      (5%) landing in the server wallet (same place as the artist-bound
@@ -39,18 +57,30 @@ const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 //
 // The edge function therefore:
 //   * Reads gross_wei = pricePerToken
-//   * Computes thirdweb_fee_wei = gross * 50 / 10000
+//   * Computes thirdweb_fee_wei = gross * release.thirdweb_fee_bps / 10000
 //   * Computes platform_wei    = gross * mu6Bps / 10000   (MU6 retention)
 //   * Forwards artist_wei = gross - thirdweb_fee_wei - platform_wei to the
 //     artist. Logs all three in the primary_sale_payouts ledger.
 //
 // This keeps the server wallet float neutral: it receives gross - thirdweb_fee
 // from the claim and sends artist_wei onward, keeping exactly platform_wei.
-const THIRDWEB_DROP_FEE_BPS = 50; // hardcoded in DropERC721 (DEFAULT_FEE_BPS)
+
+/**
+ * Returns the thirdweb drop fee in bps for a given release row.
+ * Defaults to 200 (new DropERC1155 rate) when not set on the release.
+ */
+function getThirdwebFeeBps(release: { thirdweb_fee_bps?: number | null } | null): number {
+    return release?.thirdweb_fee_bps ?? 200;
+}
+
 const PLATFORM_FEE_BPS_PRIMARY = parseInt(
     Deno.env.get("MU6_PLATFORM_FEE_BPS_PRIMARY") || "500",
     10,
 );
+
+// Secondary royalty default — used by setRoyaltyInfoForToken when bps is not supplied
+const DEFAULT_ARTIST_ROYALTY_BPS = 500;
+
 // Public RPC — chain-switch aware. Used for parsing receipts / Transfer logs.
 const RPC_URL = NETWORK === "mainnet"
     ? (Deno.env.get("MU6_RPC_URL") || "https://polygon-rpc.com")
@@ -222,22 +252,30 @@ async function sendNativeTransfer(recipient: string, amountWei: string): Promise
 }
 
 /**
- * Compute the three-way split applied to every DropERC721 primary sale:
- *   thirdwebFeeWei = gross * THIRDWEB_DROP_FEE_BPS / 10000 (protocol, hardcoded)
- *   platformWei    = gross * platformBps / 10000           (MU6, retained)
+ * Compute the three-way split applied to every primary sale:
+ *   thirdwebFeeWei = gross * thirdwebFeeBps / 10000 (protocol, per-release)
+ *   platformWei    = gross * platformBps / 10000    (MU6, retained)
  *   artistWei      = gross - thirdwebFeeWei - platformWei  (forwarded)
  *
  * Uses BigInt arithmetic. Integer division rounds toward zero; any sub-wei
  * remainder flows into artistWei (since it's computed by subtraction). This
  * is the fee-safe direction — we never over-charge the buyer or ourselves.
+ *
+ * @param grossWei      Total amount paid by the buyer, in wei (decimal string).
+ * @param thirdwebFeeBps  Protocol fee bps for this release (read from DB row).
+ * @param platformBps   MU6 platform fee bps (from PLATFORM_FEE_BPS_PRIMARY).
  */
-function splitPrimarySale(grossWei: string, platformBps: number): {
+function splitPrimarySale(
+    grossWei: string,
+    thirdwebFeeBps: number,
+    platformBps: number,
+): {
     artistWei: string;
     platformWei: string;
     thirdwebFeeWei: string;
 } {
     const gross = BigInt(grossWei);
-    const tw = (gross * BigInt(THIRDWEB_DROP_FEE_BPS)) / 10000n;
+    const tw = (gross * BigInt(thirdwebFeeBps)) / 10000n;
     const platform = (gross * BigInt(platformBps)) / 10000n;
     const artist = gross - tw - platform;
     return {
@@ -249,9 +287,9 @@ function splitPrimarySale(grossWei: string, platformBps: number): {
 
 /**
  * Look up the release row for a given drop contract + token id to find the
- * artist's payout wallet. Returns { releaseId, recipient } or null if the
- * token falls outside any known release (e.g. token minted before Option B
- * schema landed, or via a direct claim bypassing the app).
+ * artist's payout wallet and fee configuration. Returns the release id,
+ * recipient, and thirdweb_fee_bps or null if the token falls outside any
+ * known release.
  *
  * Strategy:
  *   1. Find the nft_tokens row for this tokenId (if the mint already wrote
@@ -266,14 +304,14 @@ async function resolvePrimarySaleRecipient(
     supa: ReturnType<typeof createClient>,
     contractAddress: string,
     tokenId: string | null,
-): Promise<{ releaseId: string | null; recipient: string | null }> {
+): Promise<{ releaseId: string | null; recipient: string | null; thirdwebFeeBps: number }> {
     // 1. token-level lookup if available. Join through nft_releases because
     //    contract_address lives on the release, not on nft_tokens.
     if (tokenId) {
         try {
             const { data: tokenRow } = await supa
                 .from("nft_tokens")
-                .select("nft_release_id, nft_releases!inner(primary_sale_recipient, contract_address)")
+                .select("nft_release_id, nft_releases!inner(primary_sale_recipient, contract_address, thirdweb_fee_bps)")
                 .eq("on_chain_token_id", tokenId)
                 .eq("nft_releases.contract_address", contractAddress)
                 .maybeSingle() as { data: any };
@@ -281,6 +319,7 @@ async function resolvePrimarySaleRecipient(
                 return {
                     releaseId: tokenRow.nft_release_id,
                     recipient: tokenRow.nft_releases.primary_sale_recipient,
+                    thirdwebFeeBps: tokenRow.nft_releases.thirdweb_fee_bps ?? 200,
                 };
             }
         } catch (e) {
@@ -294,7 +333,7 @@ async function resolvePrimarySaleRecipient(
     try {
         const { data: rel } = await supa
             .from("nft_releases")
-            .select("id, primary_sale_recipient, minted_count, total_supply, is_active, created_at")
+            .select("id, primary_sale_recipient, minted_count, total_supply, is_active, created_at, thirdweb_fee_bps")
             .eq("contract_address", contractAddress)
             .eq("is_active", true)
             .not("primary_sale_recipient", "is", null)
@@ -303,12 +342,16 @@ async function resolvePrimarySaleRecipient(
             // Pick the first release with supply remaining; else the first row.
             const withSupply = rel.find((r: any) => (r.minted_count ?? 0) < (r.total_supply ?? 0));
             const picked = withSupply || rel[0];
-            return { releaseId: picked.id, recipient: picked.primary_sale_recipient };
+            return {
+                releaseId: picked.id,
+                recipient: picked.primary_sale_recipient,
+                thirdwebFeeBps: picked.thirdweb_fee_bps ?? 200,
+            };
         }
     } catch (e) {
         console.warn("[nft-admin] resolvePrimarySaleRecipient releases fallback failed:", String(e));
     }
-    return { releaseId: null, recipient: null };
+    return { releaseId: null, recipient: null, thirdwebFeeBps: 200 };
 }
 
 /**
@@ -361,8 +404,12 @@ async function forwardPrimarySalePayout(
         console.warn("[nft-admin] forwardPrimarySale existence check failed:", String(e));
     }
 
-    const { releaseId, recipient } = await resolvePrimarySaleRecipient(supa, contractAddress, tokenId);
-    const { artistWei, platformWei, thirdwebFeeWei } = splitPrimarySale(grossWei, PLATFORM_FEE_BPS_PRIMARY);
+    const { releaseId, recipient, thirdwebFeeBps } = await resolvePrimarySaleRecipient(supa, contractAddress, tokenId);
+    const { artistWei, platformWei, thirdwebFeeWei } = splitPrimarySale(
+        grossWei,
+        thirdwebFeeBps,
+        PLATFORM_FEE_BPS_PRIMARY,
+    );
 
     // If no recipient resolvable, write a `failed` row so it shows up in the
     // admin ledger for manual settlement.
@@ -601,6 +648,40 @@ async function waitForTx(txId: string, maxWaitMs = 30000): Promise<{ confirmed: 
     return { confirmed: false, hash: lastHash, error: "Timeout waiting for tx confirmation" };
 }
 
+// ── RPC helper: eth_call ──────────────────────────────────────────────────────
+
+/**
+ * Execute a read-only eth_call on the RPC and return the result hex string.
+ * Returns "0x" on failure (allows callers to handle gracefully).
+ */
+async function ethCall(contractAddress: string, data: string): Promise<string> {
+    try {
+        const resp = await fetch(RPC_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "eth_call",
+                params: [{ to: contractAddress, data }, "latest"],
+            }),
+        });
+        const json = await resp.json();
+        return json?.result || "0x";
+    } catch (e) {
+        console.warn("[nft-admin] ethCall error:", String(e));
+        return "0x";
+    }
+}
+
+/**
+ * Pad a decimal or hex number to a 64-character hex string (32 bytes).
+ */
+function toHex64(value: string | number | bigint): string {
+    const n = typeof value === "bigint" ? value : BigInt(value);
+    return n.toString(16).padStart(64, "0");
+}
+
 Deno.serve(async (req: Request) => {
     if (req.method === "OPTIONS") {
         return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -656,43 +737,215 @@ Deno.serve(async (req: Request) => {
         }
 
         // ── Server Claim ──
-        // Calls DropERC721.claim() on behalf of the buyer from the server wallet.
-        // Uses Thirdweb Engine v1 /write/contract endpoint (the older /erc721/
-        // claim-to path has been removed and now returns 404).
+        // Routes by nft_standard:
+        //   erc1155 → DropERC1155 claim ABI (tokenId + allowlistProof tuple)
+        //   erc721  → legacy DropERC721 claim ABI (back-compat preserved)
+        //
+        // For ERC-1155: reads release row by release_id to get contract_address
+        // and token_id. For ERC-721: falls back to contractAddress param.
         if (action === "serverClaim") {
-            const { receiverAddress, contractAddress, onChainPriceWei } = body;
+            const { receiverAddress, contractAddress, onChainPriceWei, release_id } = body;
             if (!receiverAddress) return jsonResponse({ error: "Missing receiverAddress" }, 400);
 
-            const targetContract = contractAddress || DEFAULT_CONTRACT;
             const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
-            // ── Read active claim condition on-chain (source of truth) ──
+            // ── Resolve release row (for ERC-1155 routing) ──
+            let releaseRow: any = null;
+            if (release_id) {
+                try {
+                    const supaAdminForRelease = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+                    const { data } = await supaAdminForRelease
+                        .from("nft_releases")
+                        .select("id, contract_address, token_id, nft_standard, thirdweb_fee_bps, price_wei, currency_address")
+                        .eq("id", release_id)
+                        .maybeSingle() as { data: any };
+                    releaseRow = data;
+                } catch (e) {
+                    console.warn("[nft-admin] serverClaim: release lookup failed:", String(e));
+                }
+            }
+
+            const nftStandard: string = releaseRow?.nft_standard || "erc721";
+            const targetContract: string = releaseRow?.contract_address || contractAddress || DEFAULT_CONTRACT;
+
+            // ── ERC-1155 claim path ──
+            if (nftStandard === "erc1155") {
+                if (!releaseRow?.token_id && releaseRow?.token_id !== 0) {
+                    return jsonResponse({ error: "Release token_id not set — lazy mint required before claiming" }, 400);
+                }
+                const tokenId: string = releaseRow.token_id.toString();
+                if (!targetContract) {
+                    return jsonResponse({ error: "contract_address not set on release and no ERC-1155 default for mainnet" }, 400);
+                }
+
+                // Read active claim condition for this tokenId on-chain (source of truth).
+                // DropERC1155.getActiveClaimConditionId(tokenId) — selector 0x2a4c4bf0 + tokenId
+                let pricePerToken = (onChainPriceWei ?? releaseRow?.price_wei ?? "0").toString();
+                let currencyOnChain = releaseRow?.currency_address || NATIVE_TOKEN;
+                try {
+                    // getActiveClaimConditionId(uint256 tokenId) → uint256
+                    const activeIdHex = await ethCall(targetContract, "0x2a4c4bf0" + toHex64(tokenId));
+                    const activeId = BigInt(activeIdHex || "0x0");
+
+                    // getClaimConditionById(uint256 tokenId, uint256 conditionId) — selector 0xa77df579
+                    // params: tokenId (32 bytes) + conditionId (32 bytes)
+                    const condSelector = "0xa77df579";
+                    const condData = condSelector + toHex64(tokenId) + toHex64(activeId);
+                    const condHex = (await ethCall(targetContract, condData)).replace(/^0x/, "");
+
+                    // ClaimCondition struct (ABI-encoded):
+                    // [0]=startTimestamp [1]=maxClaimableSupply [2]=supplyClaimed
+                    // [3]=quantityLimitPerWallet [4]=merkleRoot [5]=pricePerToken
+                    // [6]=currency [7+]=metadata(string offset/data)
+                    if (condHex.length >= 64 * 7) {
+                        const onChainPrice = BigInt("0x" + condHex.slice(64 * 5, 64 * 6)).toString();
+                        const onChainCurrency = "0x" + condHex.slice(64 * 6 + 24, 64 * 7);
+                        if (onChainPrice && onChainPrice !== "0") pricePerToken = onChainPrice;
+                        if (onChainCurrency && /^0x[a-fA-F0-9]{40}$/.test(onChainCurrency)) currencyOnChain = onChainCurrency;
+                        if (onChainPriceWei && onChainPriceWei.toString() !== onChainPrice) {
+                            console.warn(
+                                `[nft-admin] serverClaim ERC-1155: client price ${onChainPriceWei} ≠ on-chain ${onChainPrice}; using on-chain.`,
+                            );
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[nft-admin] serverClaim ERC-1155: claim condition read failed, using DB price:", String(e));
+                }
+
+                // DropERC1155.claim(address receiver, uint256 tokenId, uint256 quantity,
+                //   address currency, uint256 pricePerToken,
+                //   (bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) allowlistProof,
+                //   bytes data)
+                //
+                // For a public (no-allowlist) claim: proof=[], quantityLimitPerWallet=MAX_UINT256,
+                // pricePerToken=pricePerToken, currency=currencyOnChain.
+                const allowlistProof: [string[], string, string, string] = [
+                    [],
+                    MAX_UINT256,
+                    pricePerToken,
+                    currencyOnChain,
+                ];
+
+                const erc1155RequestBody = {
+                    executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                    params: [{
+                        contractAddress: targetContract,
+                        method: "function claim(address _receiver, uint256 _tokenId, uint256 _quantity, address _currency, uint256 _pricePerToken, (bytes32[] proof, uint256 quantityLimitPerWallet, uint256 pricePerToken, address currency) _allowlistProof, bytes _data) payable",
+                        params: [
+                            receiverAddress,
+                            tokenId,
+                            "1",
+                            currencyOnChain,
+                            pricePerToken,
+                            allowlistProof,
+                            "0x",
+                        ],
+                        value: currencyOnChain.toLowerCase() === NATIVE_TOKEN.toLowerCase() ? pricePerToken : "0",
+                    }],
+                };
+
+                console.log("[nft-admin] serverClaim ERC-1155 receiver:", receiverAddress, "tokenId:", tokenId, "price:", pricePerToken);
+                const { ok, status, result } = await callEngine(erc1155RequestBody);
+                console.log("[nft-admin] serverClaim ERC-1155 engine response:", status, JSON.stringify(result));
+                if (!ok) {
+                    const errMsg = typeof result === "string"
+                        ? result
+                        : (result?.error?.message || result?.message || JSON.stringify(result));
+                    return jsonResponse({ success: false, error: errMsg }, status);
+                }
+
+                const txId = result?.result?.transactions?.[0]?.id
+                    || result?.result?.queueId
+                    || result?.result?.id;
+                if (!txId) {
+                    return jsonResponse({ success: false, error: "Engine did not return a transaction id" }, 500);
+                }
+
+                const { confirmed, hash, error } = await waitForTx(txId);
+                if (!confirmed) {
+                    const errMsg = typeof error === "string" ? error : (error || "serverClaim ERC-1155 tx did not confirm");
+                    return jsonResponse({ success: false, error: errMsg }, 500);
+                }
+                console.log("[nft-admin] serverClaim ERC-1155 confirmed, hash:", hash);
+
+                // ── Self-healing nft_tokens insert for ERC-1155 ──
+                // For ERC-1155, token_id is fixed per release. Each claim mints
+                // `quantity` copies of the same token_id. We insert one nft_tokens
+                // row per claim (one copy) — the row acts as a ledger entry.
+                if (hash && releaseRow?.id) {
+                    try {
+                        const supaAdminForToken = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+                        const priceEth = Number(pricePerToken) / 1e18;
+                        const { error: insErr } = await supaAdminForToken
+                            .from("nft_tokens")
+                            .insert({
+                                nft_release_id: releaseRow.id,
+                                token_id: tokenId,
+                                on_chain_token_id: tokenId,
+                                owner_wallet_address: receiverAddress.toLowerCase(),
+                                mint_tx_hash: hash,
+                                price_paid_eth: priceEth,
+                                price_paid_token: priceEth,
+                            });
+                        if (insErr) {
+                            console.log("[nft-admin] ERC-1155 self-healing nft_tokens insert:", insErr.message);
+                        } else {
+                            console.log("[nft-admin] ERC-1155 self-healing nft_tokens inserted for token", tokenId);
+                        }
+                    } catch (e: any) {
+                        console.error("[nft-admin] ERC-1155 self-healing nft_tokens threw (non-fatal):", e?.message || e);
+                    }
+                }
+
+                // ── Primary-sale forwarding for ERC-1155 ──
+                let payoutResult: any = null;
+                if (hash && currencyOnChain.toLowerCase() === NATIVE_TOKEN.toLowerCase() && BigInt(pricePerToken) > 0n) {
+                    try {
+                        const supaAdminForPayout = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+                        payoutResult = await forwardPrimarySalePayout(supaAdminForPayout, {
+                            contractAddress: targetContract,
+                            buyerWallet: receiverAddress,
+                            claimTxHash: hash,
+                            grossWei: pricePerToken,
+                            tokenId,
+                        });
+                        console.log("[nft-admin] ERC-1155 primary-sale payout:", JSON.stringify({
+                            status: payoutResult?.status,
+                            recipient: payoutResult?.recipient,
+                            artistWei: payoutResult?.artistWei,
+                            forwardTxHash: payoutResult?.forwardTxHash,
+                        }));
+                    } catch (e: any) {
+                        console.error("[nft-admin] ERC-1155 forwardPrimarySale threw (non-fatal):", e?.message || e);
+                        payoutResult = { status: "pending_retry", error: e?.message || String(e) };
+                    }
+                }
+
+                return jsonResponse({
+                    success: true,
+                    transactionId: txId,
+                    txHash: hash,
+                    onChainTokenId: tokenId,
+                    pricePaidWei: pricePerToken,
+                    currency: currencyOnChain,
+                    nftStandard: "erc1155",
+                    primarySalePayout: payoutResult,
+                });
+            }
+
+            // ── ERC-721 legacy claim path (preserved for back-compat) ──
+            // Read active claim condition on-chain (source of truth).
             // The contract's verifyClaim rejects any call whose _pricePerToken /
             // _currency args don't exactly match the active claim condition.
-            // We query the chain and use those values rather than trusting the
-            // client-supplied `onChainPriceWei`, which may be stale relative to
-            // the on-chain state (e.g. if an admin re-set claim conditions).
             let pricePerToken = (onChainPriceWei ?? "0").toString();
             let currencyOnChain = NATIVE_TOKEN;
             try {
                 // claimCondition() returns (currentStartId, count)
-                const ccResp = await fetch(RPC_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: targetContract, data: "0xd637ed59" }, "latest"] }),
-                });
-                const ccData = await ccResp.json();
-                const ccHex = (ccData?.result || "0x").slice(2);
+                const ccHex = (await ethCall(targetContract, "0xd637ed59")).slice(2);
                 const currentStartId = BigInt("0x" + (ccHex.slice(0, 64) || "0"));
                 // getClaimConditionById(currentStartId) selector 0x6f8934f4
                 const idHex = currentStartId.toString(16).padStart(64, "0");
-                const condResp = await fetch(RPC_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: targetContract, data: "0x6f8934f4" + idHex }, "latest"] }),
-                });
-                const condData = await condResp.json();
-                const condHex = (condData?.result || "0x").slice(2);
+                const condHex = (await ethCall(targetContract, "0x6f8934f4" + idHex)).slice(2);
                 // Struct layout starting at word 1 (word 0 is the tuple offset 0x20):
                 //   [1]=startTimestamp [2]=maxClaimableSupply [3]=supplyClaimed
                 //   [4]=quantityLimitPerWallet [5]=merkleRoot [6]=pricePerToken
@@ -704,12 +957,12 @@ Deno.serve(async (req: Request) => {
                     if (onChainCurrency && /^0x[a-fA-F0-9]{40}$/.test(onChainCurrency)) currencyOnChain = onChainCurrency;
                     if (onChainPriceWei && onChainPriceWei.toString() !== onChainPrice) {
                         console.warn(
-                            `[nft-admin] serverClaim: client price ${onChainPriceWei} ≠ on-chain ${onChainPrice}; using on-chain (source of truth).`,
+                            `[nft-admin] serverClaim ERC-721: client price ${onChainPriceWei} ≠ on-chain ${onChainPrice}; using on-chain (source of truth).`,
                         );
                     }
                 }
             } catch (e) {
-                console.warn("[nft-admin] serverClaim: failed to read claim condition, falling back to client price:", String(e));
+                console.warn("[nft-admin] serverClaim ERC-721: failed to read claim condition, falling back to client price:", String(e));
             }
 
             // DropERC721.claim(receiver, quantity, currency, pricePerToken,
@@ -718,14 +971,14 @@ Deno.serve(async (req: Request) => {
             // tuple's qtyLimit/price/currency must match the active condition —
             // using MAX_UINT256/pricePerToken/currency is the standard
             // "no override" form Thirdweb SDK sends.
-            const allowlistProof: [string[], string, string, string] = [
+            const allowlistProof721: [string[], string, string, string] = [
                 [],
                 MAX_UINT256,
                 pricePerToken,
                 currencyOnChain,
             ];
 
-            const requestBody = {
+            const erc721RequestBody = {
                 executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
                 params: [{
                     contractAddress: targetContract,
@@ -735,7 +988,7 @@ Deno.serve(async (req: Request) => {
                         "1",
                         currencyOnChain,
                         pricePerToken,
-                        allowlistProof,
+                        allowlistProof721,
                         "0x",
                     ],
                     // Server wallet forwards the claim price as msg.value so the
@@ -748,9 +1001,9 @@ Deno.serve(async (req: Request) => {
                 }],
             };
 
-            console.log("[nft-admin] serverClaim v1/write/contract receiver:", receiverAddress, "price:", pricePerToken);
-            const { ok, status, result } = await callEngine(requestBody);
-            console.log("[nft-admin] serverClaim engine response:", status, JSON.stringify(result));
+            console.log("[nft-admin] serverClaim ERC-721 v1/write/contract receiver:", receiverAddress, "price:", pricePerToken);
+            const { ok, status, result } = await callEngine(erc721RequestBody);
+            console.log("[nft-admin] serverClaim ERC-721 engine response:", status, JSON.stringify(result));
             if (!ok) {
                 const errMsg = typeof result === "string"
                     ? result
@@ -770,7 +1023,7 @@ Deno.serve(async (req: Request) => {
                 const errMsg = typeof error === "string" ? error : (error || "serverClaim tx did not confirm");
                 return jsonResponse({ success: false, error: errMsg }, 500);
             }
-            console.log("[nft-admin] serverClaim confirmed, hash:", hash);
+            console.log("[nft-admin] serverClaim ERC-721 confirmed, hash:", hash);
 
             // Parse real on-chain tokenId from the Transfer event log.
             // Best-effort: if the receipt isn't available yet we return null —
@@ -904,6 +1157,7 @@ Deno.serve(async (req: Request) => {
                 // client sent; the client should reconcile its records to this.
                 pricePaidWei: pricePerToken,
                 currency: currencyOnChain,
+                nftStandard: "erc721",
                 // Primary-sale forwarding result (Option B). Contains status,
                 // payoutId, forwardTxHash, artistWei, platformWei, recipient.
                 // null when the claim was not native-currency or price == 0.
@@ -911,7 +1165,7 @@ Deno.serve(async (req: Request) => {
             });
         }
 
-        // ── Set Claim Conditions (requires ADMIN role) ──
+        // ── Set Claim Conditions (ERC-721, requires ADMIN role) ──
         if (action === "setClaimConditions") {
             const { priceWei, contractAddress } = body;
             const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
@@ -940,6 +1194,203 @@ Deno.serve(async (req: Request) => {
                 return jsonResponse({ success: true, transactionId: txId, txHash: hash });
             }
             return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ── Set Claim Condition For Token (ERC-1155) ──
+        // Calls DropERC1155.setClaimConditions(tokenId, conditions[], resetEligibility)
+        // for a specific token ID. The condition sets pricePerToken, maxClaimableSupply,
+        // and currency for that token's drop.
+        if (action === "setClaimConditionForToken") {
+            const { tokenId, pricePerToken, maxClaimableSupply, currency, contractAddress, resetEligibility } = body;
+            if (tokenId === undefined || tokenId === null) {
+                return jsonResponse({ error: "Missing tokenId" }, 400);
+            }
+            if (!pricePerToken) {
+                return jsonResponse({ error: "Missing pricePerToken (wei)" }, 400);
+            }
+
+            const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+            const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
+            const claimCurrency = currency || NATIVE_TOKEN;
+            const supply = maxClaimableSupply?.toString() || MAX_UINT256;
+            const target = contractAddress || DEFAULT_ERC1155_CONTRACT;
+            const resetElig = resetEligibility !== false; // default true
+
+            if (!target) {
+                return jsonResponse({ error: "contractAddress required on mainnet" }, 400);
+            }
+
+            // DropERC1155.setClaimConditions(uint256 tokenId, ClaimCondition[] conditions, bool resetEligibility)
+            // ClaimCondition struct: (startTimestamp, maxClaimableSupply, supplyClaimed,
+            //   quantityLimitPerWallet, merkleRoot, pricePerToken, currency, metadata)
+            const conditionsArray = [[
+                "0",           // startTimestamp — active immediately
+                supply,        // maxClaimableSupply
+                "0",           // supplyClaimed (reset)
+                MAX_UINT256,   // quantityLimitPerWallet — unlimited per wallet
+                ZERO_BYTES32,  // merkleRoot — no allowlist
+                pricePerToken.toString(),
+                claimCurrency,
+                "",            // metadata
+            ]];
+
+            const requestBody = {
+                executionOptions: { from: ADMIN_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: target,
+                    method: "function setClaimConditions(uint256 _tokenId, (uint256 startTimestamp, uint256 maxClaimableSupply, uint256 supplyClaimed, uint256 quantityLimitPerWallet, bytes32 merkleRoot, uint256 pricePerToken, address currency, string metadata)[] _conditions, bool _resetClaimEligibility)",
+                    params: [tokenId.toString(), conditionsArray, resetElig],
+                }],
+            };
+
+            console.log("[nft-admin] setClaimConditionForToken tokenId:", tokenId, "price:", pricePerToken, "supply:", supply);
+            const { ok, status, result } = await callEngine(requestBody);
+            console.log("[nft-admin] setClaimConditionForToken response:", status, JSON.stringify(result));
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (txId) {
+                const { confirmed, hash, error } = await waitForTx(txId, 60000);
+                if (!confirmed) return jsonResponse({ success: false, error: error || "setClaimConditionForToken tx did not confirm" }, 500);
+                return jsonResponse({
+                    success: true,
+                    transactionId: txId,
+                    txHash: hash,
+                    tokenId: tokenId.toString(),
+                    pricePerToken: pricePerToken.toString(),
+                    maxClaimableSupply: supply,
+                    currency: claimCurrency,
+                });
+            }
+            return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ── Set Royalty Info For Token (ERC-1155, per-token override) ──
+        // Calls DropERC1155.setRoyaltyInfoForToken(uint256 tokenId, address recipient, uint96 bps).
+        // This sets a token-specific royalty override that takes precedence over
+        // the default contract royalty for secondary sales of this token.
+        if (action === "setRoyaltyInfoForToken") {
+            const { tokenId, recipient, bps, contractAddress } = body;
+            if (tokenId === undefined || tokenId === null) {
+                return jsonResponse({ error: "Missing tokenId" }, 400);
+            }
+            if (!recipient || !/^0x[a-fA-F0-9]{40}$/.test(recipient)) {
+                return jsonResponse({ error: "Missing or invalid recipient address" }, 400);
+            }
+
+            const royaltyBps = typeof bps === "number" ? bps : DEFAULT_ARTIST_ROYALTY_BPS;
+            if (!Number.isInteger(royaltyBps) || royaltyBps < 0 || royaltyBps > 10000) {
+                return jsonResponse({ error: "bps must be an integer in [0, 10000]" }, 400);
+            }
+            const target = contractAddress || DEFAULT_ERC1155_CONTRACT;
+            if (!target) {
+                return jsonResponse({ error: "contractAddress required on mainnet" }, 400);
+            }
+
+            const requestBody = {
+                executionOptions: { from: ADMIN_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: target,
+                    method: "function setRoyaltyInfoForToken(uint256 _tokenId, address _recipient, uint256 _royaltyBps)",
+                    params: [tokenId.toString(), recipient, royaltyBps.toString()],
+                }],
+            };
+
+            console.log("[nft-admin] setRoyaltyInfoForToken tokenId:", tokenId, "recipient:", recipient, "bps:", royaltyBps);
+            const { ok, status, result } = await callEngine(requestBody);
+            console.log("[nft-admin] setRoyaltyInfoForToken response:", status, JSON.stringify(result));
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (txId) {
+                const { confirmed, hash, error } = await waitForTx(txId, 60000);
+                if (!confirmed) return jsonResponse({ success: false, error: error || "setRoyaltyInfoForToken tx did not confirm" }, 500);
+
+                // Readback: EIP-2981 royaltyInfo(uint256 tokenId, uint256 salePrice)
+                // selector 0x2a55205a — query tokenId, salePrice=10000
+                // Returns (address receiver, uint256 royaltyAmount)
+                // bps = royaltyAmount * 10000 / salePrice
+                const READBACK_SAMPLE_PRICE = 10000n;
+                const readCalldata = "0x2a55205a" + toHex64(tokenId) + toHex64(READBACK_SAMPLE_PRICE);
+                const readHex = (await ethCall(target, readCalldata)).replace(/^0x/, "");
+                let onChainRecipient: string | null = null;
+                let onChainBps: number | null = null;
+                if (readHex.length >= 128) {
+                    onChainRecipient = "0x" + readHex.slice(24, 64);
+                    const royaltyAmount = BigInt("0x" + readHex.slice(64, 128));
+                    onChainBps = Number((royaltyAmount * 10000n) / READBACK_SAMPLE_PRICE);
+                }
+
+                return jsonResponse({
+                    success: true,
+                    transactionId: txId,
+                    txHash: hash,
+                    tokenId: tokenId.toString(),
+                    recipient,
+                    bps: royaltyBps,
+                    onChain: { recipient: onChainRecipient, bps: onChainBps },
+                });
+            }
+            return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ── Verify Contract Config ──
+        // Read-only: returns primarySaleRecipient, defaultRoyaltyInfo, and
+        // platformFeeInfo from a contract. Supports both DropERC721 and DropERC1155.
+        //
+        // Royalty query strategy:
+        //   For DropERC1155 (and DropERC721): use EIP-2981 royaltyInfo(tokenId, salePrice)
+        //   selector 0x2a55205a with tokenId=0, salePrice=10000 (1 bps unit).
+        //   This is universally supported. The "bps" returned is
+        //   royaltyAmount * 10000 / salePrice.
+        if (action === "verifyContractConfig") {
+            const { contractAddress } = body;
+            const target = contractAddress || DEFAULT_ERC1155_CONTRACT;
+            if (!target) {
+                return jsonResponse({ error: "contractAddress required" }, 400);
+            }
+
+            // primarySaleRecipient() — selector 0x079fe40e
+            const primarySaleHex = (await ethCall(target, "0x079fe40e")).replace(/^0x/, "");
+            const primarySaleRecipient = primarySaleHex.length >= 40
+                ? ("0x" + primarySaleHex.slice(Math.max(0, primarySaleHex.length - 40)))
+                : null;
+
+            // EIP-2981 royaltyInfo(uint256 tokenId, uint256 salePrice)
+            // selector 0x2a55205a — query tokenId=0, salePrice=10000
+            // Returns (address receiver, uint256 royaltyAmount)
+            // bps = royaltyAmount * 10000 / salePrice
+            let royaltyRecipient: string | null = null;
+            let royaltyBps: number | null = null;
+            const ROYALTY_SAMPLE_PRICE = 10000n;
+            const royaltyCalldata = "0x2a55205a"
+                + toHex64(0)                        // tokenId = 0
+                + toHex64(ROYALTY_SAMPLE_PRICE);     // salePrice = 10000
+            const royaltyHex = (await ethCall(target, royaltyCalldata)).replace(/^0x/, "");
+            if (royaltyHex.length >= 128) {
+                royaltyRecipient = "0x" + royaltyHex.slice(24, 64);
+                const royaltyAmount = BigInt("0x" + royaltyHex.slice(64, 128));
+                // Derive bps: royaltyAmount / salePrice * 10000
+                royaltyBps = Number((royaltyAmount * 10000n) / ROYALTY_SAMPLE_PRICE);
+            }
+
+            // getPlatformFeeInfo() — selector 0xd45573f6
+            // Returns (address platformFeeRecipient, uint16 platformFeeBps)
+            const feeHex = (await ethCall(target, "0xd45573f6")).replace(/^0x/, "");
+            let platformFeeRecipient: string | null = null;
+            let platformFeeBps: number | null = null;
+            if (feeHex.length >= 128) {
+                platformFeeRecipient = "0x" + feeHex.slice(24, 64);
+                platformFeeBps = parseInt(feeHex.slice(64, 128), 16);
+            }
+
+            return jsonResponse({
+                success: true,
+                contractAddress: target,
+                primarySaleRecipient,
+                defaultRoyaltyInfo: { recipient: royaltyRecipient, bps: royaltyBps },
+                platformFeeInfo: { recipient: platformFeeRecipient, bps: platformFeeBps },
+            });
         }
 
         // ── Transfer Funds (native POL) ──
@@ -1263,13 +1714,8 @@ Deno.serve(async (req: Request) => {
 
             // Read current on-chain value (selector 0x079fe40e = primarySaleRecipient())
             try {
-                const cur = await fetch(RPC_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: contract, data: "0x079fe40e" }, "latest"] }),
-                });
-                const curData = await cur.json();
-                const curRecipient = "0x" + (curData?.result || "0x").slice(-40);
+                const curHex = (await ethCall(contract, "0x079fe40e")).replace(/^0x/, "");
+                const curRecipient = "0x" + curHex.slice(Math.max(0, curHex.length - 40));
                 if (curRecipient.toLowerCase() === target.toLowerCase()) {
                     return jsonResponse({ success: true, unchanged: true, current: curRecipient });
                 }
@@ -1303,7 +1749,7 @@ Deno.serve(async (req: Request) => {
         // DEFAULT_FEE_RECIPIENT, not settable). The server wallet holds
         // DEFAULT_ADMIN_ROLE so it can call setPlatformFeeInfo itself.
         // Idempotent: reads current on-chain state via getPlatformFeeInfo()
-        // (selector 0xe57553da) and short-circuits when already correct.
+        // (selector 0xd45573f6) and short-circuits when already correct.
         if (action === "setPlatformFee") {
             const { recipient, bps, contractAddress } = body;
             const target = (recipient || SERVER_WALLET) as string;
@@ -1321,13 +1767,7 @@ Deno.serve(async (req: Request) => {
             // NB: 0xe57553da is getFlatPlatformFeeInfo() — a sibling mechanism,
             // unrelated to the bps fee we set here.
             try {
-                const cur = await fetch(RPC_URL, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: contract, data: "0xd45573f6" }, "latest"] }),
-                });
-                const curData = await cur.json();
-                const hx = (curData?.result || "").replace(/^0x/, "");
+                const hx = (await ethCall(contract, "0xd45573f6")).replace(/^0x/, "");
                 if (hx.length >= 128) {
                     const curRecipient = "0x" + hx.slice(24, 64);
                     const curBps = parseInt(hx.slice(64, 128), 16);
