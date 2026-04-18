@@ -826,10 +826,16 @@ Deno.serve(async (req: Request) => {
                 }
                 console.log("[nft-admin] serverClaim ERC-1155 confirmed, hash:", hash);
 
-                // ── Self-healing nft_tokens insert for ERC-1155 ──
-                // For ERC-1155, token_id is fixed per release. Each claim mints
-                // `quantity` copies of the same token_id. We insert one nft_tokens
-                // row per claim (one copy) — the row acts as a ledger entry.
+                // ── Self-healing nft_tokens ledger insert for ERC-1155 ──
+                // token_id is fixed per release (one lazy-minted id). Each claim
+                // mints `quantity` copies of the same token_id — we insert ONE
+                // ledger row per claim tx (one row = one copy held by receiver).
+                //
+                // Idempotency: nft_tokens has a UNIQUE partial index on
+                // (mint_tx_hash) where mint_tx_hash IS NOT NULL (migration 041).
+                // If the same claim tx hash tries to insert twice — e.g. on
+                // retry after a transient DB hiccup — the duplicate is rejected
+                // by the DB, never creating phantom ledger rows.
                 if (hash && releaseRow?.id) {
                     try {
                         const supaAdminForToken = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
@@ -846,12 +852,23 @@ Deno.serve(async (req: Request) => {
                                 price_paid_token: priceEth,
                             });
                         if (insErr) {
-                            console.log("[nft-admin] ERC-1155 self-healing nft_tokens insert:", insErr.message);
+                            // Duplicate-key on mint_tx_hash is expected when this
+                            // path is retried after a successful first insert —
+                            // log at warn level but do not surface as a failure.
+                            const isDup = /duplicate key|unique constraint/i.test(insErr.message);
+                            if (isDup) {
+                                console.warn("[nft-admin] ERC-1155 ledger row already exists for tx", hash, "— idempotent skip");
+                            } else {
+                                // Any OTHER DB error is loud — this is what caused
+                                // the pre-041 silent-fail class of bugs where the
+                                // on-chain claim succeeded but the ledger stayed empty.
+                                console.error("[nft-admin] ERC-1155 ledger insert FAILED (on-chain claim succeeded!):", insErr.message, "release=", releaseRow.id, "tokenId=", tokenId, "receiver=", receiverAddress, "tx=", hash);
+                            }
                         } else {
-                            console.log("[nft-admin] ERC-1155 self-healing nft_tokens inserted for token", tokenId);
+                            console.log("[nft-admin] ERC-1155 ledger row inserted for token", tokenId, "receiver", receiverAddress);
                         }
                     } catch (e: any) {
-                        console.error("[nft-admin] ERC-1155 self-healing nft_tokens threw (non-fatal):", e?.message || e);
+                        console.error("[nft-admin] ERC-1155 ledger insert threw (on-chain claim succeeded!):", e?.message || e, "release=", releaseRow.id, "tokenId=", tokenId, "receiver=", receiverAddress, "tx=", hash);
                     }
                 }
 
