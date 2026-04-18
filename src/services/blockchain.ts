@@ -28,6 +28,7 @@ import { CHAIN_ID, NATIVE_TOKEN_ADDRESS, SERVER_WALLET } from '../config/network
 import { supabase } from '../lib/supabase';
 import { sendNftMintedEmail, sendNftPurchaseConfirmEmail } from './email';
 import { getTokenToEurRate } from './fxRate';
+import { fetchErc1155ClaimState } from '../lib/thirdweb/erc1155';
 
 // ────────────────────────────────────────────
 // Types
@@ -427,6 +428,7 @@ export async function serverClaim(
     receiverAddress: string,
     onChainPriceWei: string,
     contractAddress?: string,
+    releaseId?: string,
 ): Promise<{
     success: boolean;
     txHash?: string;
@@ -448,6 +450,7 @@ export async function serverClaim(
                 receiverAddress,
                 onChainPriceWei,
                 contractAddress: contractAddress || CONTRACTS.SONG_NFT,
+                release_id: releaseId,
             }),
         });
 
@@ -1216,21 +1219,47 @@ export async function mintToken(
             }
 
             // Read the active claim-condition price so serverClaim sends the
-            // EXACT matching value the contract requires.
-            const contractForClaim = getContract({
-                client: thirdwebClient,
-                chain: activeChain,
-                address: release.contract_address || CONTRACTS.SONG_NFT,
-            });
-            const condition = await sdkGetActiveClaimCondition({ contract: contractForClaim });
-            const conditionPriceWei = condition.pricePerToken.toString();
-            console.log('[blockchain] Read active condition price:', conditionPriceWei);
+            // EXACT matching value the contract requires. Route by nft_standard:
+            //   - erc1155 (new DropERC1155): per-token claim condition
+            //   - erc721 (legacy DropERC721): single claim condition per contract
+            const contractAddrForClaim = release.contract_address || CONTRACTS.SONG_NFT;
+            const standard = (release.nft_standard || 'erc721').toLowerCase();
+            let conditionPriceWei: string;
+
+            if (standard === 'erc1155') {
+                const tokenId = release.token_id;
+                if (tokenId === null || tokenId === undefined) {
+                    throw new Error('ERC-1155 release missing token_id — release cannot be claimed');
+                }
+                const state = await fetchErc1155ClaimState(
+                    contractAddrForClaim,
+                    tokenId,
+                    release.chain_id || CHAIN_ID,
+                );
+                if (!state.success || !state.condition) {
+                    throw new Error(
+                        state.error || 'Claim condition not found for ERC-1155 token ' + tokenId
+                    );
+                }
+                conditionPriceWei = state.condition.pricePerToken.toString();
+                console.log('[blockchain] ERC-1155 condition price for token', tokenId, ':', conditionPriceWei);
+            } else {
+                const contractForClaim = getContract({
+                    client: thirdwebClient,
+                    chain: activeChain,
+                    address: contractAddrForClaim,
+                });
+                const condition = await sdkGetActiveClaimCondition({ contract: contractForClaim });
+                conditionPriceWei = condition.pricePerToken.toString();
+                console.log('[blockchain] ERC-721 condition price:', conditionPriceWei);
+            }
 
             // AWAITED — no more fire-and-forget
             const claimResult = await serverClaim(
                 buyerWallet,
                 conditionPriceWei,
                 release.contract_address || CONTRACTS.SONG_NFT,
+                releaseId,
             );
 
             if (!claimResult.success || !claimResult.txHash) {
