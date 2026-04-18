@@ -517,7 +517,22 @@ export async function getNFTReleases(songId?: string): Promise<NFTRelease[]> {
     return (data || []).map(mapNFTReleaseRow);
 }
 
+// Matches standard 8-4-4-4-12 UUID v4 strings (case-insensitive).
+// nft_releases.id and nft_tokens.id are UUIDs, so calling the `.eq('id', …)`
+// queries below with a non-UUID throws Postgres 22P02. We silently short-circuit
+// to null for synthetic IDs like 'onchain-26' (ghost tokens the Collection
+// screen creates when the on-chain NFT has no DB row yet — see useData.ts).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value: string): boolean {
+    return typeof value === 'string' && UUID_RE.test(value);
+}
+
 export async function getNFTReleaseById(releaseId: string): Promise<NFTRelease | null> {
+    if (!isUuid(releaseId)) {
+        // Synthetic / ghost id (e.g. 'onchain-26') — no matching release row,
+        // return null cleanly without a DB round-trip.
+        return null;
+    }
     const { data, error } = await supabase
         .from('nft_releases')
         .select(`
@@ -540,6 +555,11 @@ export async function getNFTReleaseById(releaseId: string): Promise<NFTRelease |
 }
 
 export async function getNFTTokenById(tokenId: string): Promise<NFTToken | null> {
+    if (!isUuid(tokenId)) {
+        // Synthetic / ghost id — nft_tokens.id is a UUID so any other shape
+        // cannot match. Short-circuit to avoid a Postgres 22P02 error.
+        return null;
+    }
     const { data, error } = await supabase
         .from('nft_tokens')
         .select(`

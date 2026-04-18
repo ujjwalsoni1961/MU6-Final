@@ -748,6 +748,83 @@ Deno.serve(async (req: Request) => {
                 console.log("[nft-admin] parsed on-chain tokenId:", onChainTokenId);
             }
 
+            // ── Self-healing nft_tokens insert (Option B hardening) ──
+            // Before Option B the client was solely responsible for writing the
+            // nft_tokens row after a successful mint. That works for the real
+            // purchase path (purchaseAndMintNFT), but leaves a gap when any
+            // other caller (admin ops, reconciliation, tests) invokes
+            // serverClaim directly — the NFT exists on-chain with no DB row,
+            // so it shows up in the buyer's collection as a "ghost" card
+            // with 'Unknown (off-chain metadata missing)' and is absent from
+            // the admin NFT Tokens screen.
+            //
+            // Making the edge function itself write a minimal row closes that
+            // gap. The client path still does its richer upsert (price_paid_eur,
+            // mint_tx_hash, intent linkage) right after serverClaim returns;
+            // its .insert hits the existing row, triggers the duplicate branch
+            // at blockchain.ts:1108, and proceeds normally. Net effect: the DB
+            // row is guaranteed whether the caller is the app, a test curl,
+            // or a future backend job.
+            if (hash && onChainTokenId) {
+                try {
+                    const supaAdminForToken = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+                    // Resolve release via contract_address + an active row so we
+                    // don't guess. If multiple active releases share the contract
+                    // (common: each tier is its own release on the same drop),
+                    // prefer the one whose price_eth matches the paid price.
+                    const priceEthStr = (Number(pricePerToken) / 1e18).toString();
+                    const { data: releaseCandidates } = await supaAdminForToken
+                        .from("nft_releases")
+                        .select("id, price_eth, is_active")
+                        .eq("contract_address", targetContract)
+                        .eq("is_active", true) as { data: any[] };
+                    let matchedReleaseId: string | null = null;
+                    if (Array.isArray(releaseCandidates) && releaseCandidates.length > 0) {
+                        // Exact-price match first; fall back to single-active-release.
+                        const exact = releaseCandidates.find(
+                            (r) => r && Number(r.price_eth).toString() === Number(priceEthStr).toString(),
+                        );
+                        matchedReleaseId = exact?.id
+                            || (releaseCandidates.length === 1 ? releaseCandidates[0].id : null);
+                    }
+                    if (matchedReleaseId) {
+                        // Idempotent: only insert if no row exists yet for this
+                        // on_chain_token_id (unique index nft_tokens_onchain_unique).
+                        const { data: existing } = await supaAdminForToken
+                            .from("nft_tokens")
+                            .select("id")
+                            .eq("on_chain_token_id", onChainTokenId)
+                            .maybeSingle();
+                        if (!existing) {
+                            const priceEth = Number(pricePerToken) / 1e18;
+                            const { error: insErr } = await supaAdminForToken
+                                .from("nft_tokens")
+                                .insert({
+                                    nft_release_id: matchedReleaseId,
+                                    token_id: onChainTokenId,
+                                    on_chain_token_id: onChainTokenId,
+                                    owner_wallet_address: receiverAddress.toLowerCase(),
+                                    mint_tx_hash: hash,
+                                    price_paid_eth: priceEth,
+                                    price_paid_token: priceEth,
+                                });
+                            if (insErr) {
+                                // Race with the client's own insert — benign.
+                                console.log("[nft-admin] self-healing nft_tokens insert skipped:", insErr.message);
+                            } else {
+                                console.log("[nft-admin] self-healing nft_tokens inserted for token", onChainTokenId);
+                            }
+                        }
+                    } else {
+                        console.warn("[nft-admin] self-healing insert: no matching release for contract", targetContract, "price", priceEthStr);
+                    }
+                } catch (e: any) {
+                    // Non-fatal — the buyer has the NFT on-chain and the client
+                    // may still write the row itself. We just log.
+                    console.error("[nft-admin] self-healing nft_tokens insert threw (non-fatal):", e?.message || e);
+                }
+            }
+
             // ── Primary-sale forwarding (Option B) ──
             // Claim confirmed → server wallet holds the sale proceeds. Forward
             // the artist's share now, inline, while we still have the claim tx
