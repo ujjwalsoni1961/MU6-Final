@@ -783,23 +783,25 @@ Deno.serve(async (req: Request) => {
                 let pricePerToken = (onChainPriceWei ?? releaseRow?.price_wei ?? "0").toString();
                 let currencyOnChain = releaseRow?.currency_address || NATIVE_TOKEN;
                 try {
-                    // getActiveClaimConditionId(uint256 tokenId) → uint256
-                    const activeIdHex = await ethCall(targetContract, "0x2a4c4bf0" + toHex64(tokenId));
+                    // getActiveClaimConditionId(uint256 tokenId) → uint256, selector 0x5ab063e8
+                    const activeIdHex = await ethCall(targetContract, "0x5ab063e8" + toHex64(tokenId));
                     const activeId = BigInt(activeIdHex || "0x0");
 
-                    // getClaimConditionById(uint256 tokenId, uint256 conditionId) — selector 0xa77df579
+                    // getClaimConditionById(uint256 tokenId, uint256 conditionId) → ClaimCondition
+                    // selector 0xd45b28d7
                     // params: tokenId (32 bytes) + conditionId (32 bytes)
-                    const condSelector = "0xa77df579";
-                    const condData = condSelector + toHex64(tokenId) + toHex64(activeId);
+                    const condData = "0xd45b28d7" + toHex64(tokenId) + toHex64(activeId);
                     const condHex = (await ethCall(targetContract, condData)).replace(/^0x/, "");
 
-                    // ClaimCondition struct (ABI-encoded):
-                    // [0]=startTimestamp [1]=maxClaimableSupply [2]=supplyClaimed
-                    // [3]=quantityLimitPerWallet [4]=merkleRoot [5]=pricePerToken
-                    // [6]=currency [7+]=metadata(string offset/data)
-                    if (condHex.length >= 64 * 7) {
-                        const onChainPrice = BigInt("0x" + condHex.slice(64 * 5, 64 * 6)).toString();
-                        const onChainCurrency = "0x" + condHex.slice(64 * 6 + 24, 64 * 7);
+                    // Response is ABI-encoded struct with a dynamic `string metadata`
+                    // field — so it has a leading 32-byte offset header.
+                    // Layout (slot = 32 bytes):
+                    //   [0]=offset(0x20) [1]=startTimestamp [2]=maxClaimableSupply
+                    //   [3]=supplyClaimed [4]=quantityLimitPerWallet [5]=merkleRoot
+                    //   [6]=pricePerToken [7]=currency [8+]=metadata
+                    if (condHex.length >= 64 * 8) {
+                        const onChainPrice = BigInt("0x" + condHex.slice(64 * 6, 64 * 7)).toString();
+                        const onChainCurrency = "0x" + condHex.slice(64 * 7 + 24, 64 * 8);
                         if (onChainPrice && onChainPrice !== "0") pricePerToken = onChainPrice;
                         if (onChainCurrency && /^0x[a-fA-F0-9]{40}$/.test(onChainCurrency)) currencyOnChain = onChainCurrency;
                         if (onChainPriceWei && onChainPriceWei.toString() !== onChainPrice) {

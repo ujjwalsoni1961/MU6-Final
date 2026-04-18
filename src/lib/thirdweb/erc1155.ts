@@ -90,12 +90,12 @@ async function ethCall(
     return (json.result as string) || '0x';
 }
 
-// ── Function selectors ─────────────────────────────────────────────────────
-// getActiveClaimConditionId(uint256 tokenId)  → bytes4: 0x2eb5cdb3 (DropERC1155)
-const SEL_GET_ACTIVE_CONDITION_ID = '0x2eb5cdb3';
-// getClaimConditionById(uint256 tokenId, uint256 conditionId) → bytes4: 0xa07bddf0
-const SEL_GET_CLAIM_CONDITION_BY_ID = '0xa07bddf0';
-// balanceOf(address account, uint256 id) → bytes4: 0x00fdd58e (ERC-1155)
+// ── Function selectors (keccak256 of signature, first 4 bytes) ─────────────
+// getActiveClaimConditionId(uint256 tokenId) → 0x5ab063e8
+const SEL_GET_ACTIVE_CONDITION_ID = '0x5ab063e8';
+// getClaimConditionById(uint256 tokenId, uint256 conditionId) → 0xd45b28d7
+const SEL_GET_CLAIM_CONDITION_BY_ID = '0xd45b28d7';
+// balanceOf(address account, uint256 id) → 0x00fdd58e (ERC-1155)
 const SEL_BALANCE_OF = '0x00fdd58e';
 
 // ── Main export ────────────────────────────────────────────────────────────
@@ -134,27 +134,32 @@ export async function fetchErc1155ClaimState(
             encodeUint256(conditionId);
         const conditionHex = await ethCall(rpcUrl, contractAddress, conditionCalldata);
 
-        // Decode ClaimCondition struct (8 × 32-byte slots):
-        // slot 0: startTimestamp (uint256)
-        // slot 1: maxClaimableSupply (uint256)
-        // slot 2: supplyClaimed (uint256)
-        // slot 3: quantityLimitPerWallet (uint256)
-        // slot 4: merkleRoot (bytes32)
-        // slot 5: pricePerToken (uint256)
-        // slot 6: currency (address — right-padded to 32 bytes, use last 20)
-        // slot 7: metadata (string — ABI-encoded dynamic, ignore)
+        // Decode ClaimCondition struct. Because the struct contains a dynamic
+        // `string metadata` field, Solidity ABI-encodes the return with a
+        // leading offset word (0x20) pointing to the struct body.
+        //
+        // Layout:
+        //   slot 0 : 0x20 (offset to struct head — skip)
+        //   slot 1 : startTimestamp (uint256)
+        //   slot 2 : maxClaimableSupply (uint256)
+        //   slot 3 : supplyClaimed (uint256)
+        //   slot 4 : quantityLimitPerWallet (uint256)
+        //   slot 5 : merkleRoot (bytes32)
+        //   slot 6 : pricePerToken (uint256)
+        //   slot 7 : currency (address, right-aligned in 32 bytes)
+        //   slot 8 : metadata string offset (dynamic tail, ignored)
         const raw = conditionHex.replace(/^0x/, '');
-        if (raw.length < 8 * 64) {
+        if (raw.length < 9 * 64) {
             return { success: false, condition: null, holderBalance: null, error: 'Unexpected response length from getClaimConditionById' };
         }
 
         const slot = (i: number) => raw.slice(i * 64, (i + 1) * 64);
-        const startTime = parseInt(slot(0), 16);
-        const maxClaimableSupply = BigInt('0x' + slot(1));
-        const supplyClaimed = BigInt('0x' + slot(2));
-        const pricePerToken = BigInt('0x' + slot(5));
+        const startTime = parseInt(slot(1), 16);
+        const maxClaimableSupply = BigInt('0x' + slot(2));
+        const supplyClaimed = BigInt('0x' + slot(3));
+        const pricePerToken = BigInt('0x' + slot(6));
         // Address is right-aligned in 32 bytes: take last 40 hex chars
-        const currency = '0x' + slot(6).slice(24);
+        const currency = '0x' + slot(7).slice(24);
 
         const isUnlimited = maxClaimableSupply === MAX_UINT256;
         const supplyRemaining = isUnlimited
