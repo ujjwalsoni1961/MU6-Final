@@ -623,3 +623,77 @@ export function useAdminNotificationActions(refresh: () => void) {
 
     return { broadcastNotification };
 }
+
+// ────────────────────────────────────────────
+// PRIMARY SALE PAYOUT ACTIONS (Option B forwarding)
+// ────────────────────────────────────────────
+
+export function useAdminPrimarySalePayoutActions(refresh: () => void) {
+    /**
+     * Retry a single pending_retry / failed payout row.
+     * Calls the nft-admin edge function's `retryPrimarySalePayout` action.
+     */
+    const retry = useCallback(async (payoutId: string) => {
+        try {
+            const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({
+                    action: 'retryPrimarySalePayout',
+                    payoutId,
+                }),
+            });
+            const json = await response.json();
+            if (!response.ok || json?.success === false || json?.error) {
+                showToast(`Retry failed: ${json?.error || response.statusText}`, 'error');
+                return { success: false, error: json?.error };
+            }
+            await logAuditAction('retry_primary_sale_payout', 'primary_sale_payout', payoutId, json);
+            showToast(json?.status === 'forwarded' ? 'Payout forwarded' : `Payout ${json?.status || 'updated'}`);
+            refresh();
+            return { success: true, result: json };
+        } catch (e: any) {
+            showToast(`Retry error: ${e?.message || String(e)}`, 'error');
+            return { success: false, error: e?.message };
+        }
+    }, [refresh]);
+
+    /**
+     * Sweep all pending_retry rows (bounded).
+     * Calls the nft-admin edge function's `sweepPrimarySalePayouts` action.
+     */
+    const sweep = useCallback(async (limit = 20) => {
+        try {
+            const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({
+                    action: 'sweepPrimarySalePayouts',
+                    limit,
+                }),
+            });
+            const json = await response.json();
+            if (!response.ok || json?.success === false || json?.error) {
+                showToast(`Sweep failed: ${json?.error || response.statusText}`, 'error');
+                return { success: false, error: json?.error };
+            }
+            await logAuditAction('sweep_primary_sale_payouts', 'primary_sale_payout', 'all', json);
+            const processed: any[] = Array.isArray(json?.processed) ? json.processed : [];
+            const forwarded = processed.filter((p: any) => p?.result === 'forwarded').length;
+            showToast(`Swept ${processed.length} rows, forwarded ${forwarded}`);
+            refresh();
+            return { success: true, result: json };
+        } catch (e: any) {
+            showToast(`Sweep error: ${e?.message || String(e)}`, 'error');
+            return { success: false, error: e?.message };
+        }
+    }, [refresh]);
+
+    return { retry, sweep };
+}

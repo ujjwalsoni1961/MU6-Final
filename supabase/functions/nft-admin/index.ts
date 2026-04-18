@@ -11,6 +11,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const THIRDWEB_SECRET_KEY = Deno.env.get("THIRDWEB_SECRET_KEY") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+// Service-role key — required for the Option B primary-sale payout writes
+// since the ledger table denies all user-role writes via RLS.
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 const NETWORK = (Deno.env.get("MU6_NETWORK") || "amoy").toLowerCase();
 const CHAIN_ID = NETWORK === "mainnet" ? 137 : 80002;
@@ -19,6 +22,16 @@ const SERVER_WALLET = Deno.env.get("MU6_SERVER_WALLET")
 const DEFAULT_CONTRACT = Deno.env.get("MU6_SONG_NFT_ADDRESS")
     || "0xACF1145AdE250D356e1B2869E392e6c748c14C0E";
 const NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+
+// ── Primary-sale forwarding (Option B) ──
+// On DropERC721 the primarySaleRecipient is the server wallet. After every
+// confirmed claim() the edge function forwards the artist's share to
+// nft_releases.primary_sale_recipient. Platform fee is retained on the server
+// wallet (currently 0 bps — all revenue goes to the artist).
+const PLATFORM_FEE_BPS_PRIMARY = parseInt(
+    Deno.env.get("MU6_PLATFORM_FEE_BPS_PRIMARY") || "0",
+    10,
+);
 // Public RPC — chain-switch aware. Used for parsing receipts / Transfer logs.
 const RPC_URL = NETWORK === "mainnet"
     ? (Deno.env.get("MU6_RPC_URL") || "https://polygon-rpc.com")
@@ -158,6 +171,292 @@ async function callEngine(requestBody: unknown) {
     let result;
     try { result = JSON.parse(text); } catch { result = { raw: text }; }
     return { ok: response.ok, status: response.status, result };
+}
+
+/**
+ * Send a raw native-value transaction from the server wallet.
+ * Used by the primary-sale forwarding path to pay the artist their share
+ * after a claim() confirms. Returns the Thirdweb Engine transaction id
+ * (NOT the on-chain hash — caller must wait + fetch status if needed).
+ */
+async function sendNativeTransfer(recipient: string, amountWei: string): Promise<{ ok: boolean; status: number; txId?: string; raw: unknown }> {
+    const url = "https://engine.thirdweb.com/v1/write/transaction";
+    const body = {
+        executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+        params: [{ to: recipient, data: "0x", value: amountWei }],
+    };
+    const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "x-secret-key": THIRDWEB_SECRET_KEY,
+        },
+        body: JSON.stringify(body),
+    });
+    const text = await resp.text();
+    let parsed: any;
+    try { parsed = JSON.parse(text); } catch { parsed = { raw: text }; }
+    const txId = parsed?.result?.transactions?.[0]?.id
+        || parsed?.result?.queueId
+        || parsed?.result?.id;
+    return { ok: resp.ok, status: resp.status, txId, raw: parsed };
+}
+
+/**
+ * Compute artist/platform split from the claim price and platform fee bps.
+ * Uses BigInt arithmetic; rounding follows integer division (any remainder
+ * goes to the platform, which is the conventional fee-safe direction).
+ */
+function splitPrimarySale(grossWei: string, platformBps: number): { artistWei: string; platformWei: string } {
+    const gross = BigInt(grossWei);
+    const bps = BigInt(platformBps);
+    // artist share = gross * (10000 - bps) / 10000
+    const artist = (gross * (10000n - bps)) / 10000n;
+    const platform = gross - artist;
+    return { artistWei: artist.toString(), platformWei: platform.toString() };
+}
+
+/**
+ * Look up the release row for a given drop contract + token id to find the
+ * artist's payout wallet. Returns { releaseId, recipient } or null if the
+ * token falls outside any known release (e.g. token minted before Option B
+ * schema landed, or via a direct claim bypassing the app).
+ *
+ * Strategy:
+ *   1. Find the nft_tokens row for this tokenId (if the mint already wrote
+ *      one — in our atomic flow the token row is inserted AFTER forwarding,
+ *      so typically there's no row yet).
+ *   2. Fall back to the most-recent active release on the same contract that
+ *      still has supply remaining. This matches the active claim-condition
+ *      in practice because the drop only exposes one tier at a time via
+ *      setClaimConditions.
+ */
+async function resolvePrimarySaleRecipient(
+    supa: ReturnType<typeof createClient>,
+    contractAddress: string,
+    tokenId: string | null,
+): Promise<{ releaseId: string | null; recipient: string | null }> {
+    // 1. token-level lookup if available. Join through nft_releases because
+    //    contract_address lives on the release, not on nft_tokens.
+    if (tokenId) {
+        try {
+            const { data: tokenRow } = await supa
+                .from("nft_tokens")
+                .select("nft_release_id, nft_releases!inner(primary_sale_recipient, contract_address)")
+                .eq("on_chain_token_id", tokenId)
+                .eq("nft_releases.contract_address", contractAddress)
+                .maybeSingle() as { data: any };
+            if (tokenRow?.nft_release_id && tokenRow?.nft_releases?.primary_sale_recipient) {
+                return {
+                    releaseId: tokenRow.nft_release_id,
+                    recipient: tokenRow.nft_releases.primary_sale_recipient,
+                };
+            }
+        } catch (e) {
+            console.warn("[nft-admin] resolvePrimarySaleRecipient tokens lookup failed:", String(e));
+        }
+    }
+    // 2. Fall back to the active release on this contract. We prefer the row
+    //    whose minted_count < total_supply (supply remaining) and order by
+    //    most-recently updated so an operator can re-target sales by flipping
+    //    is_active on releases.
+    try {
+        const { data: rel } = await supa
+            .from("nft_releases")
+            .select("id, primary_sale_recipient, minted_count, total_supply, is_active, created_at")
+            .eq("contract_address", contractAddress)
+            .eq("is_active", true)
+            .not("primary_sale_recipient", "is", null)
+            .order("created_at", { ascending: false });
+        if (Array.isArray(rel) && rel.length > 0) {
+            // Pick the first release with supply remaining; else the first row.
+            const withSupply = rel.find((r: any) => (r.minted_count ?? 0) < (r.total_supply ?? 0));
+            const picked = withSupply || rel[0];
+            return { releaseId: picked.id, recipient: picked.primary_sale_recipient };
+        }
+    } catch (e) {
+        console.warn("[nft-admin] resolvePrimarySaleRecipient releases fallback failed:", String(e));
+    }
+    return { releaseId: null, recipient: null };
+}
+
+/**
+ * Forward the artist's share from the server wallet after a confirmed claim.
+ *
+ * Writes exactly one `primary_sale_payouts` row per `claim_tx_hash` (uniquely
+ * indexed). The row's lifecycle:
+ *   - Row created with status='forwarding', forward_tx_hash=null.
+ *   - On successful submit + confirm, row updated to 'forwarded' with
+ *     forward_tx_hash and forwarded_at.
+ *   - On failure, row updated to 'pending_retry' with last_error.
+ *   - If recipient is null (release not Option-B-ready), row is written with
+ *     status='failed' so operators can surface it and settle manually.
+ *
+ * This function never throws to the caller — returns a result object so the
+ * calling action (serverClaim) can attach it to its response without losing
+ * the NFT delivery.
+ */
+async function forwardPrimarySalePayout(
+    supa: ReturnType<typeof createClient>,
+    params: {
+        contractAddress: string;
+        buyerWallet: string;
+        claimTxHash: string;
+        grossWei: string;
+        tokenId: string | null;
+    },
+): Promise<{ status: string; payoutId?: string; forwardTxHash?: string; error?: string; artistWei?: string; platformWei?: string; recipient?: string | null; releaseId?: string | null }> {
+    const { contractAddress, buyerWallet, claimTxHash, grossWei, tokenId } = params;
+
+    // Idempotency: if a row with this claim_tx_hash already exists, don't re-forward.
+    try {
+        const { data: existing } = await supa
+            .from("primary_sale_payouts")
+            .select("id, status, forward_tx_hash, artist_wei, platform_wei, artist_wallet, release_id")
+            .eq("claim_tx_hash", claimTxHash)
+            .maybeSingle() as { data: any };
+        if (existing) {
+            return {
+                status: existing.status,
+                payoutId: existing.id,
+                forwardTxHash: existing.forward_tx_hash || undefined,
+                artistWei: existing.artist_wei?.toString(),
+                platformWei: existing.platform_wei?.toString(),
+                recipient: existing.artist_wallet,
+                releaseId: existing.release_id,
+            };
+        }
+    } catch (e) {
+        console.warn("[nft-admin] forwardPrimarySale existence check failed:", String(e));
+    }
+
+    const { releaseId, recipient } = await resolvePrimarySaleRecipient(supa, contractAddress, tokenId);
+    const { artistWei, platformWei } = splitPrimarySale(grossWei, PLATFORM_FEE_BPS_PRIMARY);
+
+    // If no recipient resolvable, write a `failed` row so it shows up in the
+    // admin ledger for manual settlement.
+    if (!recipient) {
+        const { data: row } = await supa
+            .from("primary_sale_payouts")
+            .insert({
+                release_id: releaseId,
+                nft_token_id: tokenId,
+                contract_address: contractAddress,
+                chain_id: CHAIN_ID.toString(),
+                buyer_wallet: buyerWallet,
+                artist_wallet: "0x0000000000000000000000000000000000000000", // placeholder
+                server_wallet: SERVER_WALLET,
+                gross_wei: grossWei,
+                artist_wei: artistWei,
+                platform_wei: platformWei,
+                platform_fee_bps: PLATFORM_FEE_BPS_PRIMARY,
+                claim_tx_hash: claimTxHash,
+                status: "failed",
+                attempt_count: 1,
+                last_error: "No primary_sale_recipient resolvable for this token/release",
+                last_attempt_at: new Date().toISOString(),
+            })
+            .select("id")
+            .maybeSingle() as { data: any };
+        return {
+            status: "failed",
+            payoutId: row?.id,
+            error: "No primary_sale_recipient resolvable for this token/release",
+            artistWei,
+            platformWei,
+            recipient: null,
+            releaseId,
+        };
+    }
+
+    // Create the pending row first so we never lose track of the obligation
+    // even if the process dies between submit and confirmation.
+    const { data: inserted, error: insertErr } = await supa
+        .from("primary_sale_payouts")
+        .insert({
+            release_id: releaseId,
+            nft_token_id: tokenId,
+            contract_address: contractAddress,
+            chain_id: CHAIN_ID.toString(),
+            buyer_wallet: buyerWallet,
+            artist_wallet: recipient,
+            server_wallet: SERVER_WALLET,
+            gross_wei: grossWei,
+            artist_wei: artistWei,
+            platform_wei: platformWei,
+            platform_fee_bps: PLATFORM_FEE_BPS_PRIMARY,
+            claim_tx_hash: claimTxHash,
+            status: "forwarding",
+            attempt_count: 1,
+            last_attempt_at: new Date().toISOString(),
+        })
+        .select("id")
+        .maybeSingle() as { data: any; error: any };
+
+    if (insertErr || !inserted?.id) {
+        console.error("[nft-admin] forwardPrimarySale insert row failed:", insertErr?.message);
+        return {
+            status: "failed",
+            error: `Ledger insert failed: ${insertErr?.message || "unknown"}`,
+            artistWei,
+            platformWei,
+            recipient,
+            releaseId,
+        };
+    }
+    const payoutId = inserted.id as string;
+
+    // If artistWei = 0 (e.g. a free claim), skip sending but still mark forwarded.
+    if (BigInt(artistWei) === 0n) {
+        await supa
+            .from("primary_sale_payouts")
+            .update({ status: "forwarded", forwarded_at: new Date().toISOString() })
+            .eq("id", payoutId);
+        return { status: "forwarded", payoutId, artistWei, platformWei, recipient, releaseId };
+    }
+
+    // Submit the forward tx.
+    console.log(`[nft-admin] forwardPrimarySale: ${artistWei} wei -> ${recipient} (claim tx ${claimTxHash})`);
+    const { ok, status, txId, raw } = await sendNativeTransfer(recipient, artistWei);
+    if (!ok || !txId) {
+        const errMsg = typeof raw === "string" ? raw : (JSON.stringify(raw)).slice(0, 500);
+        console.error("[nft-admin] forwardPrimarySale send failed:", status, errMsg);
+        await supa
+            .from("primary_sale_payouts")
+            .update({
+                status: "pending_retry",
+                last_error: `submit failed (${status}): ${errMsg}`.slice(0, 1000),
+                last_attempt_at: new Date().toISOString(),
+            })
+            .eq("id", payoutId);
+        return { status: "pending_retry", payoutId, error: errMsg, artistWei, platformWei, recipient, releaseId };
+    }
+
+    const { confirmed, hash, error } = await waitForTx(txId, 60000);
+    if (!confirmed) {
+        console.error("[nft-admin] forwardPrimarySale did not confirm:", error);
+        await supa
+            .from("primary_sale_payouts")
+            .update({
+                status: "pending_retry",
+                forward_tx_hash: hash || null,
+                last_error: (error || "did not confirm").slice(0, 1000),
+                last_attempt_at: new Date().toISOString(),
+            })
+            .eq("id", payoutId);
+        return { status: "pending_retry", payoutId, forwardTxHash: hash, error, artistWei, platformWei, recipient, releaseId };
+    }
+
+    await supa
+        .from("primary_sale_payouts")
+        .update({
+            status: "forwarded",
+            forward_tx_hash: hash,
+            forwarded_at: new Date().toISOString(),
+        })
+        .eq("id", payoutId);
+
+    return { status: "forwarded", payoutId, forwardTxHash: hash, artistWei, platformWei, recipient, releaseId };
 }
 
 /**
@@ -448,6 +747,43 @@ Deno.serve(async (req: Request) => {
                 onChainTokenId = await fetchMintedTokenId(hash, targetContract);
                 console.log("[nft-admin] parsed on-chain tokenId:", onChainTokenId);
             }
+
+            // ── Primary-sale forwarding (Option B) ──
+            // Claim confirmed → server wallet holds the sale proceeds. Forward
+            // the artist's share now, inline, while we still have the claim tx
+            // context. A failure here is non-fatal for the NFT: the buyer
+            // keeps the token and the payout row sits in pending_retry for
+            // the retry sweep to settle. This is only attempted for
+            // native-currency claims (ERC-20 ignored for now — the flow was
+            // not originally in scope for Option B).
+            let payoutResult: any = null;
+            if (hash && currencyOnChain.toLowerCase() === NATIVE_TOKEN.toLowerCase() && BigInt(pricePerToken) > 0n) {
+                try {
+                    // Service-role client bypasses RLS (the ledger table denies
+                    // all user-role writes). Safe because the edge function is
+                    // itself the authorization boundary for these writes.
+                    const supaAdminForPayout = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+                    payoutResult = await forwardPrimarySalePayout(supaAdminForPayout, {
+                        contractAddress: targetContract,
+                        buyerWallet: receiverAddress,
+                        claimTxHash: hash,
+                        grossWei: pricePerToken,
+                        tokenId: onChainTokenId,
+                    });
+                    console.log("[nft-admin] primary-sale payout:", JSON.stringify({
+                        status: payoutResult?.status,
+                        recipient: payoutResult?.recipient,
+                        artistWei: payoutResult?.artistWei,
+                        forwardTxHash: payoutResult?.forwardTxHash,
+                    }));
+                } catch (e: any) {
+                    // Intentionally non-throwing — NFT was delivered; payout
+                    // error surfaces via the retry sweep and admin ledger.
+                    console.error("[nft-admin] forwardPrimarySale threw (non-fatal):", e?.message || e);
+                    payoutResult = { status: "pending_retry", error: e?.message || String(e) };
+                }
+            }
+
             return jsonResponse({
                 success: true,
                 transactionId: txId,
@@ -458,6 +794,10 @@ Deno.serve(async (req: Request) => {
                 // client sent; the client should reconcile its records to this.
                 pricePaidWei: pricePerToken,
                 currency: currencyOnChain,
+                // Primary-sale forwarding result (Option B). Contains status,
+                // payoutId, forwardTxHash, artistWei, platformWei, recipient.
+                // null when the claim was not native-currency or price == 0.
+                primarySalePayout: payoutResult,
             });
         }
 
@@ -793,6 +1133,189 @@ Deno.serve(async (req: Request) => {
                 return jsonResponse({ success: true, transactionId: txId, txHash: hash });
             }
             return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Option B — Primary-sale admin + retry surfaces
+        // ═══════════════════════════════════════════════════════════════════
+
+        // ── setPrimarySaleRecipient on DropERC721 (admin) ──
+        // Server wallet holds DEFAULT_ADMIN_ROLE on the drop so it can call
+        // this function itself. Idempotent: reads the current value first and
+        // short-circuits when already correct.
+        if (action === "setPrimarySaleRecipient") {
+            const { saleRecipient, contractAddress } = body;
+            const target = (saleRecipient || SERVER_WALLET) as string;
+            const contract = (contractAddress || DEFAULT_CONTRACT) as string;
+            if (!/^0x[a-fA-F0-9]{40}$/.test(target)) {
+                return jsonResponse({ error: "Invalid saleRecipient address" }, 400);
+            }
+
+            // Read current on-chain value (selector 0x079fe40e = primarySaleRecipient())
+            try {
+                const cur = await fetch(RPC_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: contract, data: "0x079fe40e" }, "latest"] }),
+                });
+                const curData = await cur.json();
+                const curRecipient = "0x" + (curData?.result || "0x").slice(-40);
+                if (curRecipient.toLowerCase() === target.toLowerCase()) {
+                    return jsonResponse({ success: true, unchanged: true, current: curRecipient });
+                }
+                console.log(`[nft-admin] setPrimarySaleRecipient: ${curRecipient} -> ${target}`);
+            } catch (e) {
+                console.warn("[nft-admin] setPrimarySaleRecipient: current-value read failed, proceeding:", String(e));
+            }
+
+            const requestBody = {
+                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: contract,
+                    method: "function setPrimarySaleRecipient(address _saleRecipient)",
+                    params: [target],
+                }],
+            };
+            const { ok, status, result } = await callEngine(requestBody);
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (txId) {
+                const { confirmed, hash, error } = await waitForTx(txId, 60000);
+                if (!confirmed) return jsonResponse({ success: false, error: error || "setPrimarySaleRecipient did not confirm" }, 500);
+                return jsonResponse({ success: true, transactionId: txId, txHash: hash, recipient: target });
+            }
+            return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ── Retry a pending primary-sale payout ──
+        // Re-runs the forward for a single payout row. Works on rows in
+        // pending_retry OR forwarding (e.g. last attempt crashed mid-confirm).
+        if (action === "retryPrimarySalePayout") {
+            const { payoutId } = body;
+            if (!payoutId) return jsonResponse({ error: "Missing payoutId" }, 400);
+
+            const supaAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+            const { data: row } = await supaAdmin
+                .from("primary_sale_payouts")
+                .select("*")
+                .eq("id", payoutId)
+                .maybeSingle() as { data: any };
+            if (!row) return jsonResponse({ error: "Payout not found" }, 404);
+            if (row.status === "forwarded") {
+                return jsonResponse({ success: true, alreadySettled: true, forwardTxHash: row.forward_tx_hash });
+            }
+            if (!row.artist_wallet || row.artist_wallet === "0x0000000000000000000000000000000000000000") {
+                return jsonResponse({ success: false, error: "artist_wallet placeholder — set nft_releases.primary_sale_recipient and retry" }, 400);
+            }
+
+            // Bump attempt counter, submit transfer, wait.
+            const attempt = (row.attempt_count || 0) + 1;
+            await supaAdmin
+                .from("primary_sale_payouts")
+                .update({ status: "forwarding", attempt_count: attempt, last_attempt_at: new Date().toISOString() })
+                .eq("id", payoutId);
+
+            const { ok, status, txId, raw } = await sendNativeTransfer(row.artist_wallet, row.artist_wei.toString());
+            if (!ok || !txId) {
+                const errMsg = typeof raw === "string" ? raw : JSON.stringify(raw).slice(0, 500);
+                await supaAdmin
+                    .from("primary_sale_payouts")
+                    .update({ status: "pending_retry", last_error: `retry submit failed (${status}): ${errMsg}`.slice(0, 1000) })
+                    .eq("id", payoutId);
+                return jsonResponse({ success: false, error: errMsg }, 500);
+            }
+            const { confirmed, hash, error } = await waitForTx(txId, 60000);
+            if (!confirmed) {
+                await supaAdmin
+                    .from("primary_sale_payouts")
+                    .update({
+                        status: "pending_retry",
+                        forward_tx_hash: hash || null,
+                        last_error: (error || "did not confirm").slice(0, 1000),
+                    })
+                    .eq("id", payoutId);
+                return jsonResponse({ success: false, error: error || "did not confirm", forwardTxHash: hash }, 500);
+            }
+            await supaAdmin
+                .from("primary_sale_payouts")
+                .update({
+                    status: "forwarded",
+                    forward_tx_hash: hash,
+                    forwarded_at: new Date().toISOString(),
+                    last_error: null,
+                })
+                .eq("id", payoutId);
+            return jsonResponse({ success: true, forwardTxHash: hash });
+        }
+
+        // ── Sweep all pending_retry payouts ──
+        // Called periodically (cron or manual). Processes rows in order of
+        // creation, capped at `limit` per invocation so a bad row cannot
+        // block the entire queue. Rows with too many failed attempts are
+        // demoted to `failed` so they stop re-entering the sweep.
+        if (action === "sweepPrimarySalePayouts") {
+            const limit = Math.max(1, Math.min(25, Number(body.limit) || 10));
+            const maxAttempts = Math.max(3, Math.min(20, Number(body.maxAttempts) || 5));
+            const supaAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY);
+            const { data: rows } = await supaAdmin
+                .from("primary_sale_payouts")
+                .select("id, artist_wallet, artist_wei, attempt_count, status")
+                .eq("status", "pending_retry")
+                .order("created_at", { ascending: true })
+                .limit(limit) as { data: any[] };
+            const processed: any[] = [];
+            for (const r of rows || []) {
+                if ((r.attempt_count || 0) >= maxAttempts) {
+                    await supaAdmin
+                        .from("primary_sale_payouts")
+                        .update({ status: "failed", last_error: `exceeded ${maxAttempts} retries` })
+                        .eq("id", r.id);
+                    processed.push({ id: r.id, result: "gave_up" });
+                    continue;
+                }
+                if (!r.artist_wallet || r.artist_wallet === "0x0000000000000000000000000000000000000000") {
+                    processed.push({ id: r.id, result: "skipped_no_recipient" });
+                    continue;
+                }
+                const attempt = (r.attempt_count || 0) + 1;
+                await supaAdmin
+                    .from("primary_sale_payouts")
+                    .update({ status: "forwarding", attempt_count: attempt, last_attempt_at: new Date().toISOString() })
+                    .eq("id", r.id);
+                const { ok, txId } = await sendNativeTransfer(r.artist_wallet, r.artist_wei.toString());
+                if (!ok || !txId) {
+                    await supaAdmin
+                        .from("primary_sale_payouts")
+                        .update({ status: "pending_retry", last_error: "sweep submit failed" })
+                        .eq("id", r.id);
+                    processed.push({ id: r.id, result: "submit_failed" });
+                    continue;
+                }
+                const { confirmed, hash, error } = await waitForTx(txId, 45000);
+                if (confirmed) {
+                    await supaAdmin
+                        .from("primary_sale_payouts")
+                        .update({
+                            status: "forwarded",
+                            forward_tx_hash: hash,
+                            forwarded_at: new Date().toISOString(),
+                            last_error: null,
+                        })
+                        .eq("id", r.id);
+                    processed.push({ id: r.id, result: "forwarded", hash });
+                } else {
+                    await supaAdmin
+                        .from("primary_sale_payouts")
+                        .update({
+                            status: "pending_retry",
+                            forward_tx_hash: hash || null,
+                            last_error: (error || "sweep did not confirm").slice(0, 1000),
+                        })
+                        .eq("id", r.id);
+                    processed.push({ id: r.id, result: "did_not_confirm" });
+                }
+            }
+            return jsonResponse({ success: true, processed });
         }
 
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);

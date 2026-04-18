@@ -397,16 +397,45 @@ export async function serverSetClaimConditions(
 }
 
 /**
+ * Option B primary-sale forwarding payload returned alongside serverClaim.
+ * The edge function atomically forwards the artist's share after claim()
+ * confirms; this object reports the ledger state so the client can show a
+ * confirmation (“artist paid”) or log a warning (“payout queued for retry”).
+ */
+export type PrimarySalePayoutResult = {
+    status: 'forwarded' | 'forwarding' | 'pending_retry' | 'failed';
+    payoutId?: string;
+    forwardTxHash?: string;
+    artistWei?: string;
+    platformWei?: string;
+    recipient?: string | null;
+    releaseId?: string | null;
+    error?: string;
+};
+
+/**
  * Server-mediated NFT claim.
- * The server wallet (which has MINTER_ROLE) calls the contract's claim function
- * on behalf of the buyer. The NFT is minted directly to receiverAddress.
- * The server pays the on-chain claim price from its own balance.
+ * The server wallet (which holds DEFAULT_ADMIN_ROLE and is the drop's
+ * primarySaleRecipient) calls claim() on behalf of the buyer. The NFT is
+ * minted directly to receiverAddress. The server receives the POL on-chain
+ * and then atomically forwards the artist's share (Option B) before
+ * returning. The forwarding result is surfaced in `primarySalePayout` —
+ * failures there do NOT fail the mint (NFT is delivered; artist payout
+ * queued via pending_retry).
  */
 export async function serverClaim(
     receiverAddress: string,
     onChainPriceWei: string,
     contractAddress?: string,
-): Promise<{ success: boolean; txHash?: string; onChainTokenId?: string | null; pricePaidWei?: string; currency?: string; error?: string }> {
+): Promise<{
+    success: boolean;
+    txHash?: string;
+    onChainTokenId?: string | null;
+    pricePaidWei?: string;
+    currency?: string;
+    primarySalePayout?: PrimarySalePayoutResult | null;
+    error?: string;
+}> {
     try {
         const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
         console.log('[blockchain] serverClaim: claiming NFT for', receiverAddress, 'at on-chain price', onChainPriceWei);
@@ -442,6 +471,7 @@ export async function serverClaim(
             onChainTokenId: result.onChainTokenId ?? null,
             pricePaidWei: result.pricePaidWei,
             currency: result.currency,
+            primarySalePayout: (result.primarySalePayout ?? null) as PrimarySalePayoutResult | null,
         };
     } catch (err: any) {
         console.error('[blockchain] serverClaim error:', err);
@@ -1007,6 +1037,21 @@ export async function mintToken(
             mintTxHash = claimResult.txHash;
             onChainTokenId = claimResult.onChainTokenId || null;
             console.log('[blockchain] On-chain mint confirmed. txHash:', mintTxHash, 'tokenId:', onChainTokenId);
+
+            // Surface Option B primary-sale forwarding outcome. The edge
+            // function forwards atomically; a non-"forwarded" status here
+            // means the NFT shipped but the artist payout is queued for the
+            // retry sweep (buyer unaffected).
+            const payout = claimResult.primarySalePayout;
+            if (payout) {
+                if (payout.status === 'forwarded') {
+                    console.log('[blockchain] Primary-sale payout forwarded to artist:',
+                        payout.recipient, 'artistWei:', payout.artistWei, 'tx:', payout.forwardTxHash);
+                } else {
+                    console.warn('[blockchain] Primary-sale payout not forwarded (status=' +
+                        payout.status + '):', payout.error || '(queued for retry)');
+                }
+            }
         } catch (claimErr: any) {
             console.error('[blockchain] serverClaim threw:', claimErr);
             if (intentId) {

@@ -585,6 +585,76 @@ export function useAdminPayoutRequests(adminProfileId?: string | 'superadmin', l
 }
 
 // ────────────────────────────────────────────
+// PRIMARY SALE PAYOUTS (Option B forwarding ledger)
+// ────────────────────────────────────────────
+
+export interface AdminPrimarySalePayout {
+    id: string;
+    createdAt: string;
+    status: 'pending' | 'forwarded' | 'pending_retry' | 'failed' | string;
+    chainId: string;
+    contractAddress: string;
+    nftTokenId: string;
+    buyerWallet: string;
+    artistWallet: string;
+    grossWei: string;
+    artistWei: string;
+    platformWei: string;
+    platformFeeBps: number;
+    claimTxHash: string;
+    forwardTxHash: string;
+    attemptCount: number;
+    lastError: string;
+    forwardedAt: string | null;
+    tierName: string;
+    rarity: string;
+    songTitle: string;
+    artistName: string;
+}
+
+export function useAdminPrimarySalePayouts(limit = 100) {
+    return useAsync<AdminPrimarySalePayout[]>(
+        async () => {
+            const { data, error } = await supabase
+                .from('primary_sale_payouts_admin_view')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(limit);
+
+            if (error) {
+                console.error('[useAdminPrimarySalePayouts] query error:', error);
+                return [];
+            }
+            return (data || []).map((row: any) => ({
+                id: row.id,
+                createdAt: row.created_at,
+                status: row.status,
+                chainId: row.chain_id,
+                contractAddress: row.contract_address,
+                nftTokenId: row.nft_token_id,
+                buyerWallet: row.buyer_wallet,
+                artistWallet: row.artist_wallet,
+                grossWei: String(row.gross_wei ?? '0'),
+                artistWei: String(row.artist_wei ?? '0'),
+                platformWei: String(row.platform_wei ?? '0'),
+                platformFeeBps: row.platform_fee_bps ?? 0,
+                claimTxHash: row.claim_tx_hash || '',
+                forwardTxHash: row.forward_tx_hash || '',
+                attemptCount: row.attempt_count ?? 0,
+                lastError: row.last_error || '',
+                forwardedAt: row.forwarded_at,
+                tierName: row.tier_name || '',
+                rarity: row.rarity || '',
+                songTitle: row.song_title || 'Unknown',
+                artistName: row.artist_name || 'Unknown',
+            }));
+        },
+        [],
+        [limit],
+    );
+}
+
+// ────────────────────────────────────────────
 // PLATFORM SETTINGS
 // ────────────────────────────────────────────
 
