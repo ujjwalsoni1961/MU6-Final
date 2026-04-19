@@ -86,28 +86,64 @@ export default function SongOptionsMenu({ visible, song, onClose }: SongOptionsM
         { icon: Share2, label: 'Share', onPress: handleShare },
     ];
 
+    // PDF priority fix #3 — on web, the bottom-sheet "slide" Modal stretched
+    // to full width and produced an awkward hover/overlay glitch on desktop.
+    // Render as a centered popup card on web (max ~340px), keep the native
+    // bottom sheet on iOS/Android. Logic and option list are identical.
+    const isWeb = Platform.OS === 'web';
+
+    const backdropStyle = isWeb
+        ? { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center' as const, alignItems: 'center' as const, padding: 20 }
+        : { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' as const };
+
+    const sheetStyle = isWeb
+        ? {
+            width: '100%' as const,
+            maxWidth: 340,
+            backgroundColor: isDark ? '#111827' : '#ffffff',
+            borderRadius: 16,
+            paddingTop: 8,
+            paddingBottom: 8,
+            borderWidth: 1,
+            borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+            // Subtle elevation — safe on web because this is a single isolated
+            // floating card (unlike the TabPill row where shadows stacked).
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.24,
+            shadowRadius: 24,
+        }
+        : {
+            backgroundColor: isDark ? '#111827' : '#ffffff',
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+            paddingTop: 8,
+            paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+        };
+
     return (
         <>
-            <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+            <Modal
+                visible={visible}
+                transparent
+                animationType={isWeb ? 'fade' : 'slide'}
+                onRequestClose={onClose}
+            >
                 <AnimatedPressable
                     preset="icon"
                     hapticType="none"
                     onPress={onClose}
-                    style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}
+                    style={backdropStyle}
                 >
-                    <View onStartShouldSetResponder={() => true} style={{
-                        backgroundColor: isDark ? '#111827' : '#ffffff',
-                        borderTopLeftRadius: 24,
-                        borderTopRightRadius: 24,
-                        paddingTop: 8,
-                        paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-                    }}>
-                        {/* Handle bar */}
-                        <View style={{
-                            width: 40, height: 4, borderRadius: 2,
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
-                            alignSelf: 'center', marginBottom: 16,
-                        }} />
+                    <View onStartShouldSetResponder={() => true} style={sheetStyle}>
+                        {/* Handle bar — native bottom sheet only */}
+                        {!isWeb && (
+                            <View style={{
+                                width: 40, height: 4, borderRadius: 2,
+                                backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
+                                alignSelf: 'center', marginBottom: 16,
+                            }} />
+                        )}
 
                         {/* Song info header */}
                         <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, marginBottom: 16 }}>

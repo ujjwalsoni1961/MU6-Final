@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, Platform, Pressable, TextInput, Animated } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import {
@@ -86,6 +86,21 @@ export default function ConsumerWebHeader() {
     const [showAvatarMenu, setShowAvatarMenu] = useState(false);
     const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // PDF priority fix #1 — header is transparent when the page is at the top
+    // and fades to the solid theme color once the user scrolls past a small
+    // threshold. Web-only; the `window` reference is guarded by Platform.OS.
+    const [isScrolled, setIsScrolled] = useState(false);
+    useEffect(() => {
+        if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+        const onScroll = () => {
+            const y = window.scrollY || window.pageYOffset || 0;
+            setIsScrolled(y > 8);
+        };
+        onScroll(); // initial sync (e.g. after route change / deep link)
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+    }, []);
+
     // Only render on web
     if (Platform.OS !== 'web') return null;
 
@@ -98,8 +113,21 @@ export default function ConsumerWebHeader() {
         { path: '/(consumer)/collection', match: '/collection', label: 'Collection', Icon: Gem },
     ];
 
-    const headerBg = isDark ? 'rgba(3,7,17,0.92)' : 'rgba(255,255,255,0.92)';
-    const borderColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)';
+    // Solid-when-scrolled / transparent-at-top (PDF #1). Both branches below
+    // spread this background so the behaviour is consistent across mobile and
+    // tablet/desktop layouts. `transition` is a web-only CSS property that RN
+    // ignores on native — safe since this component early-returns for non-web.
+    const headerBg = isScrolled
+        ? (isDark ? 'rgba(3,7,17,0.92)' : 'rgba(255,255,255,0.92)')
+        : 'transparent';
+    const borderColor = isScrolled
+        ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)')
+        : 'transparent';
+    // @ts-ignore — web-only
+    const bgTransition = { transition: 'background-color 200ms ease, border-color 200ms ease' } as any;
+    // Only apply backdrop blur once scrolled; at the top we want a fully
+    // transparent header so the hero backdrop shows through cleanly.
+    const backdropFilter: any = isScrolled ? 'saturate(180%) blur(12px)' : 'none';
 
     const avatarUrl = profile?.avatarPath
         ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`
@@ -118,7 +146,8 @@ export default function ConsumerWebHeader() {
                 borderBottomWidth: 1,
                 borderBottomColor: borderColor,
                 // @ts-ignore
-                backdropFilter: 'saturate(180%) blur(12px)',
+                backdropFilter,
+                ...bgTransition,
             }}>
                 {/* Bar */}
                 <View style={{
@@ -318,7 +347,8 @@ export default function ConsumerWebHeader() {
             // @ts-ignore web-only
             position: 'sticky' as any, top: 0, zIndex: 100,
             // @ts-ignore
-            backdropFilter: 'saturate(180%) blur(12px)',
+            backdropFilter,
+            ...bgTransition,
         }}>
             {/* Brand */}
             <AnimatedPressable

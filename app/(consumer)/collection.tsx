@@ -592,10 +592,25 @@ export default function CollectionScreen() {
                             </AnimatedPressable>
                         </View>
 
+                        {/*
+                          PDF priority fix #2 — collection view cards were
+                          disproportionately large on desktop because each card
+                          was pinned to `width: '50%'`. Switch to responsive
+                          column count based on the modal width: 4 cols on wide
+                          desktops (≥1200px), 3 on medium (≥1024px), 2 on
+                          tablets (≥640px), and 2 on phones. This keeps the
+                          modal density consistent with the rest of the grid.
+                        */}
+                        {(() => {
+                            const modalCols = isDesktopLayout
+                                ? (width >= 1200 ? 4 : width >= 1024 ? 3 : 2)
+                                : (width >= 640 ? 3 : 2);
+                            const cellWidth = `${100 / modalCols}%`;
+                            return (
                         <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 40 }}>
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                                 {selectedGroup.map((item) => (
-                                    <View key={item.id} style={{ width: '50%', padding: 6 }}>
+                                    <View key={item.id} style={{ width: cellWidth as any, padding: 6 }}>
                                         <View>
                                             <NFTCard
                                                 cover={item.coverImage}
@@ -677,6 +692,8 @@ export default function CollectionScreen() {
                                 ))}
                             </View>
                         </ScrollView>
+                            );
+                        })()}
                 </Animated.View>
             </Modal>
         </ScreenScaffold>

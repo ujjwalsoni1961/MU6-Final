@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { Image } from 'expo-image';
-import { ChevronDown, ListMusic, Mic2 } from 'lucide-react-native';
+import { ChevronDown, ListMusic } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../context/ThemeContext';
 import { usePlayer } from '../../context/PlayerContext';
@@ -147,38 +147,24 @@ export default function WebPlayerExpanded({ onCollapse }: WebPlayerExpandedProps
                     </View>
                 </View>
 
-                {/* Lyrics Placeholder */}
+                {/*
+                  Lyrics section intentionally removed (PDF priority fix #5).
+                  Lyrics data ingestion / per-line sync is not implemented yet
+                  and the placeholder ("Lyrics not available for this track.")
+                  was confusing users — they read it as a broken feature. When
+                  we ship real lyrics, re-add a block here and wire it to the
+                  same queue/lyrics data source used on native's FullPlayer.
+                */}
+
+                {/* Queue / Up Next — expanded to fill the space the lyrics
+                    block used to occupy so the panel doesn't look empty. */}
                 <View style={{
                     flex: 1,
                     backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
                     borderRadius: 12,
                     borderWidth: 1,
                     borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-                    padding: 20,
-                    marginBottom: 16,
-                    maxHeight: 200,
-                }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                        <Mic2 size={14} color={colors.text.muted} style={{ marginRight: 6 }} />
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.text.muted, textTransform: 'uppercase', letterSpacing: 1 }}>
-                            Lyrics
-                        </Text>
-                    </View>
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        <Text style={{ fontSize: 15, color: colors.text.secondary, lineHeight: 24 }}>
-                            {currentSong.lyrics || 'Lyrics not available for this track.'}
-                        </Text>
-                    </ScrollView>
-                </View>
-
-                {/* Queue / Up Next */}
-                <View style={{
-                    backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
                     padding: 16,
-                    maxHeight: 200,
                 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                         <ListMusic size={14} color={colors.text.muted} style={{ marginRight: 6 }} />
