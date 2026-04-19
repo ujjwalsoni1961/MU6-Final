@@ -9,7 +9,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { PlayerProvider } from '../../src/context/PlayerContext';
 import MusicPlayerOverlay from '../../src/components/player/MusicPlayerOverlay';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
-import ConsumerWebHeader from '../../src/components/shared/ConsumerWebHeader';
+import WebHeader from '../../src/components/layout/WebHeader';
 
 /* Constants */
 const isWeb = Platform.OS === 'web';
@@ -71,7 +71,7 @@ export default function ConsumerLayout() {
     return (
         <PlayerProvider>
             <View style={{ flex: 1, backgroundColor: isDark ? colors.bg.base : '#f8fafc' }}>
-                {isWeb && <ConsumerWebHeader />}
+                {isWeb && <WebHeader />}
                 <Tabs
                     screenOptions={{
                         headerShown: false,

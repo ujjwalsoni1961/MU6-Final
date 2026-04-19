@@ -1,12 +1,13 @@
 import React, { useRef, useState, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, Platform, Animated } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { User, Search, ChevronDown, LogOut, Settings, Wallet, X, Clock, TrendingUp } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import { useSongs } from '../../hooks/useData';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useResponsive } from '../../hooks/useResponsive';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 
@@ -14,13 +15,22 @@ interface WebHeaderProps {
     scrollY?: Animated.Value;
 }
 
+const NAV_LINKS = [
+    { label: 'Home', path: '/(consumer)/home', match: 'home' },
+    { label: 'Market', path: '/(consumer)/marketplace', match: 'marketplace' },
+    { label: 'Library', path: '/(consumer)/library', match: 'library' },
+    { label: 'Collection', path: '/(consumer)/collection', match: 'collection' },
+] as const;
+
 export default function WebHeader({ scrollY }: WebHeaderProps) {
     const router = useRouter();
+    const pathname = usePathname();
     const scale = useRef(new Animated.Value(1)).current;
     const [showDropdown, setShowDropdown] = useState(false);
     const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { isDark, colors, toggleTheme } = useTheme();
     const { signOut, profile } = useAuth();
+    const { isPhoneLayout, isTablet } = useResponsive();
 
     // Build avatar URL from profile
     const avatarUrl = profile?.avatarPath
@@ -81,10 +91,10 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                     web: {
                         flexDirection: 'row',
                         alignItems: 'center',
-                        paddingHorizontal: 40,
-                        paddingVertical: 18,
+                        paddingHorizontal: isPhoneLayout ? 16 : (isTablet ? 24 : 40),
+                        paddingVertical: isPhoneLayout ? 12 : 18,
                         zIndex: 50,
-                        position: 'absolute',
+                        position: 'sticky',
                         top: 0,
                         left: 0,
                         right: 0,
@@ -108,7 +118,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                         top: 0, left: 0, right: 0, bottom: 0,
                         backgroundColor: isDark ? 'rgba(3,7,17,0.95)' : 'rgba(255,255,255,0.95)',
                         backdropFilter: 'blur(20px)',
-                        opacity: headerOpacity,
+                        opacity: isPhoneLayout ? 1 : headerOpacity,
                         borderBottomWidth: 1,
                         borderBottomColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.5)',
                     } as any}
@@ -129,8 +139,25 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                 />
             </AnimatedPressable>
 
+            {/* Nav Links (Home / Market / Library / Collection) */}
+            {!isPhoneLayout && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: isTablet ? 20 : 32, gap: isTablet ? 4 : 8, zIndex: 51 }}>
+                    {NAV_LINKS.map((link) => {
+                        const isActive = pathname?.includes(link.match);
+                        return (
+                            <NavLink
+                                key={link.label}
+                                label={link.label}
+                                isActive={!!isActive}
+                                onPress={() => router.push(link.path as any)}
+                            />
+                        );
+                    })}
+                </View>
+            )}
+
             {/* Search Bar Container */}
-            <View style={{ position: 'relative', flex: 1, maxWidth: 420, marginLeft: 40, zIndex: 101 }}>
+            <View style={{ position: 'relative', flex: 1, maxWidth: 420, marginLeft: isPhoneLayout ? 16 : (isTablet ? 20 : 32), zIndex: 101 }}>
 
                 {/* 
                     Using Pressable as a wrapper for Hover detection on Web. 
@@ -415,5 +442,43 @@ function DropdownItem({ icon, label, labelColor, onPress }: { icon: React.ReactN
             {icon}
             <Text style={{ marginLeft: 12, fontSize: 13, fontWeight: '500', color: labelColor || colors.text.primary }}>{label}</Text>
         </AnimatedPressable>
+    );
+}
+
+function NavLink({ label, isActive, onPress }: { label: string; isActive: boolean; onPress: () => void }) {
+    const { isDark, colors } = useTheme();
+    const [hovered, setHovered] = useState(false);
+    return (
+        <Pressable
+            onPress={onPress}
+            onHoverIn={() => setHovered(true)}
+            onHoverOut={() => setHovered(false)}
+            style={{
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                borderRadius: 10,
+                backgroundColor: isActive
+                    ? (isDark ? 'rgba(56,180,186,0.12)' : 'rgba(56,180,186,0.10)')
+                    : (hovered ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)') : 'transparent'),
+                ...(Platform.OS === 'web'
+                    ? ({
+                        cursor: 'pointer' as any,
+                        transitionProperty: 'background-color',
+                        transitionDuration: '150ms',
+                    } as any)
+                    : {}),
+            }}
+        >
+            <Text
+                style={{
+                    fontSize: 14,
+                    fontWeight: isActive ? '700' : '600',
+                    color: isActive ? colors.accent.cyan : colors.text.primary,
+                    letterSpacing: 0.2,
+                }}
+            >
+                {label}
+            </Text>
+        </Pressable>
     );
 }
