@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
     View, Text, ScrollView, ActivityIndicator, Linking, Alert,
-    TextInput, StyleSheet,
+    TextInput, StyleSheet, Platform,
 } from 'react-native';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

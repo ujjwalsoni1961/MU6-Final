@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, ScrollView, Animated, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Animated, ActivityIndicator, RefreshControl, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
