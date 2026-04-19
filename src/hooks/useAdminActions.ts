@@ -12,56 +12,44 @@ import { sendVerificationStatusEmail, sendRoyaltyPayoutEmail } from '../services
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+// SEC-02: admin-action edge function now requires the shared secret.
+// Exposed to the client only in admin-web Vercel builds (never in the
+// native Android/iOS app bundles — those never render the admin panel).
+const ADMIN_SECRET = process.env.EXPO_PUBLIC_ADMIN_SECRET || '';
+
+function adminHeaders(): Record<string, string> {
+    const h: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    };
+    if (ADMIN_SECRET) h['x-mu6-admin-secret'] = ADMIN_SECRET;
+    return h;
+}
 
 // ────────────────────────────────────────────
 // Audit log helper
 // ────────────────────────────────────────────
 
+// SEC-02: client-side audit logging is now handled server-side by the
+// admin-action edge function (which writes to admin_audit_log with the
+// service_role key). This client helper is retained as a no-op so existing
+// call sites compile without changes and can still annotate UX intent in
+// the console for debugging, but it no longer writes to the DB directly.
 async function logAuditAction(
     action: string,
     targetType: string,
     targetId: string,
     details?: Record<string, any>,
 ) {
-    // The admin dashboard uses a static `superadmin` bypass (useAdminAuth)
-    // that is intentionally decoupled from Supabase Auth, so auth.uid() is
-    // usually NULL here. Migration 027 made admin_audit_log.admin_id nullable
-    // to represent "system / superadmin bypass" cleanly. Passing NULL avoids
-    // the FK violation against profiles(id) that previously produced 500s.
-    const { data: { user } } = await supabase.auth.getUser();
-    const result = await executeAdminInsert('admin_audit_log', {
-        admin_id: user?.id ?? null,
-        action,
-        target_type: targetType,
-        target_id: targetId,
-        details: details || {},
-    });
-    // Audit log failures must not silently swallow — surface to console so we
-    // can detect future schema drift, but do NOT throw (the primary mutation
-    // has already succeeded and we don't want to confuse the admin UI).
-    if (result && result.success === false) {
-        console.error('[admin] logAuditAction failed:', result.error, {
-            action,
-            targetType,
-            targetId,
-        });
-    }
+    // eslint-disable-next-line no-console
+    console.debug('[admin] action:', action, targetType, targetId, details || {});
 }
 
 async function executeAdminUpdate(table: string, id: string, updates: Record<string, any>) {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
-            profileId: 'superadmin',
-            action: 'update',
-            table,
-            id,
-            updates,
-        }),
+        headers: adminHeaders(),
+        body: JSON.stringify({ action: 'update', table, id, updates }),
     });
     return response.json();
 }
@@ -69,16 +57,8 @@ async function executeAdminUpdate(table: string, id: string, updates: Record<str
 async function executeAdminDelete(table: string, id: string) {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
-            profileId: 'superadmin',
-            action: 'delete',
-            table,
-            id,
-        }),
+        headers: adminHeaders(),
+        body: JSON.stringify({ action: 'delete', table, id }),
     });
     return response.json();
 }
@@ -86,16 +66,8 @@ async function executeAdminDelete(table: string, id: string) {
 async function executeAdminInsert(table: string, updates: Record<string, any> | Record<string, any>[]) {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({
-            profileId: 'superadmin',
-            action: 'insert',
-            table,
-            updates,
-        }),
+        headers: adminHeaders(),
+        body: JSON.stringify({ action: 'insert', table, updates }),
     });
     return response.json();
 }
@@ -637,10 +609,7 @@ export function useAdminPrimarySalePayoutActions(refresh: () => void) {
         try {
             const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                },
+                headers: adminHeaders(),
                 body: JSON.stringify({
                     action: 'retryPrimarySalePayout',
                     payoutId,
@@ -669,10 +638,7 @@ export function useAdminPrimarySalePayoutActions(refresh: () => void) {
         try {
             const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                },
+                headers: adminHeaders(),
                 body: JSON.stringify({
                     action: 'sweepPrimarySalePayouts',
                     limit,

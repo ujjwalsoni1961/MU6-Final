@@ -533,21 +533,25 @@ export function useAdminSongSplits(limit = 100) {
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+const ADMIN_SECRET = process.env.EXPO_PUBLIC_ADMIN_SECRET || '';
 
 export function useAdminPayoutRequests(adminProfileId?: string | 'superadmin', limit = 50) {
     return useAsync(
         async () => {
-            // For the admin dashboard, we can override with 'superadmin' if no specific profile is given.
-            // If the user uses standard 'useAuth' and has a profile ID, we send that.
+            // Admin dashboard: we send profileId='superadmin' AND the admin secret
+            // header. The edge function checks the secret first (SEC-04); profileId
+            // value is only used for response debugging in that path.
             const targetProfile = adminProfileId || 'superadmin';
 
             try {
+                const headers: Record<string, string> = {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                };
+                if (ADMIN_SECRET) headers['x-mu6-admin-secret'] = ADMIN_SECRET;
                 const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-list`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                    },
+                    headers,
                     body: JSON.stringify({ profileId: targetProfile }),
                 });
 
