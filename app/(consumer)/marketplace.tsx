@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Zap, Tag, X } from 'lucide-react-native';
@@ -210,7 +210,7 @@ export default function MarketplaceScreen() {
                     key={`grid-${numCols}`}
                     contentContainerStyle={{
                         paddingHorizontal: isDesktopLayout ? 26 : 10,
-                        paddingTop: isDesktopLayout ? 80 : insets.top + 44,
+                        paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
                         paddingBottom: 100,
                     }}
                     showsVerticalScrollIndicator={false}

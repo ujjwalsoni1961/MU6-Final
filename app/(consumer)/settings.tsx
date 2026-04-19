@@ -214,7 +214,7 @@ export default function SettingsScreen() {
     };
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isDesktopLayout ? colors.bg.base : 'transparent' }}>
+        <Container style={{ flex: 1, backgroundColor: Platform.OS === 'web' ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
             <ScrollView
                 style={{ flex: 1 }}
                 contentContainerStyle={{

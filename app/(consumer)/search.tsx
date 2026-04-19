@@ -108,7 +108,7 @@ export default function SearchScreen() {
     const Container = isPhoneLayout ? SafeAreaView : View;
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isPhoneLayout ? 'transparent' : (isDark ? colors.bg.base : '#f8fafc') }}>
+        <Container style={{ flex: 1, backgroundColor: Platform.OS === 'web' ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
             <View style={{ maxWidth: isDesktopLayout ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any, flex: 1, paddingTop: Platform.OS === 'web' ? 80 : 0 }}>
                 <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, paddingTop: 16 }}>
                     <SearchInput

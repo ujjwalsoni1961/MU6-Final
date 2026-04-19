@@ -84,7 +84,14 @@ export default function ConsumerLayout() {
                         tabBarInactiveTintColor: colors.text.muted,
                         tabBarStyle: hideTabBar ? { display: 'none' } : getGlassTabBar(isDark, colors, insets) as any,
                         tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginBottom: 0 },
-                        sceneStyle: { backgroundColor: 'transparent' },
+                        // On web, use an opaque scene background so inactive
+                        // tab scenes (kept mounted by react-navigation on web)
+                        // don't bleed through the focused one on phone-sized
+                        // viewports. On native the gradient is driven by the
+                        // root AnimatedBackground so transparent is correct.
+                        sceneStyle: isWeb
+                            ? { backgroundColor: isDark ? colors.bg.base : '#f8fafc' }
+                            : { backgroundColor: 'transparent' },
                         tabBarBackground: () => (
                             hideTabBar ? null :
                                 <View style={{ flex: 1, backgroundColor: isDark ? 'rgba(3,7,17,0.9)' : 'rgba(255,255,255,0.9)' }} />

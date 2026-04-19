@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
     View, Text, ScrollView, FlatList, useWindowDimensions,
     Animated, ActivityIndicator, Modal, TextInput, Alert,
-    TouchableWithoutFeedback, PanResponder,
+    TouchableWithoutFeedback, PanResponder, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -343,7 +343,7 @@ export default function CollectionScreen() {
                     key={`grid-${numCols}`}
                     contentContainerStyle={{
                         paddingHorizontal: isDesktopLayout ? 26 : 10,
-                        paddingTop: isDesktopLayout ? 80 : insets.top + 44,
+                        paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
                         paddingBottom: 100,
                     }}
                     showsVerticalScrollIndicator={false}

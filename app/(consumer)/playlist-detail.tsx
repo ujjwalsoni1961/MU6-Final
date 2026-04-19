@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, ActivityIndicator, Alert, Animated } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, Alert, Animated, Platform } from 'react-native';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
@@ -203,7 +203,7 @@ export default function PlaylistDetailScreen() {
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
                         paddingHorizontal: isDesktopLayout ? 32 : 16,
-                        paddingTop: isDesktopLayout ? 80 : insets.top + 44,
+                        paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
                         paddingBottom: 140,
                     }}
                     onScroll={Animated.event(

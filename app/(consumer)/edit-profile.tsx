@@ -199,7 +199,7 @@ export default function EditProfileScreen() {
     const Container = isDesktopLayout ? View : SafeAreaView;
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isDesktopLayout ? colors.bg.base : 'transparent' }}>
+        <Container style={{ flex: 1, backgroundColor: Platform.OS === 'web' ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
             <KeyboardAvoidingView
                 style={{ flex: 1 }}
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl, Platform } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -333,7 +333,7 @@ export default function LibraryScreen() {
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
                             paddingHorizontal: isDesktopLayout ? 26 : 10,
-                            paddingTop: isDesktopLayout ? 80 : insets.top + 44,
+                            paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
                             paddingBottom: 100,
                         }}
                         refreshControl={
@@ -369,7 +369,7 @@ export default function LibraryScreen() {
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
                             paddingHorizontal: isDesktopLayout ? 32 : 16,
-                            paddingTop: isDesktopLayout ? 80 : insets.top + 44,
+                            paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
                             paddingBottom: 100,
                         }}
                         refreshControl={
