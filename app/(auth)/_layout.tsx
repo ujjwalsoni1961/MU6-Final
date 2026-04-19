@@ -7,6 +7,7 @@ export default function AuthLayout() {
             <Stack.Screen name="login" />
             <Stack.Screen name="artist-login" />
             <Stack.Screen name="creator-register" />
+            <Stack.Screen name="e2e-login" />
         </Stack>
     );
 }

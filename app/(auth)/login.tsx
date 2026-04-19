@@ -150,6 +150,22 @@ function WebLogin() {
                         <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Register here</Text>
                     </Text>
                 </AnimatedPressable>
+
+                {/* E2E test personas — rendered only when E2E mode is enabled */}
+                {process.env.EXPO_PUBLIC_E2E_MODE === 'true' ? (
+                    <AnimatedPressable
+                        preset="button"
+                        onPress={() => router.push('/(auth)/e2e-login')}
+                        style={{ alignItems: 'center', marginTop: 10 }}
+                    >
+                        <Text style={{ fontSize: 12, color: '#f59e0b' }}>
+                            E2E test mode ·{' '}
+                            <Text style={{ color: '#fcd34d', fontWeight: '600' }}>
+                                Use a test persona
+                            </Text>
+                        </Text>
+                    </AnimatedPressable>
+                ) : null}
             </View>
         </View>
     );
