@@ -4,15 +4,17 @@ const path = require('path');
 const config = getDefaultConfig(__dirname);
 
 // Required for thirdweb v5 SDK – enables named package exports resolution.
-// Order matters: react-native first, then browser, then require.
-// Do NOT add 'node' (resolves @noble/hashes to Node crypto).
-// Do NOT add 'import' before 'require' (causes __extends interop errors).
+// We deliberately do NOT set `unstable_conditionNames` globally. Expo's
+// default already configures `unstable_conditionsByPlatform` correctly:
+//   { ios: ['react-native'], android: ['react-native'], web: ['browser'] }
+// Setting a global list would force every platform (including web) to match
+// the 'react-native' export condition — which makes the web bundle pick
+// thirdweb's `.native.js` entry (uses expo-web-browser's openAuthSessionAsync
+// popup that bypasses `mode: 'redirect'`). That caused the Google sign-in
+// popup-hang bug: the web build was literally running the native OAuth path.
+// Trust Expo's per-platform conditions; Metro auto-adds 'default' + 'import'
+// or 'require' based on file type, so we don't need to list them manually.
 config.resolver.unstable_enablePackageExports = true;
-config.resolver.unstable_conditionNames = [
-    'react-native',
-    'browser',
-    'require',
-];
 
 // Stub out native-only modules that thirdweb statically/dynamically imports
 // but aren't installed. These are for wallet types we don't use (Coinbase)

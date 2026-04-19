@@ -49,10 +49,35 @@ const inAppAuthOptions: Array<'email' | 'google' | 'apple'> = shouldShowApple()
     ? ['email', 'google', 'apple']
     : ['email', 'google'];
 
+// Auth flow decision:
+//   • Web  → 'redirect' mode. Popup mode is known-fragile on Chrome/Safari
+//     (Chrome's 3P-cookie phase-out breaks the popup → opener postMessage
+//     handoff, causing the user to pick their Google account and then hang
+//     with no callback). Redirect is the flow recommended by thirdweb in
+//     their own changelog for "certain browsers" —
+//     https://portal.thirdweb.com/changelog/new-pay-embed-modes-and-in-app-wallets-in-telegram
+//     and by OAuth best practice (Auth0, etc.). No popups, no 3P cookies.
+//   • Native (iOS/Android) → the SDK uses expo-web-browser, which is its own
+//     in-app-browser flow and is unaffected by the web `mode` setting; leaving
+//     the default here is correct and matches thirdweb's RN SDK guidance.
+//
+// After the user completes Google/Apple sign-in on thirdweb's hosted callback,
+// the redirectUrl below brings them back to /login. AuthContext's wallet
+// listener picks up the newly-connected account, syncs the Supabase profile,
+// and login.tsx's useEffect redirects to the role-appropriate dashboard.
+const isWebRuntime =
+    Platform.OS === 'web' && typeof window !== 'undefined';
+
 export const appWallet = inAppWallet({
     auth: {
-        mode: 'popup',
+        mode: isWebRuntime ? 'redirect' : 'popup',
         options: inAppAuthOptions,
+        // Only set redirectUrl on web. Building it at module-load time is safe
+        // because thirdweb.ts is imported after hydration; window.location is
+        // guaranteed defined on web (guarded above) and ignored on native.
+        redirectUrl: isWebRuntime
+            ? `${window.location.origin}/login`
+            : undefined,
     },
     metadata: {
         name: 'MU6 Wallet',
