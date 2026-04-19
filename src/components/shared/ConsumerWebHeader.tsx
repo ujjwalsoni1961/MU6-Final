@@ -118,16 +118,14 @@ export default function ConsumerWebHeader() {
     // tablet/desktop layouts. `transition` is a web-only CSS property that RN
     // ignores on native — safe since this component early-returns for non-web.
     const headerBg = isScrolled
-        ? (isDark ? 'rgba(3,7,17,0.92)' : 'rgba(255,255,255,0.92)')
+        ? (isDark ? '#000000' : '#ffffff')
         : 'transparent';
     const borderColor = isScrolled
         ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)')
         : 'transparent';
     // @ts-ignore — web-only
     const bgTransition = { transition: 'background-color 200ms ease, border-color 200ms ease' } as any;
-    // Only apply backdrop blur once scrolled; at the top we want a fully
-    // transparent header so the hero backdrop shows through cleanly.
-    const backdropFilter: any = isScrolled ? 'saturate(180%) blur(12px)' : 'none';
+    const backdropFilter: any = 'none';
 
     const avatarUrl = profile?.avatarPath
         ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`

@@ -81,10 +81,9 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
                     contentContainerStyle={[
                         contentContainerStyle,
                         {
-                            // On web the WebHeader is position:sticky,
-                            // so scroll content flows right under it — no
-                            // paddingTop required.
-                            paddingTop: isWeb ? 0 : insets.top + 60,
+                            // On web the WebHeader is now position:absolute
+                            // so scroll content needs padding to avoid hiding under it.
+                            paddingTop: isWeb ? 80 : insets.top + 60,
                             // Reserve space for the bottom bars.
                             //  - Desktop web: just the player bar (≈ 96px)
                             //  - Phone web: player bar + tab bar stacked (≈ 172px)
