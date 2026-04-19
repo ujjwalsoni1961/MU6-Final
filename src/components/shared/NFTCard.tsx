@@ -25,13 +25,20 @@ interface NFTCardProps {
     variant?: 'collect' | 'manage' | 'collection';
     /** Optional: pass user's preferred fiat currency to show fiat prices on the tag */
     fiatCurrency?: FiatCurrency;
+    /**
+     * ERC-1155 only: how many copies the viewing wallet owns of this tokenId
+     * (from on-chain balanceOf). When > 1 we render a small "You own ×N"
+     * badge so the user sees their holdings without duplicating cards.
+     * Only rendered for `variant === 'collection'`.
+     */
+    ownedQuantity?: number;
     onPress?: () => void;
 }
 
 import { useTheme } from '../../context/ThemeContext';
 
 export default function NFTCard({
-    cover, title, artist, price, editionNumber, totalEditions, rarity, mintedCount, variant = 'collect', fiatCurrency, onPress,
+    cover, title, artist, price, editionNumber, totalEditions, rarity, mintedCount, variant = 'collect', fiatCurrency, ownedQuantity, onPress,
 }: NFTCardProps) {
     const { isDark, colors } = useTheme();
 
@@ -73,6 +80,23 @@ export default function NFTCard({
                 <View style={{ position: 'absolute', top: 8, right: 8 }}>
                     <PriceTag price={price} dark fiatCurrency={fiatCurrency} />
                 </View>
+                {/* Owned-quantity badge — bottom-left of image, collection variant only.
+                    Renders "×2", "×3", … when the wallet holds multiple copies
+                    of an ERC-1155 tokenId. Hidden when the wallet owns one copy. */}
+                {variant === 'collection' && (ownedQuantity ?? 0) > 1 && (
+                    <View style={{
+                        position: 'absolute', top: 8, left: 70,
+                        backgroundColor: 'rgba(56,180,186,0.95)',
+                        paddingHorizontal: 8, paddingVertical: 3,
+                        borderRadius: 999,
+                        shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.25, shadowRadius: 4,
+                    }}>
+                        <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '800', letterSpacing: 0.3 }}>
+                            ×{ownedQuantity}
+                        </Text>
+                    </View>
+                )}
                 <View style={{ position: 'absolute', bottom: variant === 'manage' ? 8 : 12, left: variant === 'manage' ? 8 : 12, right: variant === 'manage' ? 8 : 12 }}>
                     <Text style={{ color: '#fff', fontWeight: '700', fontSize: variant === 'manage' ? 12 : 13, lineHeight: variant === 'manage' ? 16 : 20, paddingBottom: 2 }} numberOfLines={1}>{title}</Text>
                     <Text style={{ color: 'rgba(255,255,255,0.8)', fontSize: variant === 'manage' ? 10 : 11, lineHeight: variant === 'manage' ? 12 : 14 }} numberOfLines={1}>{artist}</Text>

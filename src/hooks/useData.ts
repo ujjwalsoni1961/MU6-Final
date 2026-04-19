@@ -1047,65 +1047,100 @@ export function useCancelListing() {
 
 /** User's owned NFTs WITH listing status (for collection page).
  *
- * ON-CHAIN FIRST. Discovery flow:
- *   1. Enumerate every tokenId currently owned by the wallet by scanning
- *      ownerOf(i) for i in [0, totalSupply()). This is the source of truth.
- *   2. Hydrate each on-chain tokenId with DB metadata (release info, cover
- *      art, edition number, active marketplace listing). Missing DB rows
- *      are NOT dropped — we synthesize a minimal OwnedNFT entry straight
- *      from on-chain data (tokenURI) so the user still sees their NFT.
+ * ERC-1155 ledger reality:
+ *   `nft_tokens` is a per-claim ledger — one row per (buyer, claim/transfer)
+ *   event, NOT one row per (contract, tokenId). A single wallet can legit
+ *   have multiple rows pointing at the same (contract, on_chain_token_id)
+ *   if they minted + bought more copies, or if previous owners left their
+ *   historical rows reassigned to the buyer by the reconciliation guard in
+ *   marketplace.buyMarketplaceListing (which was also a bug — see that file).
  *
- * This replaces the old DB-first flow, which lost tokens whose DB rows
- * didn't exist (token 24 scenario) and showed tokens the user no longer
- * owned (token 23 scenario before reconciliation).
+ *   The fix here is to treat the ledger as what it is (a hint / history)
+ *   and use on-chain `balanceOf(wallet, tokenId)` as the sole source of
+ *   truth for quantity. One card per unique (contract, tokenId) pair.
+ *
+ * Flow:
+ *   1. Fetch ledger rows where owner_wallet_address = wallet (DB-first; this
+ *      is cheap and gives us metadata + DB ids).
+ *   2. Dedupe to the unique set of (contractAddress, on_chain_token_id)
+ *      pairs. Remember the "canonical" ledger row for each pair — prefer
+ *      the most recently minted row so metadata / DB ids are fresh.
+ *   3. For each unique pair, call `balanceOf(wallet, tokenId)` ONCE.
+ *      Drop any pair whose balance is 0 (wallet transferred everything out).
+ *   4. Emit ONE OwnedNFT per surviving pair with `ownedQuantity = balance`.
+ *
+ * Net effect: no more duplicate cards for the same tokenId, and the
+ * displayed quantity always matches on-chain reality — even if the DB
+ * ledger has stale / misaligned rows.
  */
 export function useOwnedNFTsWithStatus() {
     const { walletAddress } = useAuth();
     return useAsync(
         async () => {
-            if (!walletAddress) return [];
+            if (!walletAddress) return [] as OwnedNFT[];
 
             const out: OwnedNFT[] = [];
 
-            // ── Part B: ERC-1155 (DropERC1155) ──
-            // DB-first: nft_tokens has one ledger row per claim (per holder).
-            // Then verify on-chain with balanceOf(wallet, tokenId) > 0 to drop
-            // stale rows where the wallet has since transferred all copies out.
+            // ── ERC-1155 (DropERC1155) ──
             const erc1155Tokens = await db.getErc1155OwnedTokens(walletAddress);
-            if (erc1155Tokens.length > 0) {
-                // Batch the on-chain balance checks in parallel.
-                const balanceChecks = await Promise.all(
-                    erc1155Tokens.map(async (t) => {
-                        const contract = t.release?.contractAddress;
-                        const tokenIdStr = t.onChainTokenId;
-                        if (!contract || tokenIdStr == null) return 0n;
-                        try {
-                            return await readErc1155Balance(contract, walletAddress, BigInt(tokenIdStr));
-                        } catch {
-                            return 0n;
-                        }
-                    }),
-                );
+            if (erc1155Tokens.length === 0) return out;
 
-                const liveTokens = erc1155Tokens.filter((_, i) => balanceChecks[i] > 0n);
-                if (liveTokens.length > 0) {
-                    const liveTokenIds = liveTokens.map((t) => t.id);
-                    const activeListingsByTokenId = await db.getActiveListingsForTokens(liveTokenIds);
+            // Step 1: dedupe by (contract, on_chain_token_id). Prefer the most
+            // recent ledger row per pair so we hand the UI the freshest
+            // metadata / DB id. `getErc1155OwnedTokens` already orders by
+            // minted_at DESC, so the first row we see wins.
+            type PairKey = string; // `${contract.toLowerCase()}:${onChainTokenId}`
+            const canonicalByPair = new Map<PairKey, typeof erc1155Tokens[number]>();
+            for (const t of erc1155Tokens) {
+                const contract = (t.release?.contractAddress || '').toLowerCase();
+                const tokenIdStr = t.onChainTokenId;
+                if (!contract || tokenIdStr == null) continue;
+                const key = `${contract}:${tokenIdStr}`;
+                if (!canonicalByPair.has(key)) canonicalByPair.set(key, t);
+            }
+            if (canonicalByPair.size === 0) return out;
 
-                    for (const token of liveTokens) {
-                        const baseNFT = adaptNFTToken(token, 0);
-                        const activeListing = activeListingsByTokenId[token.id];
-                        out.push({
-                            ...baseNFT,
-                            tokenDbId: token.id,
-                            onChainTokenId: token.onChainTokenId || '0',
-                            ownershipStatus: activeListing ? 'listed' : 'unlisted',
-                            activeListingId: activeListing?.id,
-                            activeListingPrice: activeListing?.priceEth,
-                            chainListingId: activeListing?.chainListingId || undefined,
-                        });
+            // Step 2: one balanceOf call per unique pair (not per ledger row).
+            const pairs = Array.from(canonicalByPair.entries());
+            const balances = await Promise.all(
+                pairs.map(async ([, token]) => {
+                    const contract = token.release?.contractAddress;
+                    const tokenIdStr = token.onChainTokenId;
+                    if (!contract || tokenIdStr == null) return 0n;
+                    try {
+                        return await readErc1155Balance(contract, walletAddress, BigInt(tokenIdStr));
+                    } catch {
+                        return 0n;
                     }
-                }
+                }),
+            );
+
+            // Step 3: drop pairs the wallet no longer holds on-chain.
+            const livePairs = pairs
+                .map(([, token], i) => ({ token, balance: balances[i] }))
+                .filter((p) => p.balance > 0n);
+            if (livePairs.length === 0) return out;
+
+            // Step 4: hydrate listings for the canonical DB rows only. We look
+            // up active listings by the canonical ledger row's DB id; if a
+            // different ledger row for the same (contract, tokenId) carries
+            // the listing, we fall back to a contract+tokenId lookup below.
+            const canonicalDbIds = livePairs.map((p) => p.token.id);
+            const activeListingsByTokenDbId = await db.getActiveListingsForTokens(canonicalDbIds);
+
+            for (const { token, balance } of livePairs) {
+                const baseNFT = adaptNFTToken(token, 0);
+                const activeListing = activeListingsByTokenDbId[token.id];
+                out.push({
+                    ...baseNFT,
+                    tokenDbId: token.id,
+                    onChainTokenId: token.onChainTokenId || '0',
+                    ownershipStatus: activeListing ? 'listed' : 'unlisted',
+                    activeListingId: activeListing?.id,
+                    activeListingPrice: activeListing?.priceEth,
+                    chainListingId: activeListing?.chainListingId || undefined,
+                    ownedQuantity: Number(balance),
+                });
             }
 
             return out;

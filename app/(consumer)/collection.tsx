@@ -315,7 +315,13 @@ export default function CollectionScreen() {
                     renderItem={({ item }: { item: OwnedNFT[] }) => {
                         const firstItem = item[0];
                         const listedCount = item.filter((n) => n.ownershipStatus === 'listed').length;
-                        const badgeText = listedCount > 0 ? `${item.length} Owned · ${listedCount} Listed` : `${item.length} Owned`;
+                        // Sum on-chain copies across every (tokenId) the wallet holds
+                        // for this song. Previously this used `item.length` (ledger
+                        // rows), which over-counted when the per-claim ledger had
+                        // duplicates. `ownedQuantity` is now deduped + driven by
+                        // balanceOf, so this total reflects real on-chain holdings.
+                        const ownedTotal = item.reduce((sum, n) => sum + (n.ownedQuantity || 1), 0);
+                        const badgeText = listedCount > 0 ? `${ownedTotal} Owned · ${listedCount} Listed` : `${ownedTotal} Owned`;
                         
                         return (
                             <View style={{ width: `${100 / numCols}%` as any, maxWidth: isDesktopLayout ? 280 : undefined }}>
@@ -623,6 +629,7 @@ export default function CollectionScreen() {
                                                 rarity={item.rarity}
                                                 fiatCurrency={fiatCurrency}
                                                 variant="collection"
+                                                ownedQuantity={item.ownedQuantity}
                                                 onPress={() => {
                                                     setGroupModalVisible(false);
                                                     router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } });

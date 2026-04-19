@@ -113,6 +113,14 @@ export interface OwnedNFT extends NFT {
     activeListingId?: string;
     activeListingPrice?: number;
     chainListingId?: string;
+    /**
+     * How many copies of this ERC-1155 (contract, on_chain_token_id) the wallet
+     * currently holds on-chain. Driven by `balanceOf(wallet, tokenId)` — the
+     * canonical source of truth. Always >= 1 when the entry is rendered.
+     * Used to show a “×N” badge when the wallet owns multiple copies instead
+     * of rendering duplicate ledger rows.
+     */
+    ownedQuantity: number;
 }
 
 export interface Playlist {

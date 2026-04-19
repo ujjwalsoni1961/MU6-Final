@@ -592,47 +592,34 @@ export async function buyMarketplaceListing(
             })
             .eq('id', listing.nft_token_id);
 
-        // Post-buy DB reconciliation guard.
+        // Post-buy DB ledger note (ERC-1155).
         //
-        // At this point the on-chain Transfer event has already been verified
-        // (buyer now owns the token on-chain). We also just wrote the DB row
-        // via the listing's nft_token_id. BUT — and this is the bug we keep
-        // hitting — the DB cache can drift from on-chain reality in a handful
-        // of subtle ways:
+        // Previously this block did a mass UPDATE on nft_tokens keyed by
+        // on_chain_token_id, rewriting EVERY row for that tokenId to point
+        // at the buyer. For ERC-721 that would be correct (one token, one
+        // owner). For ERC-1155 it is catastrophically wrong: the same
+        // on_chain_token_id can legitimately have many ledger rows — one
+        // per holder, per claim event — and mass-reassigning them clobbered
+        // the records of every other holder, so the buyer's /collection
+        // page showed phantom duplicate cards for copies they didn't
+        // actually own more of.
         //
-        //   a) two DB rows accidentally share the same on_chain_token_id
-        //      (only one gets updated via .eq('id', ...)),
-        //   b) the listing's nft_token_id references a stale / soft-voided row
-        //      while a second, correct row exists for the same on-chain id,
-        //   c) direct wallet-to-wallet transfers happened out-of-band and
-        //      never landed in our DB.
+        // The correct behaviour for a marketplace buy of N copies is:
+        //   - Primary update above (keyed by listing.nft_token_id) already
+        //     reassigned the specific ledger row this listing was backed
+        //     by — that represents the N copies that just moved.
+        //   - Other holders' rows are left untouched; their balances on
+        //     chain are unchanged by this transaction.
         //
-        // To make drift IMPOSSIBLE from this flow we do a second, unconditional
-        // write keyed by on_chain_token_id. This is the source of truth from
-        // the on-chain Transfer event we just verified — so overwriting every
-        // row with that on_chain_token_id to point at the buyer is correct.
-        try {
-            const tokenRow: any = listing.nft_token;
-            const chainTokenId = tokenRow?.on_chain_token_id || tokenRow?.token_id;
-            if (chainTokenId && /^\d+$/.test(String(chainTokenId))) {
-                const { error: reconErr } = await supabase
-                    .from('nft_tokens')
-                    .update({
-                        owner_wallet_address: config.buyerWallet.toLowerCase(),
-                        last_transferred_at: now,
-                    })
-                    .eq('on_chain_token_id', String(chainTokenId));
-                if (reconErr) {
-                    console.warn('[marketplace] post-buy reconciliation update failed (non-fatal):', reconErr.message);
-                } else {
-                    console.log('[marketplace] post-buy DB reconciled: on_chain_token_id=', chainTokenId, '→', config.buyerWallet);
-                }
-            }
-        } catch (reconErr: any) {
-            // Non-fatal: the primary update already succeeded. Log so ops
-            // can notice if this path starts failing.
-            console.warn('[marketplace] post-buy reconciliation guard error (non-fatal):', reconErr?.message);
-        }
+        // The collection view (useOwnedNFTsWithStatus) treats nft_tokens as
+        // a hint and uses on-chain balanceOf(wallet, tokenId) as the sole
+        // source of truth for quantity — so even if the ledger drifts, the
+        // UI stays honest. That is the "on-chain is source of truth" rule.
+        //
+        // If we ever need stronger ledger integrity for reporting, the
+        // correct shape is: sync a single row per (wallet, contract,
+        // on_chain_token_id) using on-chain Transfer events as the input
+        // — NOT a mass UPDATE by on_chain_token_id from the buy flow.
 
         // NOTE: NO royalty_events/royalty_shares creation here.
         // MarketplaceV3 handles fund distribution atomically inside buyFromListing:

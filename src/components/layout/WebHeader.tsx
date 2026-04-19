@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, Pressable, Platform, Animated } from 'react-native';
 import AnimatedPressable from '../shared/AnimatedPressable';
 import { useRouter, usePathname } from 'expo-router';
@@ -26,6 +26,28 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
     const router = useRouter();
     const pathname = usePathname();
     const scale = useRef(new Animated.Value(1)).current;
+
+    // PDF priority fix #1 — header must be transparent at the top of the page
+    // and fade to a solid theme background once the user scrolls past ~8px.
+    // Previously the component expected a `scrollY` prop from the parent
+    // layout, but the consumer layout never passed one, so the interpolated
+    // opacity fell back to a constant 1 and the header was always solid.
+    // Fall back to an internally-driven Animated.Value that tracks
+    // window.scrollY on web. The existing animated background layer below
+    // already interpolates [0..80] → [0..1], so this drops in cleanly.
+    const internalScrollY = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+        if (scrollY) return; // Parent provided its own driver — don't override.
+        if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+        const onScroll = () => {
+            const y = window.scrollY || window.pageYOffset || 0;
+            internalScrollY.setValue(y);
+        };
+        onScroll(); // initial sync after route change / deep link
+        window.addEventListener('scroll', onScroll, { passive: true });
+        return () => window.removeEventListener('scroll', onScroll);
+    }, [scrollY, internalScrollY]);
+    const effectiveScrollY = scrollY || internalScrollY;
     const [showDropdown, setShowDropdown] = useState(false);
     const closeTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
     const { isDark, colors, toggleTheme } = useTheme();
@@ -74,12 +96,13 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
         }, 800);
     };
 
-    // Dynamic Header Background Opacity
-    const headerOpacity = scrollY ? scrollY.interpolate({
+    // Dynamic Header Background Opacity — driven by `effectiveScrollY` so the
+    // header works whether a parent passes `scrollY` or not.
+    const headerOpacity = effectiveScrollY.interpolate({
         inputRange: [0, 80],
         outputRange: [0, 1],
         extrapolate: 'clamp',
-    }) : 1;
+    });
 
     // Base background color
     const baseBgColor = isDark ? '#030711' : '#ffffff';
