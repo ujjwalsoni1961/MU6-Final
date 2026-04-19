@@ -39,13 +39,26 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
     useEffect(() => {
         if (scrollY) return; // Parent provided its own driver — don't override.
         if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-        const onScroll = () => {
-            const y = window.scrollY || window.pageYOffset || 0;
+        // Expo sets `body { overflow: hidden }` — the actual scrolling happens
+        // inside a nested ScrollView container, not on window. So we listen
+        // for scroll events during the capture phase (scroll doesn't bubble)
+        // and pick the largest scrollTop among descendants as the driver.
+        const onScroll = (evt?: Event) => {
+            let y = 0;
+            const target = evt?.target as HTMLElement | Document | null;
+            if (target && (target as HTMLElement).scrollTop !== undefined) {
+                y = (target as HTMLElement).scrollTop || 0;
+            } else if (target && (target as Document).scrollingElement) {
+                y = (target as Document).scrollingElement!.scrollTop || 0;
+            } else {
+                y = window.scrollY || window.pageYOffset || 0;
+            }
             internalScrollY.setValue(y);
         };
-        onScroll(); // initial sync after route change / deep link
-        window.addEventListener('scroll', onScroll, { passive: true });
-        return () => window.removeEventListener('scroll', onScroll);
+        onScroll(); // initial sync
+        // Capture phase catches scroll events from nested scroll containers.
+        window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+        return () => window.removeEventListener('scroll', onScroll, { capture: true } as any);
     }, [scrollY, internalScrollY]);
     const effectiveScrollY = scrollY || internalScrollY;
     const [showDropdown, setShowDropdown] = useState(false);
