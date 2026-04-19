@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, Platform, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, Platform, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -30,11 +30,18 @@ function WalletConnect({ isDark }: { isDark?: boolean }) {
     );
 }
 
-/* ─── Web Login ─── */
+/* ─── Web Login (responsive) ─── */
 function WebLogin() {
     const router = useRouter();
     const { colors, isDark } = useTheme();
     const { isConnected, isLoading, role } = useAuth();
+    const { width } = useWindowDimensions();
+
+    // Breakpoint: below 900px viewport → stacked mobile-friendly layout.
+    const isNarrow = width < 900;
+    const cardPadding = isNarrow ? 24 : 36;
+    const logoSize = isNarrow ? 84 : 120;
+    const brandSpacing = isNarrow ? 24 : 60;
 
     // Auto-redirect after wallet connects and profile syncs
     useEffect(() => {
@@ -61,59 +68,103 @@ function WebLogin() {
         );
     }
 
+    const BrandBlock = (
+        <View
+            style={{
+                flex: isNarrow ? 0 : 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingHorizontal: isNarrow ? 24 : brandSpacing,
+                paddingTop: isNarrow ? 32 : brandSpacing,
+                paddingBottom: isNarrow ? 16 : brandSpacing,
+            }}
+        >
+            <Image
+                source={require('../../assets/mu6-logo-white.png')}
+                style={{ width: logoSize, height: logoSize, marginBottom: isNarrow ? 12 : 24 }}
+                contentFit="contain"
+            />
+            <Text
+                style={{
+                    fontSize: isNarrow ? 14 : 20,
+                    color: '#f1f5f9',
+                    marginTop: isNarrow ? 4 : 12,
+                    letterSpacing: isNarrow ? 3 : 4,
+                    ...(Platform.OS === 'web' ? { textShadow: '0px 0px 10px rgba(56,180,186,0.5)' } : {}),
+                } as any}
+            >
+                MUSIC. OWNED.
+            </Text>
+        </View>
+    );
+
+    const CardBlock = (
+        <View
+            style={{
+                flex: isNarrow ? 0 : 1,
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingHorizontal: isNarrow ? 16 : 40,
+                paddingBottom: isNarrow ? 40 : 40,
+                paddingTop: isNarrow ? 8 : 40,
+                width: '100%',
+            }}
+        >
+            <View
+                style={{
+                    width: '100%',
+                    maxWidth: 420,
+                    backgroundColor: 'rgba(255,255,255,0.03)',
+                    borderRadius: 24,
+                    padding: cardPadding,
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,255,255,0.06)',
+                }}
+            >
+                <Text style={{ fontSize: 24, fontWeight: '800', color: '#f1f5f9', marginBottom: 4 }}>
+                    Welcome
+                </Text>
+                <Text style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>
+                    Connect your wallet to continue.
+                </Text>
+
+                {/* Thirdweb Connect Embed – auto-creates in-app wallet via email/Google/Apple */}
+                <WalletConnect isDark={isDark} />
+
+                {/* Artist registration link */}
+                <AnimatedPressable
+                    preset="button"
+                    onPress={() => router.push('/(auth)/artist-login')}
+                    style={{ alignItems: 'center', marginTop: 20 }}
+                >
+                    <Text style={{ fontSize: 13, color: '#64748b' }}>
+                        Are you an artist?{' '}
+                        <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Register here</Text>
+                    </Text>
+                </AnimatedPressable>
+            </View>
+        </View>
+    );
+
+    // Narrow viewport (phone browsers) — stacked single column with scroll.
+    if (isNarrow) {
+        return (
+            <ScrollView
+                style={{ flex: 1, backgroundColor: '#030711' }}
+                contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}
+                keyboardShouldPersistTaps="handled"
+            >
+                {BrandBlock}
+                {CardBlock}
+            </ScrollView>
+        );
+    }
+
+    // Desktop / tablet — side-by-side two-column layout.
     return (
         <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#030711' }}>
-            {/* Left side – branding */}
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 60 }}>
-                <Image
-                    source={require('../../assets/mu6-logo-white.png')}
-                    style={{ width: 120, height: 120, marginBottom: 24 }}
-                    contentFit="contain"
-                />
-                <Text style={{
-                    fontSize: 20,
-                    color: '#f1f5f9',
-                    marginTop: 12,
-                    letterSpacing: 4,
-                    ...(Platform.OS === 'web' ? { textShadow: '0px 0px 10px rgba(56,180,186,0.5)' } : {}),
-                } as any}>
-                    MUSIC. OWNED.
-                </Text>
-            </View>
-
-            {/* Right side – connect */}
-            <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 }}>
-                <View
-                    style={{
-                        width: '100%', maxWidth: 420,
-                        backgroundColor: 'rgba(255,255,255,0.03)',
-                        borderRadius: 24, padding: 36,
-                        borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
-                    }}
-                >
-                    <Text style={{ fontSize: 24, fontWeight: '800', color: '#f1f5f9', marginBottom: 4 }}>
-                        Welcome
-                    </Text>
-                    <Text style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>
-                        Connect your wallet to continue.
-                    </Text>
-
-                    {/* Thirdweb Connect Embed – auto-creates in-app wallet via email/Google/Apple */}
-                    <WalletConnect isDark={isDark} />
-
-                    {/* Artist registration link */}
-                    <AnimatedPressable
-                        preset="button"
-                        onPress={() => router.push('/(auth)/artist-login')}
-                        style={{ alignItems: 'center', marginTop: 20 }}
-                    >
-                        <Text style={{ fontSize: 13, color: '#64748b' }}>
-                            Are you an artist?{' '}
-                            <Text style={{ color: '#38b4ba', fontWeight: '600' }}>Register here</Text>
-                        </Text>
-                    </AnimatedPressable>
-                </View>
-            </View>
+            {BrandBlock}
+            {CardBlock}
         </View>
     );
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Platform } from 'react-native';
+import { View, Text, Platform, useWindowDimensions, ScrollView } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { Home, Store, Library, Wallet as WalletIcon, Gem, Settings, LogOut, Music2 } from 'lucide-react-native';
 import { useTheme } from '../../context/ThemeContext';
@@ -22,9 +22,9 @@ import AnimatedPressable from './AnimatedPressable';
 
 /* ─── Single nav link ─── */
 function NavLink({
-    label, Icon, active, onPress,
+    label, Icon, active, onPress, compact,
 }: {
-    label: string; Icon: any; active: boolean; onPress: () => void;
+    label: string; Icon: any; active: boolean; onPress: () => void; compact?: boolean;
 }) {
     const { isDark, colors } = useTheme();
     return (
@@ -35,7 +35,7 @@ function NavLink({
             style={{
                 flexDirection: 'row',
                 alignItems: 'center',
-                paddingHorizontal: 14,
+                paddingHorizontal: compact ? 10 : 14,
                 paddingVertical: 8,
                 borderRadius: 10,
                 marginRight: 4,
@@ -45,35 +45,47 @@ function NavLink({
             }}
         >
             <Icon size={16} color={active ? '#38b4ba' : (isDark ? '#94a3b8' : '#64748b')} />
-            <Text
-                style={{
-                    color: active ? '#38b4ba' : colors.text.secondary,
-                    fontSize: 13,
-                    fontWeight: active ? '600' : '500',
-                    marginLeft: 8,
-                }}
-            >
-                {label}
-            </Text>
+            {!compact && (
+                <Text
+                    style={{
+                        color: active ? '#38b4ba' : colors.text.secondary,
+                        fontSize: 13,
+                        fontWeight: active ? '600' : '500',
+                        marginLeft: 8,
+                    }}
+                >
+                    {label}
+                </Text>
+            )}
         </AnimatedPressable>
     );
 }
 
-/* ─── Header ─── */
+/* ─── Header (responsive) ─── */
 export default function ConsumerWebHeader() {
     const router = useRouter();
     const pathname = usePathname() || '';
     const { isDark, colors } = useTheme();
-    const { signOut, profile } = useAuth() as any;
+    const { signOut } = useAuth() as any;
+    const { width } = useWindowDimensions();
 
     // Only render on web — on native the bottom tab bar is the nav.
     if (Platform.OS !== 'web') return null;
+
+    // Breakpoints:
+    //   < 640px  → icon-only nav, compact logo (no wordmark), tight padding
+    //   640-1024 → icon+label nav, slightly tighter padding
+    //   >= 1024  → full spacious layout
+    const isNarrow = width < 640;
+    const isMedium = width < 1024;
+    const showWordmark = width >= 480;
+    const horizontalPad = isNarrow ? 12 : isMedium ? 16 : 24;
 
     const isActive = (match: string) => pathname.includes(match);
 
     const primaryNav = [
         { path: '/(consumer)/home', match: '/home', label: 'Home', Icon: Home },
-        { path: '/(consumer)/marketplace', match: '/marketplace', label: 'Marketplace', Icon: Store },
+        { path: '/(consumer)/marketplace', match: '/marketplace', label: 'Market', Icon: Store },
         { path: '/(consumer)/library', match: '/library', label: 'Library', Icon: Library },
         { path: '/(consumer)/collection', match: '/collection', label: 'Collection', Icon: Gem },
     ];
@@ -88,8 +100,8 @@ export default function ConsumerWebHeader() {
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                paddingHorizontal: 24,
-                paddingVertical: 12,
+                paddingHorizontal: horizontalPad,
+                paddingVertical: 10,
                 backgroundColor: headerBg,
                 borderBottomWidth: 1,
                 borderBottomColor: borderColor,
@@ -97,56 +109,72 @@ export default function ConsumerWebHeader() {
                 ...(Platform.OS === 'web' ? { position: 'sticky', top: 0, zIndex: 100, backdropFilter: 'saturate(180%) blur(12px)' } : {}),
             }}
         >
-            {/* Left: brand + primary nav */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                <AnimatedPressable
-                    preset="row"
-                    hapticType="none"
-                    onPress={() => router.push('/(consumer)/home' as any)}
-                    style={{ flexDirection: 'row', alignItems: 'center', marginRight: 32 }}
+            {/* Brand logo (always visible) */}
+            <AnimatedPressable
+                preset="row"
+                hapticType="none"
+                onPress={() => router.push('/(consumer)/home' as any)}
+                style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    marginRight: isNarrow ? 8 : 24,
+                    flexShrink: 0,
+                }}
+            >
+                <View
+                    style={{
+                        width: 32, height: 32, borderRadius: 8,
+                        backgroundColor: '#38b4ba',
+                        alignItems: 'center', justifyContent: 'center',
+                        marginRight: showWordmark ? 10 : 0,
+                    }}
                 >
-                    <View
-                        style={{
-                            width: 32, height: 32, borderRadius: 8,
-                            backgroundColor: '#38b4ba',
-                            alignItems: 'center', justifyContent: 'center',
-                            marginRight: 10,
-                        }}
-                    >
-                        <Music2 size={18} color="#ffffff" />
-                    </View>
+                    <Music2 size={18} color="#ffffff" />
+                </View>
+                {showWordmark && (
                     <Text style={{ color: colors.text.primary, fontSize: 18, fontWeight: '700', letterSpacing: 0.5 }}>
                         MU6
                     </Text>
-                </AnimatedPressable>
+                )}
+            </AnimatedPressable>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {primaryNav.map((item) => (
-                        <NavLink
-                            key={item.path}
-                            label={item.label}
-                            Icon={item.Icon}
-                            active={isActive(item.match)}
-                            onPress={() => router.push(item.path as any)}
-                        />
-                    ))}
-                </View>
-            </View>
+            {/* Primary nav (horizontally scrollable if overflow) */}
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}
+                style={{ flex: 1 }}
+            >
+                {primaryNav.map((item) => (
+                    <NavLink
+                        key={item.path}
+                        label={item.label}
+                        Icon={item.Icon}
+                        active={isActive(item.match)}
+                        compact={isNarrow}
+                        onPress={() => router.push(item.path as any)}
+                    />
+                ))}
+            </ScrollView>
 
-            {/* Right: wallet + settings + sign out */}
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {/* Right cluster: wallet, settings, sign out */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
                 <NavLink
                     label="Wallet"
                     Icon={WalletIcon}
                     active={isActive('/wallet')}
+                    compact={isNarrow}
                     onPress={() => router.push('/(consumer)/wallet' as any)}
                 />
-                <NavLink
-                    label="Settings"
-                    Icon={Settings}
-                    active={isActive('/settings')}
-                    onPress={() => router.push('/(consumer)/settings' as any)}
-                />
+                {!isNarrow && (
+                    <NavLink
+                        label="Settings"
+                        Icon={Settings}
+                        active={isActive('/settings')}
+                        compact={isMedium}
+                        onPress={() => router.push('/(consumer)/settings' as any)}
+                    />
+                )}
                 <AnimatedPressable
                     preset="row"
                     hapticType="none"
@@ -157,23 +185,25 @@ export default function ConsumerWebHeader() {
                     style={{
                         flexDirection: 'row',
                         alignItems: 'center',
-                        paddingHorizontal: 12,
+                        paddingHorizontal: isNarrow ? 10 : 12,
                         paddingVertical: 8,
                         borderRadius: 10,
                         marginLeft: 4,
                     }}
                 >
                     <LogOut size={16} color={isDark ? '#94a3b8' : '#64748b'} />
-                    <Text
-                        style={{
-                            color: colors.text.secondary,
-                            fontSize: 13,
-                            fontWeight: '500',
-                            marginLeft: 8,
-                        }}
-                    >
-                        Sign out
-                    </Text>
+                    {!isNarrow && (
+                        <Text
+                            style={{
+                                color: colors.text.secondary,
+                                fontSize: 13,
+                                fontWeight: '500',
+                                marginLeft: 8,
+                            }}
+                        >
+                            Sign out
+                        </Text>
+                    )}
                 </AnimatedPressable>
             </View>
         </View>
