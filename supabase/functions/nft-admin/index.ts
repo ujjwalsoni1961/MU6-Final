@@ -92,7 +92,7 @@ const RPC_URL = NETWORK === "mainnet"
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, apikey, x-mu6-admin-secret",
 };
 
 function jsonResponse(data: unknown, status = 200) {
@@ -656,9 +656,50 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: auth.error || "Unauthorized" }, 401);
     }
 
+    // ── Admin-secret gate for privileged actions (SEC-03) ──
+    // User-callable actions: getTxStatus, lazyMint, serverClaim.
+    // Everything else (contract config, royalties, fee sweeps, deploys,
+    // enrichment, sync) requires the MU6_ADMIN_SECRET header. The admin
+    // panel provides it via env var; normal clients never do.
+    const ADMIN_ONLY_ACTIONS = new Set<string>([
+        "setClaimConditionForToken",
+        "setRoyaltyInfoForToken",
+        "verifyContractConfig",
+        "transferFunds",
+        "deploySplit",
+        "deployMarketplace",
+        "setRoyalty",
+        "setPrimarySaleRecipient",
+        "setPlatformFee",
+        "retryPrimarySalePayout",
+        "sweepPrimarySalePayouts",
+        "setMarketplacePlatformFee",
+        "syncTransfers",
+        "enrichMu6MarketplaceSales",
+        "enrichOpenseaSales",
+        "refreshCollectionStats",
+    ]);
+    const MU6_ADMIN_SECRET_ENV = Deno.env.get("MU6_ADMIN_SECRET") || "";
+    function ctEqual(a: string, b: string): boolean {
+        if (a.length !== b.length) return false;
+        let diff = 0;
+        for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+        return diff === 0;
+    }
+
     try {
         const body = await req.json();
         const { action } = body;
+
+        if (ADMIN_ONLY_ACTIONS.has(action)) {
+            const headerSecret = req.headers.get("x-mu6-admin-secret") || "";
+            if (!MU6_ADMIN_SECRET_ENV || !ctEqual(headerSecret, MU6_ADMIN_SECRET_ENV)) {
+                return jsonResponse({
+                    error: "Admin secret required for this action",
+                    code: "ADMIN_SECRET_REQUIRED",
+                }, 403);
+            }
+        }
 
         // ── Diagnostic: Get Thirdweb TX Status ──
         // Returns the raw Thirdweb transaction record for a given txId.
