@@ -13,6 +13,8 @@ import { thirdwebClient, activeChain, supportedWallets } from '../../src/lib/thi
 const isWeb = Platform.OS === 'web';
 
 /* ─── Shared Thirdweb Connect Embed wrapper ─── */
+// We hide ConnectEmbed's built-in header because the parent card already
+// renders a "Welcome" title and subtitle — avoiding duplicate headings.
 function WalletConnect({ isDark }: { isDark?: boolean }) {
     return (
         <ConnectEmbed
@@ -22,8 +24,10 @@ function WalletConnect({ isDark }: { isDark?: boolean }) {
             theme={isDark ? 'dark' : 'light'}
             modalSize="compact"
             showThirdwebBranding={false}
+            // Empty header with zero-height icon — thirdweb still renders a slot,
+            // but passing an empty title+icon collapses it visually.
             header={{
-                title: 'Connect to MU6',
+                title: '',
                 titleIcon: '',
             }}
         />
@@ -117,7 +121,9 @@ function WebLogin() {
                     maxWidth: 420,
                     backgroundColor: 'rgba(255,255,255,0.03)',
                     borderRadius: 24,
-                    padding: cardPadding,
+                    paddingHorizontal: cardPadding,
+                    paddingTop: cardPadding,
+                    paddingBottom: isNarrow ? 24 : 28,
                     borderWidth: 1,
                     borderColor: 'rgba(255,255,255,0.06)',
                 }}
@@ -125,17 +131,20 @@ function WebLogin() {
                 <Text style={{ fontSize: 24, fontWeight: '800', color: '#f1f5f9', marginBottom: 4 }}>
                     Welcome
                 </Text>
-                <Text style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28 }}>
+                <Text style={{ fontSize: 14, color: '#94a3b8', marginBottom: 20 }}>
                     Connect your wallet to continue.
                 </Text>
 
                 {/*
-                  Thirdweb ConnectEmbed – its root uses flex:1 which collapses
-                  inside a block container on web. Wrap with explicit minHeight
-                  so the embed renders with proper height and doesn't overflow
-                  its parent (preventing visual overlap with sibling blocks).
+                  Thirdweb ConnectEmbed wrapper.
+                  The embed's internal root uses flex:1 and on web collapses to
+                  0px inside a non-flex container during its initial mount phase
+                  — so we give it a small `minHeight` floor that matches actual
+                  measured content height (≈174px for 2 OAuth buttons + email
+                  input). This prevents the former ~430px dead space while still
+                  keeping the embed visible during hydration.
                 */}
-                <View style={{ width: '100%', minHeight: 430 }}>
+                <View style={{ width: '100%', minHeight: 180 }}>
                     <WalletConnect isDark={isDark} />
                 </View>
 
@@ -143,7 +152,7 @@ function WebLogin() {
                 <AnimatedPressable
                     preset="button"
                     onPress={() => router.push('/(auth)/artist-login')}
-                    style={{ alignItems: 'center', marginTop: 20 }}
+                    style={{ alignItems: 'center', marginTop: 18 }}
                 >
                     <Text style={{ fontSize: 13, color: '#64748b' }}>
                         Are you an artist?{' '}
@@ -294,7 +303,7 @@ function MobileLogin() {
                   The embed's internal root has flex:1 which collapses inside
                   ScrollView. Wrapping with minHeight ensures it renders.
                 */}
-                <View style={{ width: '100%', maxWidth: 380, minHeight: 400 }}>
+                <View style={{ width: '100%', maxWidth: 380, minHeight: 180 }}>
                     <WalletConnect isDark={isDark} />
                 </View>
             </ScrollView>
