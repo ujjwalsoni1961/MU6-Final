@@ -680,6 +680,8 @@ Deno.serve(async (req: Request) => {
         "enrichMu6MarketplaceSales",
         "enrichOpenseaSales",
         "refreshCollectionStats",
+        "setContractURI",
+        "deployDropERC1155",
     ]);
     const MU6_ADMIN_SECRET_ENV = Deno.env.get("MU6_ADMIN_SECRET") || "";
     function ctEqual(a: string, b: string): boolean {
@@ -2253,6 +2255,194 @@ Deno.serve(async (req: Request) => {
                 return jsonResponse({ success: false, error: refreshErr.message }, 500);
             }
             return jsonResponse({ success: true, refreshedAt: new Date().toISOString() });
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // setContractURI — writes collection-level metadata pointer (OpenSea contractURI).
+        // Idempotent: reads current contractURI() and short-circuits if unchanged.
+        // Thirdweb DropERC1155: function setContractURI(string _uri).
+        // ═════════════════════════════════════════════════════════════════
+        if (action === "setContractURI") {
+            const { uri, contractAddress } = body;
+            if (!uri || typeof uri !== "string") {
+                return jsonResponse({ error: "Missing uri (ipfs://…)" }, 400);
+            }
+            const contract = (contractAddress || DEFAULT_CONTRACT) as string;
+
+            // Read current on-chain contractURI() (selector 0xe8a3d485).
+            // Returns ABI-encoded string. If already equal, skip the write.
+            try {
+                const cur = await ethCall(contract, "0xe8a3d485");
+                // Decode ABI string: 32-byte offset, 32-byte length, then data.
+                const hex = cur.replace(/^0x/, "");
+                if (hex.length >= 128) {
+                    const len = parseInt(hex.slice(64, 128), 16);
+                    if (len > 0 && len * 2 <= hex.length - 128) {
+                        const bytes = hex.slice(128, 128 + len * 2);
+                        let decoded = "";
+                        for (let i = 0; i < bytes.length; i += 2) {
+                            decoded += String.fromCharCode(parseInt(bytes.slice(i, i + 2), 16));
+                        }
+                        if (decoded === uri) {
+                            return jsonResponse({ success: true, unchanged: true, current: decoded });
+                        }
+                        console.log(`[nft-admin] setContractURI: '${decoded}' -> '${uri}'`);
+                    }
+                }
+            } catch (e) {
+                console.warn("[nft-admin] setContractURI: current-value read failed, proceeding:", String(e));
+            }
+
+            const requestBody = {
+                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: contract,
+                    method: "function setContractURI(string _uri)",
+                    params: [uri],
+                }],
+            };
+            const { ok, status, result } = await callEngine(requestBody);
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (txId) {
+                const { confirmed, hash, error } = await waitForTx(txId, 60000);
+                if (!confirmed) return jsonResponse({ success: false, error: error || "setContractURI did not confirm" }, 500);
+                return jsonResponse({ success: true, transactionId: txId, txHash: hash, uri });
+            }
+            return jsonResponse({ success: true, transactionId: txId, result });
+        }
+
+        // ═════════════════════════════════════════════════════════════════
+        // deployDropERC1155 — clone a DropERC1155 for a single artist.
+        // Used for per-artist contracts (Fix 4). Deploys via Thirdweb Engine
+        // Published Contract deploy, seeded with MU6 defaults + artist metadata.
+        //
+        // Body params:
+        //   contractURI:      ipfs://… collection metadata JSON
+        //   name:             string (e.g. "Artist Name — Songs")
+        //   symbol:           string (e.g. "ARTIST")
+        //   royaltyRecipient: 0x… (EOA or split)
+        //   royaltyBps:       number (0–10000)
+        //   primarySaleRecipient: 0x… (EOA or split)
+        //   trustedForwarders: string[] (optional, defaults to [])
+        //   platformFeeRecipient: 0x… (optional, defaults to SERVER_WALLET)
+        //   platformFeeBps:   number (optional, defaults to 0)
+        //
+        // Engine Published Contract deployment: POST /v1/contracts/deploy/published
+        // with publisher="deployer.thirdweb.eth", contractName="DropERC1155".
+        // ═════════════════════════════════════════════════════════════════
+        if (action === "deployDropERC1155") {
+            const {
+                contractURI: cURI,
+                name,
+                symbol,
+                royaltyRecipient,
+                royaltyBps,
+                primarySaleRecipient,
+                trustedForwarders,
+                platformFeeRecipient,
+                platformFeeBps,
+                artistProfileId,
+            } = body;
+            if (!cURI) return jsonResponse({ error: "Missing contractURI" }, 400);
+            if (!name) return jsonResponse({ error: "Missing name" }, 400);
+            if (!symbol) return jsonResponse({ error: "Missing symbol" }, 400);
+            if (!/^0x[a-fA-F0-9]{40}$/.test(royaltyRecipient || "")) {
+                return jsonResponse({ error: "Invalid royaltyRecipient" }, 400);
+            }
+            if (!/^0x[a-fA-F0-9]{40}$/.test(primarySaleRecipient || "")) {
+                return jsonResponse({ error: "Invalid primarySaleRecipient" }, 400);
+            }
+            const bps = typeof royaltyBps === "number" ? royaltyBps : 500;
+            const platformBps = typeof platformFeeBps === "number" ? platformFeeBps : 0;
+            const platformRecipient = platformFeeRecipient || SERVER_WALLET;
+
+            // Thirdweb Engine deploy endpoint
+            const engineUrl = Deno.env.get("THIRDWEB_ENGINE_URL") || "";
+            const engineToken = Deno.env.get("THIRDWEB_ENGINE_ACCESS_TOKEN") || "";
+            if (!engineUrl || !engineToken) {
+                return jsonResponse({
+                    success: false,
+                    error: "THIRDWEB_ENGINE_URL / THIRDWEB_ENGINE_ACCESS_TOKEN not configured",
+                }, 500);
+            }
+
+            const deployBody = {
+                contractType: "nft-drop-edition", // thirdweb alias for DropERC1155
+                version: "latest",
+                contractParams: {
+                    defaultAdmin: SERVER_WALLET,
+                    name,
+                    symbol,
+                    contractURI: cURI,
+                    trustedForwarders: trustedForwarders || [],
+                    saleRecipient: primarySaleRecipient,
+                    royaltyRecipient,
+                    royaltyBps: bps,
+                    platformFeeBps: platformBps,
+                    platformFeeRecipient: platformRecipient,
+                },
+                chain: CHAIN_ID.toString(),
+                from: SERVER_WALLET,
+            };
+
+            // Use the same Engine base URL as callEngine uses. Deploy endpoint
+            // differs per Engine version; try the v1/deploy/published first,
+            // fall back to v3 write-contract path if needed.
+            try {
+                const endpoint = `${engineUrl.replace(/\/+$/, "")}/v1/contracts/deploy/prebuilt`;
+                const resp = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${engineToken}`,
+                    },
+                    body: JSON.stringify(deployBody),
+                });
+                const txt = await resp.text();
+                let parsed: any = null;
+                try { parsed = JSON.parse(txt); } catch { /* non-json body */ }
+                if (!resp.ok) {
+                    console.error("[nft-admin] deployDropERC1155 engine error:", resp.status, txt);
+                    return jsonResponse({
+                        success: false,
+                        error: parsed?.error || parsed?.message || `Engine deploy failed: HTTP ${resp.status}`,
+                        raw: parsed || txt,
+                    }, 500);
+                }
+
+                const deployedAddress = parsed?.result?.deployedAddress
+                    || parsed?.deployedAddress
+                    || parsed?.result?.contractAddress
+                    || null;
+                const txId = parsed?.result?.queueId || parsed?.result?.transactionId || null;
+
+                // Persist a record if artistProfileId provided.
+                if (artistProfileId && deployedAddress) {
+                    const supaAdmin = createClient(
+                        SUPABASE_URL,
+                        SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY,
+                    );
+                    await supaAdmin.from("artist_nft_contracts").upsert({
+                        profile_id: artistProfileId,
+                        chain_id: CHAIN_ID.toString(),
+                        contract_address: deployedAddress,
+                        name,
+                        symbol,
+                        deployed_at: new Date().toISOString(),
+                    }, { onConflict: "profile_id,chain_id" });
+                }
+
+                return jsonResponse({
+                    success: true,
+                    deployedAddress,
+                    transactionId: txId,
+                    raw: parsed,
+                });
+            } catch (err: any) {
+                console.error("[nft-admin] deployDropERC1155 exception:", err);
+                return jsonResponse({ success: false, error: err.message || String(err) }, 500);
+            }
         }
 
         return jsonResponse({ error: `Unknown action: ${action}` }, 400);

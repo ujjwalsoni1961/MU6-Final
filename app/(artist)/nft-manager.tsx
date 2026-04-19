@@ -26,7 +26,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { supabase } from '../../src/lib/supabase';
-import { createErc1155Release } from '../../src/services/blockchain';
+import { createErc1155Release, resolveArtistErc1155Contract } from '../../src/services/blockchain';
+import { buildAndPinReleaseMetadata } from '../../src/services/nftMetadata';
 import { CONTRACT_ADDRESSES, CHAIN_ID } from '../../src/config/network';
 
 // ERC-1155 contract address — read from env; falls back to Amoy testnet default.
@@ -262,10 +263,56 @@ export default function NFTManagerScreen() {
                 anyProfile?.walletAddress ||
                 null;
 
-            const metadataUri =
-                selectedSong.coverImage?.startsWith('ipfs://')
-                    ? selectedSong.coverImage
-                    : 'ipfs://QmWYNy1tmd2UvBQNE9mT1TfQCu85GzD9x237wDdf5ahcWk/';
+            // ── Build & pin real OpenSea-standard metadata to IPFS ──
+            // Cover source priority:
+            //  1) artist-picked local image (just uploaded to Supabase 'covers')
+            //  2) song cover already pinned on IPFS
+            //  3) song cover stored in Supabase (public 'covers' bucket)
+            //  4) song cover as plain HTTP URL
+            let coverSource: Parameters<typeof buildAndPinReleaseMetadata>[0]['coverSource'];
+            if (coverImageUri) {
+                coverSource = { kind: 'local-uri', value: coverImageUri };
+            } else if (selectedSong.coverImage?.startsWith('ipfs://')) {
+                coverSource = { kind: 'ipfs', value: selectedSong.coverImage };
+            } else if (selectedSong._coverPath) {
+                coverSource = { kind: 'supabase-path', value: selectedSong._coverPath };
+            } else if (selectedSong.coverImage?.startsWith('http')) {
+                coverSource = { kind: 'http-url', value: selectedSong.coverImage };
+            } else {
+                throw new Error('Song has no cover image. Please add one before minting.');
+            }
+
+            setErc1155Progress('Preparing NFT metadata…');
+            const pin = await buildAndPinReleaseMetadata(
+                {
+                    songTitle: selectedSong.title,
+                    artistName: selectedSong.artistName || profile?.displayName || 'MU6 Artist',
+                    tierName: tierName.trim(),
+                    description: description.trim() || undefined,
+                    rarity,
+                    genre: selectedSong.genre,
+                    maxSupply: maxSupplyVal,
+                    pricePol: price,
+                    coverSource,
+                    audioPath: selectedSong._audioPath || null,
+                    songId: selectedSong.id,
+                    releaseDate: selectedSong.credits?.releaseDate,
+                    benefits: benefits.length > 0 ? benefits : undefined,
+                },
+                (step) => setErc1155Progress(step),
+            );
+            const metadataUri = pin.metadataUri;
+            console.log('[nft-manager] metadata pinned:', metadataUri, pin);
+
+            // Per-artist contract (Fix 4). Falls back to shared contract
+            // when EXPO_PUBLIC_PER_ARTIST_CONTRACTS is not enabled or the
+            // artist hasn't deployed their own.
+            const contractForRelease = profile?.id
+                ? await resolveArtistErc1155Contract(profile.id, ERC1155_CONTRACT)
+                : ERC1155_CONTRACT;
+            if (contractForRelease !== ERC1155_CONTRACT) {
+                console.log('[nft-manager] using per-artist contract:', contractForRelease);
+            }
 
             setErc1155Progress('Lazy-minting token on-chain (server wallet)…');
 
@@ -283,7 +330,7 @@ export default function NFTManagerScreen() {
                     royaltyBps,
                     royaltyRecipientWallet,
                 },
-                ERC1155_CONTRACT,
+                contractForRelease,
             );
 
             if (!result.success) {
@@ -295,7 +342,7 @@ export default function NFTManagerScreen() {
             setErc1155Success({
                 tokenId: result.tokenId!,
                 releaseId: result.releaseId!,
-                contractAddress: ERC1155_CONTRACT,
+                contractAddress: contractForRelease,
             });
             setShowModal(false);
             resetForm();

@@ -600,6 +600,52 @@ export async function distributeSplitERC20(
 
 
 // ────────────────────────────────────────────────────────────────────────────
+// Per-artist contract resolver (Fix 4)
+// ────────────────────────────────────────────────────────────────────────────
+// Resolves the DropERC1155 contract address for an artist. If
+// EXPO_PUBLIC_PER_ARTIST_CONTRACTS=true AND the artist has an active row in
+// `artist_nft_contracts` for the current chain, returns that address.
+// Otherwise returns the shared fallback contract.
+//
+// Safe & additive: never throws; on any error returns the fallback so minting
+// continues. Logs the decision for audit.
+export async function resolveArtistErc1155Contract(
+    artistProfileId: string,
+    fallbackContract: string,
+): Promise<string> {
+    const perArtistEnabled =
+        (process.env.EXPO_PUBLIC_PER_ARTIST_CONTRACTS || 'false').toLowerCase() === 'true';
+    if (!perArtistEnabled) {
+        return fallbackContract;
+    }
+    try {
+        const { data, error } = await supabase
+            .from('artist_nft_contracts')
+            .select('contract_address, is_active')
+            .eq('profile_id', artistProfileId)
+            .eq('chain_id', CHAIN_ID.toString())
+            .maybeSingle();
+        if (error) {
+            console.warn('[blockchain] resolveArtistErc1155Contract query error:', error);
+            return fallbackContract;
+        }
+        const row = data as any;
+        if (row?.contract_address && row.is_active !== false) {
+            console.log(
+                '[blockchain] resolveArtistErc1155Contract: using per-artist contract',
+                row.contract_address,
+                'for profile',
+                artistProfileId,
+            );
+            return row.contract_address as string;
+        }
+    } catch (err) {
+        console.warn('[blockchain] resolveArtistErc1155Contract exception:', err);
+    }
+    return fallbackContract;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // ERC-1155 release creation
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -643,18 +689,28 @@ async function getErc1155NextTokenIdToMint(contractAddress: string): Promise<big
         ? `https://${chainId}.rpc.thirdweb.com/${THIRDWEB_CLIENT_ID}`
         : (chainId === 137 ? 'https://polygon-rpc.com' : 'https://rpc-amoy.polygon.technology');
 
-    // nextTokenIdToMint() → bytes4: 0x5bc5da30 (DropERC1155)
+    // nextTokenIdToMint() → bytes4 selector 0x3b1475a7 (keccak256 of signature,
+    // confirmed on DropERC1155). A prior version of this file used 0x5bc5da30
+    // which is NOT this function and reverts — causing the fallback '0x0' to
+    // mask the real on-chain counter. This resulted in DB rows being inserted
+    // with token_id=0 for every release. Fixed: use the correct selector.
     const resp = await fetch(rpcUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             jsonrpc: '2.0', id: 1,
             method: 'eth_call',
-            params: [{ to: contractAddress, data: '0x5bc5da30' }, 'latest'],
+            params: [{ to: contractAddress, data: '0x3b1475a7' }, 'latest'],
         }),
     });
     const json = await resp.json();
-    return BigInt(json.result || '0x0');
+    if (json?.error) {
+        throw new Error(`nextTokenIdToMint eth_call reverted: ${json.error.message || JSON.stringify(json.error)}`);
+    }
+    if (!json?.result || json.result === '0x') {
+        throw new Error('nextTokenIdToMint eth_call returned empty result');
+    }
+    return BigInt(json.result);
 }
 
 /**
