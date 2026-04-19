@@ -3,6 +3,7 @@ import {
     View, Text, ScrollView, Platform, Alert, StyleSheet, Switch,
     Modal, Linking,
 } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -12,8 +13,6 @@ import {
     Shield, Lock, HelpCircle, Bug, FileText, Eye,
     LogOut, Moon, Sun, Brush, Building2
 } from 'lucide-react-native';
-
-const isWeb = Platform.OS === 'web';
 
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
@@ -65,10 +64,11 @@ function SectionHeader({ title }: { title: string }) {
 /* ─── Section Card Wrapper ─── */
 function SectionCard({ children }: { children: React.ReactNode }) {
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
     return (
         <View style={[styles.sectionCard, {
-            backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)'),
-            borderColor: isWeb ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)')
+            backgroundColor: isDesktopLayout ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.55)'),
+            borderColor: isDesktopLayout ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)')
         }]}>
             {children}
         </View>
@@ -77,7 +77,8 @@ function SectionCard({ children }: { children: React.ReactNode }) {
 
 function Divider() {
     const { isDark } = useTheme();
-    return <View style={[styles.divider, { backgroundColor: isWeb ? (isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc') : 'rgba(0,0,0,0.04)' }]} />;
+    const { isDesktopLayout } = useResponsive();
+    return <View style={[styles.divider, { backgroundColor: isDesktopLayout ? (isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc') : 'rgba(0,0,0,0.04)' }]} />;
 }
 
 /* ─── Bottom Sheet Modal ─── */
@@ -168,7 +169,8 @@ export default function SettingsScreen() {
     const { isDark, colors, toggleTheme } = useTheme();
     const { signOut, role } = useAuth();
     const { displayCurrency, updateCurrency } = useCurrency();
-    const Container = isWeb ? View : SafeAreaView;
+    const { isDesktopLayout } = useResponsive();
+    const Container = isDesktopLayout ? View : SafeAreaView;
 
     // Modal states
     const [notifModal, setNotifModal] = useState(false);
@@ -195,7 +197,7 @@ export default function SettingsScreen() {
     };
 
     const handleLogout = () => {
-        if (isWeb) {
+        if (isDesktopLayout) {
             doLogout();
         } else {
             Alert.alert('Log Out', 'Are you sure you want to log out?', [
@@ -212,14 +214,14 @@ export default function SettingsScreen() {
     };
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isWeb ? colors.bg.base : 'transparent' }}>
+        <Container style={{ flex: 1, backgroundColor: isDesktopLayout ? colors.bg.base : 'transparent' }}>
             <ScrollView
                 style={{ flex: 1 }}
                 contentContainerStyle={{
-                    maxWidth: isWeb ? 600 : undefined,
+                    maxWidth: isDesktopLayout ? 600 : undefined,
                     width: '100%',
                     alignSelf: 'center',
-                    paddingHorizontal: isWeb ? 32 : 16,
+                    paddingHorizontal: isDesktopLayout ? 32 : 16,
                     paddingBottom: 60,
                 }}
                 showsVerticalScrollIndicator={false}
@@ -229,8 +231,8 @@ export default function SettingsScreen() {
                     <AnimatedPressable preset="icon" onPress={() => router.back()} style={[
                         styles.backButton,
                         {
-                            backgroundColor: isWeb ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
-                            borderColor: isWeb ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)'),
+                            backgroundColor: isDesktopLayout ? (isDark ? colors.bg.card : '#fff') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
+                            borderColor: isDesktopLayout ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)'),
                         }
                     ] as any}>
                         <ChevronLeft size={20} color={colors.text.primary} />
@@ -261,8 +263,8 @@ export default function SettingsScreen() {
                         subtitle="Manage bank account for withdrawals"
                         onPress={() => router.push('/(consumer)/bank-details')}
                     />
-                    {/* Become a Creator: web-only (hidden on mobile per UX spec) */}
-                    {role === 'listener' && isWeb && (
+                    {/* Become a Creator: desktop-only (hidden on mobile per UX spec) */}
+                    {role === 'listener' && isDesktopLayout && (
                         <>
                             <Divider />
                             <SettingRow
@@ -489,7 +491,7 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: isWeb ? 8 : 16,
+        marginTop: 16,
         marginBottom: 24,
     },
     backButton: {

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Zap, Tag, X } from 'lucide-react-native';
@@ -13,8 +13,7 @@ import { useNFTReleases, useMarketplaceListings } from '../../src/hooks/useData'
 import { useTheme } from '../../src/context/ThemeContext';
 import { useCurrency } from '../../src/hooks/useCurrency';
 import ErrorState from '../../src/components/shared/ErrorState';
-
-const isWeb = Platform.OS === 'web';
+import { useResponsive } from '../../src/hooks/useResponsive';
 const filters = ['All', 'Drops', 'Resale', 'Rare', 'Legendary'];
 
 /** Unified marketplace item: either a primary drop (release) or secondary listing */
@@ -30,6 +29,7 @@ export default function MarketplaceScreen() {
     const [selectedGroup, setSelectedGroup] = useState<MarketplaceItem[]>([]);
     const router = useRouter();
     const { width } = useWindowDimensions();
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
     const { isDark, colors } = useTheme();
     const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
@@ -94,7 +94,7 @@ export default function MarketplaceScreen() {
         return Object.values(groups);
     }, [filteredItems]);
 
-    const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
+    const numCols = isDesktopLayout ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
 
     const dropsCount = allItems.filter((i) => i._type === 'drop').length;
     const resaleCount = allItems.filter((i) => i._type === 'listing').length;
@@ -117,11 +117,11 @@ export default function MarketplaceScreen() {
 
     const renderHeader = () => (
         <View>
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 12 }}>
-                {!isWeb && (
+            <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 12 }}>
+                {isPhoneLayout && (
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>Marketplace</Text>
                 )}
-                <Text style={{ fontSize: 14, color: colors.text.secondary, marginTop: isWeb ? 0 : 4 }}>
+                <Text style={{ fontSize: 14, color: colors.text.secondary, marginTop: isDesktopLayout ? 0 : 4 }}>
                     {loading
                         ? 'Discover unique music NFTs'
                         : `${dropsCount} primary drop${dropsCount === 1 ? '' : 's'} · ${resaleCount} resale listing${resaleCount === 1 ? '' : 's'}`}
@@ -129,7 +129,7 @@ export default function MarketplaceScreen() {
             </View>
 
             {/* Stats pills */}
-            <View style={{ flexDirection: 'row', paddingHorizontal: isWeb ? 32 : 16, gap: 10, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', paddingHorizontal: isDesktopLayout ? 32 : 16, gap: 10, marginBottom: 16 }}>
                 <View style={{
                     flexDirection: 'row', alignItems: 'center', gap: 6,
                     backgroundColor: 'rgba(139,92,246,0.12)',
@@ -156,7 +156,7 @@ export default function MarketplaceScreen() {
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={{ marginBottom: 16, flexGrow: 0 }}
-                contentContainerStyle={{ paddingHorizontal: isWeb ? 32 : 16, paddingVertical: 4 }}
+                contentContainerStyle={{ paddingHorizontal: isDesktopLayout ? 32 : 16, paddingVertical: 4 }}
             >
                 {filters.map((filter) => (
                     <TabPill key={filter} label={filter} active={activeFilter === filter} onPress={() => setActiveFilter(filter)} />
@@ -182,7 +182,7 @@ export default function MarketplaceScreen() {
         else badgeText = `${resale} Resale`;
 
         return (
-            <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
+            <View style={{ width: `${100 / numCols}%` as any, maxWidth: isDesktopLayout ? 280 : undefined }}>
                 <NFTGroupCard
                     cover={firstItem.coverImage}
                     title={firstItem.songTitle}
@@ -200,7 +200,7 @@ export default function MarketplaceScreen() {
     return (
         <>
             <ScreenScaffold dominantColor="#8b5cf6" noScroll scrollY={scrollY}>
-            <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
+            <View style={{ flex: 1, maxWidth: isDesktopLayout ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 <FlatList
                     data={loading ? [] : groupedItems}
                     ListHeaderComponent={renderHeader}
@@ -209,8 +209,8 @@ export default function MarketplaceScreen() {
                     numColumns={numCols}
                     key={`grid-${numCols}`}
                     contentContainerStyle={{
-                        paddingHorizontal: isWeb ? 26 : 10,
-                        paddingTop: isWeb ? 80 : insets.top + 44,
+                        paddingHorizontal: isDesktopLayout ? 26 : 10,
+                        paddingTop: isDesktopLayout ? 80 : insets.top + 44,
                         paddingBottom: 100,
                     }}
                     showsVerticalScrollIndicator={false}

@@ -15,19 +15,20 @@ import * as Clipboard from 'expo-clipboard';
 import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
 import { PRESET_AVATAR_IDS } from '../../src/hooks/useData';
 import { CHAIN_NAME } from '../../src/config/network';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
 
 /* ─── Stat Card ─── */
 function StatCard({ icon, value, label }: { icon: React.ReactNode; value: number | string; label: string }) {
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
     return (
         <View
             style={{
                 flex: 1, margin: 4, padding: 20,
-                borderRadius: isWeb ? 16 : 24,
-                backgroundColor: isWeb
+                borderRadius: isDesktopLayout ? 16 : 24,
+                backgroundColor: isDesktopLayout
                     ? (isDark ? colors.bg.card : '#fff')
                     : (isDark
                         ? (isAndroid ? 'rgba(20,30,50,0.95)' : 'rgba(255,255,255,0.08)')
@@ -53,6 +54,7 @@ export default function ProfileScreen() {
     const router = useRouter();
     const { profile, walletAddress, role } = useAuth();
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
     const { fiatCurrency } = useCurrency();
     const [refreshing, setRefreshing] = React.useState(false);
 
@@ -116,17 +118,17 @@ export default function ProfileScreen() {
         listing: 'Listed',
     };
 
-    const Container = isWeb ? View : SafeAreaView;
+    const Container = isDesktopLayout ? View : SafeAreaView;
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isWeb ? colors.bg.base : 'transparent' }}>
+        <Container style={{ flex: 1, backgroundColor: isDesktopLayout ? colors.bg.base : 'transparent' }}>
             <ScrollView
                 style={{ flex: 1 }}
                 contentContainerStyle={{
-                    maxWidth: isWeb ? 800 : undefined,
+                    maxWidth: isDesktopLayout ? 800 : undefined,
                     width: '100%' as any,
                     alignSelf: 'center' as any,
-                    paddingHorizontal: isWeb ? 32 : 16,
+                    paddingHorizontal: isDesktopLayout ? 32 : 16,
                     paddingBottom: 32,
                 }}
                 showsVerticalScrollIndicator={false}
@@ -140,7 +142,7 @@ export default function ProfileScreen() {
                 }
             >
                 {/* Header Row */}
-                {!isWeb && (
+                {isPhoneLayout && (
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, marginBottom: 24 }}>
                         <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>Profile</Text>
                         <AnimatedPressable
@@ -162,40 +164,40 @@ export default function ProfileScreen() {
                 <View
                     style={{
                         alignItems: 'center', marginBottom: 24, paddingVertical: 32, paddingHorizontal: 24,
-                        borderRadius: isWeb ? 20 : 24,
-                        backgroundColor: isWeb
+                        borderRadius: isDesktopLayout ? 20 : 24,
+                        backgroundColor: isDesktopLayout
                             ? (isDark ? colors.bg.card : '#fff')
                             : (isDark
                                 ? (isAndroid ? 'rgba(20,30,50,0.95)' : 'rgba(255,255,255,0.08)')
                                 : (isAndroid ? '#ffffff' : 'rgba(255,255,255,0.4)')),
                         borderWidth: isDark ? 1 : 0,
                         borderColor: isDark ? 'rgba(255,255,255,0.06)' : 'transparent',
-                        marginTop: isWeb ? 8 : 0,
+                        marginTop: isDesktopLayout ? 8 : 0,
                         shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
                         shadowOpacity: isAndroid ? 0 : 0.04, shadowRadius: 8, elevation: isAndroid ? 1 : 4,
                     }}
                 >
                     <View style={{
-                        width: isWeb ? 100 : 96, height: isWeb ? 100 : 96, borderRadius: 50,
+                        width: isDesktopLayout ? 100 : 96, height: isDesktopLayout ? 100 : 96, borderRadius: 50,
                         padding: 3, borderWidth: 3, borderColor: '#38b4ba',
                         overflow: 'hidden',
                     }}>
                         <AvatarDisplay
                             uri={avatarUri || 'preset:default'}
-                            size={(isWeb ? 100 : 96) - 6}
+                            size={(isDesktopLayout ? 100 : 96) - 6}
                         />
                     </View>
                     <Text style={{ fontSize: 24, fontWeight: '800', color: colors.text.primary, marginTop: 16, letterSpacing: -0.5 }}>
                         {displayName}
                     </Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6 }}>
-                        <Text style={{ color: colors.text.secondary, fontSize: 13, fontFamily: isWeb ? 'monospace' : undefined }}>{truncatedWallet}</Text>
+                        <Text style={{ color: colors.text.secondary, fontSize: 13, fontFamily: isDesktopLayout ? 'monospace' : undefined }}>{truncatedWallet}</Text>
                         <AnimatedPressable preset="icon" onPress={handleCopyAddress} style={{ marginLeft: 8, padding: 4, borderRadius: 6 }}>
                             <Copy size={14} color={colors.text.secondary} />
                         </AnimatedPressable>
                     </View>
 
-                    {isWeb && (
+                    {isDesktopLayout && (
                         <AnimatedPressable
                             preset="button"
                             onPress={() => router.push('/(consumer)/edit-profile')}
@@ -212,7 +214,7 @@ export default function ProfileScreen() {
                 </View>
 
                 {/* Mobile Wallet Button */}
-                {!isWeb && (
+                {isPhoneLayout && (
                     <AnimatedPressable
                         preset="row"
                         onPress={() => router.push('/(consumer)/wallet')}
@@ -241,13 +243,13 @@ export default function ProfileScreen() {
                 )}
 
                 {/* Become a Creator CTA – only for listeners on web (hidden on mobile per UX spec) */}
-                {role === 'listener' && isWeb && (
+                {role === 'listener' && isDesktopLayout && (
                     <AnimatedPressable
                         preset="row"
                         onPress={() => router.push('/(auth)/creator-register')}
                         style={{
                             flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                            marginBottom: 24, padding: 20, borderRadius: isWeb ? 16 : 24,
+                            marginBottom: 24, padding: 20, borderRadius: isDesktopLayout ? 16 : 24,
                             backgroundColor: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(139,92,246,0.06)',
                             borderWidth: 1,
                             borderColor: isDark ? 'rgba(139,92,246,0.2)' : 'rgba(139,92,246,0.15)',
@@ -284,7 +286,7 @@ export default function ProfileScreen() {
                 ) : ownedNFTs.length > 0 ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 28 }}>
                         {ownedNFTs.slice(0, 5).map((nft) => (
-                            <View key={nft.id} style={{ width: isWeb ? 220 : 176, marginRight: 16 }}>
+                            <View key={nft.id} style={{ width: isDesktopLayout ? 220 : 176, marginRight: 16 }}>
                                 <NFTCard
                                     cover={nft.coverImage}
                                     title={nft.songTitle}
@@ -313,8 +315,8 @@ export default function ProfileScreen() {
                 ) : recentActivity.length > 0 ? (
                     <View
                         style={{
-                            borderRadius: isWeb ? 16 : 24,
-                            backgroundColor: isWeb
+                            borderRadius: isDesktopLayout ? 16 : 24,
+                            backgroundColor: isDesktopLayout
                                 ? (isDark ? colors.bg.card : '#fff')
                                 : (isDark
                                     ? (isAndroid ? 'rgba(20,30,50,0.95)' : 'rgba(255,255,255,0.08)')

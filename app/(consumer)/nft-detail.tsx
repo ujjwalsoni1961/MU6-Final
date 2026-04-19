@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, Platform, ActivityIndicator, Alert } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -113,7 +114,8 @@ export default function NFTDetailScreen() {
         listingId?: string;
     }>();
     const router = useRouter();
-    const isWeb = Platform.OS === 'web';
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
+    const useTwoColumn = isDesktopLayout;
     const { isDark, colors } = useTheme();
     const { walletAddress, profile } = useAuth();
     const account = useActiveAccount();
@@ -353,7 +355,7 @@ export default function NFTDetailScreen() {
                         preset="icon"
                         onPress={() => router.back()}
                         style={{
-                            width: 40, height: 40, borderRadius: 20, marginTop: isWeb ? 20 : 8, marginBottom: 8,
+                            width: 40, height: 40, borderRadius: 20, marginTop: useTwoColumn ? 20 : 8, marginBottom: 8,
                             backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
                             alignItems: 'center' as const, justifyContent: 'center' as const,
                             borderWidth: 1,
@@ -455,7 +457,7 @@ export default function NFTDetailScreen() {
     return (
         <ScreenScaffold dominantColor="#8b5cf6" contentContainerStyle={{ paddingBottom: 40 }}>
             <View style={[
-                isWeb ? { maxWidth: 1200, width: '100%', alignSelf: 'center' } : { flex: 1 },
+                useTwoColumn ? { maxWidth: 1200, width: '100%', alignSelf: 'center' } : { flex: 1 },
             ]}>
                 {/* Back Button */}
                 <View style={{ paddingHorizontal: 16 }}>
@@ -463,7 +465,7 @@ export default function NFTDetailScreen() {
                         preset="icon"
                         onPress={() => router.back()}
                         style={{
-                            width: 40, height: 40, borderRadius: 20, marginTop: isWeb ? 20 : 8, marginBottom: 8,
+                            width: 40, height: 40, borderRadius: 20, marginTop: useTwoColumn ? 20 : 8, marginBottom: 8,
                             backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
                             alignItems: 'center' as const, justifyContent: 'center' as const,
                             borderWidth: 1,
@@ -475,30 +477,30 @@ export default function NFTDetailScreen() {
                 </View>
 
                 <View style={[
-                    isWeb ? { flexDirection: 'row', gap: 40, paddingVertical: 40, paddingHorizontal: 16 } : { paddingHorizontal: 16 },
+                    useTwoColumn ? { flexDirection: 'row', gap: 40, paddingVertical: 40, paddingHorizontal: 16 } : { paddingHorizontal: 16 },
                 ]}>
                     {/* NFT Cover */}
                     <View style={[
                         { borderRadius: 32, overflow: 'hidden', marginBottom: 20, position: 'relative' },
-                        isWeb && { width: 400, height: 400, flexShrink: 0 },
+                        useTwoColumn && { width: 400, height: 400, flexShrink: 0 },
                     ]}>
                         <Image
                             source={{ uri: nft.coverImage }}
-                            style={{ width: '100%', height: isWeb ? '100%' : undefined, aspectRatio: isWeb ? undefined : 1 }}
+                            style={{ width: '100%', height: useTwoColumn ? '100%' : undefined, aspectRatio: useTwoColumn ? undefined : 1 }}
                             contentFit="cover"
                         />
-                        {!isWeb && (
+                        {isPhoneLayout && (
                             <LinearGradient
                                 colors={['transparent', isDark ? 'rgba(0,0,0,0.85)' : 'rgba(0,0,0,0.65)'] as any}
                                 style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 140 }}
                             />
                         )}
-                        {!isWeb && (
+                        {isPhoneLayout && (
                             <View style={{ position: 'absolute', top: 16, left: 16 }}>
                                 <RarityBadge rarity={nft.rarity} />
                             </View>
                         )}
-                        {!isWeb && (
+                        {isPhoneLayout && (
                             <View style={{ position: 'absolute', bottom: 20, left: 20, right: 20 }}>
                                 <AnimatedPressable preset="row" onPress={handleCreatorPress}>
                                     <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800', letterSpacing: -1 }}>{nft.songTitle}</Text>
@@ -510,7 +512,7 @@ export default function NFTDetailScreen() {
 
                     {/* Details */}
                     <View style={{ flex: 1 }}>
-                        {isWeb && (
+                        {useTwoColumn && (
                             <View style={{ marginBottom: 24 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                                     <Text style={{ fontSize: 40, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>{nft.songTitle}</Text>
@@ -629,7 +631,7 @@ export default function NFTDetailScreen() {
                             </AnimatedPressable>
 
                             {/* PayEmbed — fiat card payment option (web only) */}
-                            {isWeb && !actionSuccess && walletAddress && typeof PayEmbed !== 'undefined' && PayEmbed && (
+                            {useTwoColumn && !actionSuccess && walletAddress && typeof PayEmbed !== 'undefined' && PayEmbed && (
                                 (isPrimary && canMint && !isSoldOut) || (!isPrimary && listing && !isOwnListing)
                             ) && (
                                 <View style={{ marginTop: 16 }}>
@@ -978,7 +980,7 @@ export default function NFTDetailScreen() {
                 </View>
 
                 {/* Trade History & Analytics */}
-                <View style={{ paddingHorizontal: 16, marginBottom: 40, marginTop: 10, maxWidth: isWeb ? 1200 : undefined, alignSelf: isWeb ? 'center' : 'auto', width: '100%' }}>
+                <View style={{ paddingHorizontal: 16, marginBottom: 40, marginTop: 10, maxWidth: useTwoColumn ? 1200 : undefined, alignSelf: useTwoColumn ? 'center' : 'auto', width: '100%' }}>
                     <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>
                         Trade History
                     </Text>

@@ -3,6 +3,7 @@ import {
     View, Text, TextInput, ScrollView, Platform, Alert,
     StyleSheet, ActivityIndicator, KeyboardAvoidingView, Dimensions,
 } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -16,7 +17,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { supabase } from '../../src/lib/supabase';
 
-const isWeb = Platform.OS === 'web';
 const isAndroid = Platform.OS === 'android';
 const screenWidth = Dimensions.get('window').width;
 
@@ -64,10 +64,11 @@ function DefaultAvatar({ size = 80 }: { size?: number }) {
 /* ─── Glass Card ─── */
 function GlassCard({ children, style }: { children: React.ReactNode; style?: any }) {
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
     return (
         <View style={[{
-            borderRadius: isWeb ? 16 : 24,
-            backgroundColor: isWeb
+            borderRadius: isDesktopLayout ? 16 : 24,
+            backgroundColor: isDesktopLayout
                 ? (isDark ? colors.bg.card : '#fff')
                 : (isDark
                     ? (isAndroid ? 'rgba(20,30,50,0.95)' : 'rgba(255,255,255,0.08)')
@@ -91,6 +92,7 @@ export default function EditProfileScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
     const { profile, refreshProfile } = useAuth();
+    const { isDesktopLayout } = useResponsive();
 
     const { data: linkedProfiles } = useProfiles({ client: thirdwebClient });
     const thirdwebProfile = linkedProfiles?.find(p => p.type === 'email' || p.type === 'google' || p.type === 'apple');
@@ -142,7 +144,7 @@ export default function EditProfileScreen() {
 
         const trimmedName = displayName.trim();
         if (!trimmedName) {
-            if (isWeb) {
+            if (isDesktopLayout) {
                 alert('Please enter your name');
             } else {
                 Alert.alert('Name Required', 'Please enter your name to continue.');
@@ -173,7 +175,7 @@ export default function EditProfileScreen() {
                 await refreshProfile();
                 router.back();
             } else {
-                if (isWeb) {
+                if (isDesktopLayout) {
                     alert('Failed to save profile. Please try again.');
                 } else {
                     Alert.alert('Error', 'Failed to save profile. Please try again.');
@@ -184,7 +186,7 @@ export default function EditProfileScreen() {
             const msg = err?.name === 'AbortError'
                 ? 'Upload timed out. Check your connection and try again.'
                 : 'Could not save profile. Please check your connection and try again.';
-            if (isWeb) {
+            if (isDesktopLayout) {
                 alert(msg);
             } else {
                 Alert.alert('Save Failed', msg);
@@ -194,10 +196,10 @@ export default function EditProfileScreen() {
         }
     };
 
-    const Container = isWeb ? View : SafeAreaView;
+    const Container = isDesktopLayout ? View : SafeAreaView;
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isWeb ? colors.bg.base : 'transparent' }}>
+        <Container style={{ flex: 1, backgroundColor: isDesktopLayout ? colors.bg.base : 'transparent' }}>
             <KeyboardAvoidingView
                 style={{ flex: 1 }}
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -205,10 +207,10 @@ export default function EditProfileScreen() {
                 <ScrollView
                     style={{ flex: 1 }}
                     contentContainerStyle={{
-                        maxWidth: isWeb ? 600 : undefined,
+                        maxWidth: isDesktopLayout ? 600 : undefined,
                         width: '100%' as any,
                         alignSelf: 'center' as any,
-                        paddingHorizontal: isWeb ? 32 : 16,
+                        paddingHorizontal: isDesktopLayout ? 32 : 16,
                         paddingBottom: 60,
                     }}
                     showsVerticalScrollIndicator={false}
@@ -219,10 +221,10 @@ export default function EditProfileScreen() {
                         <AnimatedPressable preset="icon" onPress={() => router.back()} style={[
                             styles.backButton,
                             {
-                                backgroundColor: isWeb
+                                backgroundColor: isDesktopLayout
                                     ? (isDark ? colors.bg.card : '#fff')
                                     : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
-                                borderColor: isWeb
+                                borderColor: isDesktopLayout
                                     ? (isDark ? colors.border.base : '#f1f5f9')
                                     : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)'),
                             }
@@ -262,14 +264,14 @@ export default function EditProfileScreen() {
                                     <Image
                                         source={{ uri: avatarUri }}
                                         style={{
-                                            width: isWeb ? 96 : 88,
-                                            height: isWeb ? 96 : 88,
-                                            borderRadius: (isWeb ? 96 : 88) / 2,
+                                            width: isDesktopLayout ? 96 : 88,
+                                            height: isDesktopLayout ? 96 : 88,
+                                            borderRadius: (isDesktopLayout ? 96 : 88) / 2,
                                         }}
                                         contentFit="cover"
                                     />
                                 ) : (
-                                    <DefaultAvatar size={isWeb ? 96 : 88} />
+                                    <DefaultAvatar size={isDesktopLayout ? 96 : 88} />
                                 )}
                                 {/* Camera overlay */}
                                 <View style={{
@@ -299,7 +301,7 @@ export default function EditProfileScreen() {
 
                     {/* Name Input */}
                     <Text style={[styles.sectionLabel, { color: colors.text.tertiary }]}>YOUR NAME</Text>
-                    <GlassCard style={{ paddingHorizontal: 20, paddingVertical: isWeb ? 16 : (isAndroid ? 4 : 16) }}>
+                    <GlassCard style={{ paddingHorizontal: 20, paddingVertical: isDesktopLayout ? 16 : (isAndroid ? 4 : 16) }}>
                         <TextInput
                             value={displayName}
                             onChangeText={setDisplayName}
@@ -319,7 +321,7 @@ export default function EditProfileScreen() {
 
                     {/* Email Display */}
                     <Text style={[styles.sectionLabel, { color: colors.text.tertiary, marginTop: 24 }]}>EMAIL ADDRESS</Text>
-                    <GlassCard style={{ paddingHorizontal: 20, paddingVertical: isWeb ? 16 : (isAndroid ? 4 : 16) }}>
+                    <GlassCard style={{ paddingHorizontal: 20, paddingVertical: isDesktopLayout ? 16 : (isAndroid ? 4 : 16) }}>
                         <TextInput
                             value={userEmail}
                             editable={false}
@@ -344,7 +346,7 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginTop: isWeb ? 8 : 16,
+        marginTop: 16,
         marginBottom: 24,
     },
     backButton: {
@@ -367,7 +369,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#38b4ba',
         paddingHorizontal: 18,
         paddingVertical: 10,
-        borderRadius: isWeb ? 12 : 16,
+        borderRadius: 16,
         gap: 6,
     },
     saveText: {

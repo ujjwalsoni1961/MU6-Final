@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, Platform, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -12,8 +12,8 @@ import { Song, Artist } from '../../src/types';
 import { useSongs, useSearchArtists } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
 import { usePlayer } from '../../src/context/PlayerContext';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-const isWeb = Platform.OS === 'web';
 const genres = ['Electronic', 'Hip-Hop', 'Ambient', 'Synthwave', 'Pop', 'Dubstep', 'Rock', 'Lo-fi', 'R&B'];
 
 function ArtistResultRow({ artist, onPress }: { artist: Artist; onPress: () => void }) {
@@ -87,6 +87,7 @@ export default function SearchScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
     const { playSong } = usePlayer();
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
 
     // Debounce search query
     useEffect(() => {
@@ -104,12 +105,12 @@ export default function SearchScreen() {
     const hasResults = songResults.length > 0 || artistResults.length > 0;
     const loading = loadingSongs || loadingArtists;
 
-    const Container = isWeb ? View : SafeAreaView;
+    const Container = isPhoneLayout ? SafeAreaView : View;
 
     return (
-        <Container style={{ flex: 1, backgroundColor: isWeb ? (isDark ? colors.bg.base : '#f8fafc') : 'transparent' }}>
-            <View style={{ maxWidth: isWeb ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any, flex: 1 }}>
-                <View style={{ paddingHorizontal: isWeb ? 32 : 16, paddingTop: 16 }}>
+        <Container style={{ flex: 1, backgroundColor: isPhoneLayout ? 'transparent' : (isDark ? colors.bg.base : '#f8fafc') }}>
+            <View style={{ maxWidth: isDesktopLayout ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any, flex: 1 }}>
+                <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, paddingTop: 16 }}>
                     <SearchInput
                         value={query}
                         onChangeText={setQuery}
@@ -119,7 +120,7 @@ export default function SearchScreen() {
                 </View>
 
                 {query.length === 0 ? (
-                    <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginTop: 24 }}>
+                    <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginTop: 24 }}>
                         <Text style={{ fontSize: 18, fontWeight: '800', color: colors.text.primary, marginBottom: 16, letterSpacing: -0.5 }}>
                             Browse Categories
                         </Text>
@@ -136,7 +137,7 @@ export default function SearchScreen() {
                 ) : hasResults ? (
                     <ScrollView
                         style={{ flex: 1 }}
-                        contentContainerStyle={{ paddingHorizontal: isWeb ? 32 : 16, paddingTop: 16, paddingBottom: 100 }}
+                        contentContainerStyle={{ paddingHorizontal: isDesktopLayout ? 32 : 16, paddingTop: 16, paddingBottom: 100 }}
                         showsVerticalScrollIndicator={false}
                     >
                         {/* Artist Results */}

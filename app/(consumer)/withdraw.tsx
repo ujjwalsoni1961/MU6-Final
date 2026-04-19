@@ -3,6 +3,7 @@ import {
     View, Text, ScrollView, Platform, Alert, TextInput,
     StyleSheet, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ChevronLeft, Building2, User as UserIcon, Hash, ArrowRightLeft,
@@ -16,8 +17,6 @@ import { useWalletBalance } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 import * as db from '../../src/services/database';
 
-const isWeb = Platform.OS === 'web';
-
 type Step = 'loading' | 'bank_form' | 'withdraw_form' | 'success';
 
 export default function WithdrawScreen() {
@@ -25,6 +24,7 @@ export default function WithdrawScreen() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { walletAddress, profile } = useAuth();
+    const { isDesktopLayout } = useResponsive();
 
     const [step, setStep] = useState<Step>('loading');
     const [bankDetails, setBankDetails] = useState<db.BankDetails | null>(null);
@@ -177,11 +177,11 @@ export default function WithdrawScreen() {
                 <ScrollView
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
-                        maxWidth: isWeb ? 600 : undefined,
+                        maxWidth: isDesktopLayout ? 600 : undefined,
                         width: '100%',
                         alignSelf: 'center',
-                        paddingHorizontal: isWeb ? 32 : 16,
-                        paddingTop: isWeb ? 24 : insets.top + 16,
+                        paddingHorizontal: isDesktopLayout ? 32 : 16,
+                        paddingTop: isDesktopLayout ? 24 : insets.top + 16,
                         paddingBottom: 100,
                     }}
                     keyboardShouldPersistTaps="handled"

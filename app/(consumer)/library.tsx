@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, Platform, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -18,8 +18,8 @@ import { usePlayer } from '../../src/context/PlayerContext';
 import { useAuth } from '../../src/context/AuthContext';
 import * as db from '../../src/services/database';
 import ErrorState from '../../src/components/shared/ErrorState';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-const isWeb = Platform.OS === 'web';
 const tabs = ['Songs', 'Playlists', 'NFTs', 'Creators'];
 
 import { useTheme } from '../../src/context/ThemeContext';
@@ -28,6 +28,7 @@ import { useCurrency } from '../../src/hooks/useCurrency';
 /* ─── Creator Row ─── */
 function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
 
     return (
         <AnimatedPressable
@@ -39,9 +40,9 @@ function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
                 marginBottom: 8,
                 padding: 14,
                 borderRadius: 16,
-                backgroundColor: isWeb ? (isDark ? colors.bg.card : '#f8fafc') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'),
+                backgroundColor: isDesktopLayout ? (isDark ? colors.bg.card : '#f8fafc') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'),
                 borderWidth: 1,
-                borderColor: isWeb ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
+                borderColor: isDesktopLayout ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
             }}
         >
             <View style={{
@@ -51,7 +52,7 @@ function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
                 padding: 2,
                 backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.3)',
                 borderWidth: 1.5,
-                borderColor: isWeb ? (isDark ? colors.border.base : '#e2e8f0') : (isDark ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.4)'),
+                borderColor: isDesktopLayout ? (isDark ? colors.border.base : '#e2e8f0') : (isDark ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.4)'),
             }}>
                 <AvatarDisplay uri={item.avatar} size={46} />
             </View>
@@ -76,6 +77,7 @@ export default function LibraryScreen() {
     const [activeTab, setActiveTab] = useState('Songs');
     const router = useRouter();
     const { width } = useWindowDimensions();
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
     const { isDark, colors } = useTheme();
     const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
@@ -134,7 +136,7 @@ export default function LibraryScreen() {
         setRefreshing(false);
     }, [refreshLiked, refreshArtists, refreshNFTs, fetchPlaylists]);
 
-    const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
+    const numCols = isDesktopLayout ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
 
     const isLoading = (activeTab === 'Songs' && loadingSongs) ||
                       (activeTab === 'Creators' && loadingArtists) ||
@@ -186,9 +188,9 @@ export default function LibraryScreen() {
                 marginBottom: 8,
                 padding: 14,
                 borderRadius: 16,
-                backgroundColor: isWeb ? (isDark ? colors.bg.card : '#f8fafc') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'),
+                backgroundColor: isDesktopLayout ? (isDark ? colors.bg.card : '#f8fafc') : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.6)'),
                 borderWidth: 1,
-                borderColor: isWeb ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
+                borderColor: isDesktopLayout ? (isDark ? colors.border.base : '#f1f5f9') : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)'),
             }}
         >
             <View style={{
@@ -209,15 +211,15 @@ export default function LibraryScreen() {
 
     const renderHeader = () => (
         <View>
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 8 }}>
-                {!isWeb && (
+            <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 8 }}>
+                {isPhoneLayout && (
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>Library</Text>
                 )}
             </View>
 
             {/* Recently Played Section */}
             {recentlyPlayed.length > 0 && activeTab === 'Songs' && (
-                <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 16 }}>
+                <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 16 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
                         <Clock size={16} color={colors.accent.cyan} style={{ marginRight: 8 }} />
                         <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text.primary }}>Recently Played</Text>
@@ -247,7 +249,7 @@ export default function LibraryScreen() {
                 </View>
             )}
 
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 12 }}>
+            <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 12 }}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 44 }}>
                     {tabs.map((tab) => (
                         <TabPill key={tab} label={tab} active={activeTab === tab} onPress={() => setActiveTab(tab)} />
@@ -257,7 +259,7 @@ export default function LibraryScreen() {
 
             {/* Create Playlist button */}
             {activeTab === 'Playlists' && (
-                <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 12 }}>
+                <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 12 }}>
                     <AnimatedPressable
                         preset="button"
                         onPress={() => setShowCreatePlaylist(true)}
@@ -302,7 +304,7 @@ export default function LibraryScreen() {
 
     return (
         <ScreenScaffold dominantColor="#38b4ba" noScroll scrollY={scrollY}>
-            <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
+            <View style={{ flex: 1, maxWidth: isDesktopLayout ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 {activeTab === 'NFTs' ? (
                     <FlatList
                         data={loadingNFTs ? [] : groupedNFTs}
@@ -311,7 +313,7 @@ export default function LibraryScreen() {
                             const firstItem = item[0];
                             const badgeText = `${item.length} Owned`;
                             return (
-                                <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
+                                <View style={{ width: `${100 / numCols}%` as any, maxWidth: isDesktopLayout ? 280 : undefined }}>
                                     <NFTGroupCard
                                         cover={firstItem.coverImage}
                                         title={firstItem.songTitle}
@@ -330,8 +332,8 @@ export default function LibraryScreen() {
                         key={`grid-${numCols}`}
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
-                            paddingHorizontal: isWeb ? 26 : 10,
-                            paddingTop: isWeb ? 80 : insets.top + 44,
+                            paddingHorizontal: isDesktopLayout ? 26 : 10,
+                            paddingTop: isDesktopLayout ? 80 : insets.top + 44,
                             paddingBottom: 100,
                         }}
                         refreshControl={
@@ -366,8 +368,8 @@ export default function LibraryScreen() {
                         keyExtractor={(item) => item.id}
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{
-                            paddingHorizontal: isWeb ? 32 : 16,
-                            paddingTop: isWeb ? 80 : insets.top + 44,
+                            paddingHorizontal: isDesktopLayout ? 32 : 16,
+                            paddingTop: isDesktopLayout ? 80 : insets.top + 44,
                             paddingBottom: 100,
                         }}
                         refreshControl={

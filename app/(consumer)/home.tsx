@@ -13,8 +13,7 @@ import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useTrendingSongs, useNewReleases, useArtists, useNFTReleases } from '../../src/hooks/useData';
 import ErrorState from '../../src/components/shared/ErrorState';
-
-const isWeb = Platform.OS === 'web';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
 /* ─── Quick Play Card (YT Music Style) ─── */
 function QuickPlayCard({ cover, title, artist, onPress }: { cover: string; title: string; artist: string; onPress?: () => void }) {
@@ -53,9 +52,10 @@ function QuickPlayCard({ cover, title, artist, onPress }: { cover: string; title
 /* ─── Section Header ─── */
 function SectionHeader({ title, onViewAll }: { title: string; onViewAll?: () => void }) {
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
     return (
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, marginTop: 8 }}>
-            <Text style={{ fontSize: isWeb ? 26 : 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
+            <Text style={{ fontSize: isDesktopLayout ? 26 : 20, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
                 {title}
             </Text>
             {onViewAll && (
@@ -71,7 +71,7 @@ function SectionHeader({ title, onViewAll }: { title: string; onViewAll?: () => 
                     }}
                 >
                     <Text style={{ color: colors.accent.cyan, fontWeight: '600', fontSize: 13 }}>View All</Text>
-                    {isWeb && <ChevronRight size={14} color={colors.accent.cyan} style={{ marginLeft: 2 }} />}
+                    {isDesktopLayout && <ChevronRight size={14} color={colors.accent.cyan} style={{ marginLeft: 2 }} />}
                 </AnimatedPressable>
             )}
         </View>
@@ -115,6 +115,7 @@ export default function HomeScreen() {
     const [refreshing, setRefreshing] = React.useState(false);
     const router = useRouter();
     const { width } = useWindowDimensions();
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
     const { isDark, colors } = useTheme();
     const { fiatCurrency } = useCurrency();
     const { playSong } = usePlayer();
@@ -143,7 +144,7 @@ export default function HomeScreen() {
         quickPlayChunks.push(quickPlaySongs.slice(i, i + 4));
     }
 
-    const hPad = isWeb ? 40 : 16;
+    const hPad = isDesktopLayout ? 40 : 16;
 
     return (
         <ScreenScaffold
@@ -159,20 +160,20 @@ export default function HomeScreen() {
             }
         >
             <View style={[
-                isWeb ? { maxWidth: 1400, width: '100%', alignSelf: 'center' } : { flex: 1 }
+                isDesktopLayout ? { maxWidth: 1400, width: '100%', alignSelf: 'center' } : { flex: 1 }
             ]}>
 
                 <View style={{
-                    marginTop: isWeb ? 20 : 16,
-                    marginBottom: isWeb ? 30 : 24,
+                    marginTop: isDesktopLayout ? 20 : 12,
+                    marginBottom: isDesktopLayout ? 30 : 20,
                     paddingHorizontal: hPad
                 }}>
                     {/* ─── Quick Picks ─── */}
-                    <View style={{ paddingHorizontal: hPad, marginTop: isWeb ? 40 : 20 }}>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                    <View style={{ marginTop: isDesktopLayout ? 40 : 12 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text.secondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
                             Start Radio From a Song
                         </Text>
-                        <Text style={{ fontSize: 32, fontWeight: '800', color: colors.text.primary, letterSpacing: -1, marginBottom: 24 }}>
+                        <Text style={{ fontSize: isDesktopLayout ? 32 : 24, fontWeight: '800', color: colors.text.primary, letterSpacing: -1, marginBottom: 20 }}>
                             Quick Picks
                         </Text>
 
@@ -184,14 +185,14 @@ export default function HomeScreen() {
                             <ScrollView
                                 horizontal
                                 showsHorizontalScrollIndicator={false}
-                                pagingEnabled={!isWeb}
-                                snapToInterval={isWeb ? undefined : width - 32}
+                                pagingEnabled={isPhoneLayout}
+                                snapToInterval={isDesktopLayout ? undefined : width - 32}
                                 decelerationRate="fast"
                                 contentContainerStyle={{ paddingRight: hPad }}
                                 style={{ marginHorizontal: -hPad, paddingHorizontal: hPad }}
                             >
                                 {quickPlayChunks.map((chunk, idx) => (
-                                    <View key={idx} style={{ width: isWeb ? 340 : width - 40, marginRight: 16 }}>
+                                    <View key={idx} style={{ width: isDesktopLayout ? 340 : Math.max(240, width - 40), marginRight: 16 }}>
                                         {chunk.map((song) => (
                                             <QuickPlayCard
                                                 key={song.id}
@@ -208,7 +209,7 @@ export default function HomeScreen() {
                     </View>
 
                     {/* ─── Jump Back In (New Releases) ─── */}
-                    <View style={{ paddingHorizontal: hPad, marginBottom: 40 }}>
+                    <View style={{ marginBottom: isDesktopLayout ? 40 : 28 }}>
                         <SectionHeader title="Jump Back In" onViewAll={() => router.push({ pathname: '/(consumer)/all-songs', params: { section: 'new' } })} />
                         {loadingNew ? <SectionLoader /> : errorNew ? (
                             <SectionError message="Could not load new releases" onRetry={refreshNew} />
@@ -234,7 +235,7 @@ export default function HomeScreen() {
                     </View>
 
                     {/* ─── Made For You (more trending) ─── */}
-                    <View style={{ paddingHorizontal: hPad }}>
+                    <View>
                         <SectionHeader title="Made For You" onViewAll={() => router.push({ pathname: '/(consumer)/all-songs', params: { section: 'trending' } })} />
                     </View>
                     {loadingTrending ? <SectionLoader /> : errorTrending ? (
@@ -245,8 +246,7 @@ export default function HomeScreen() {
                         <Animated.ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: hPad }}
-                            style={{ marginBottom: 40 }}
+                            style={{ marginHorizontal: -hPad, paddingHorizontal: hPad, marginBottom: 40 }}
                         >
                             {trendingSongs.slice(6, 12).map((song, idx) => (
                                 <SongCard
@@ -265,7 +265,7 @@ export default function HomeScreen() {
                     )}
 
                     {/* ─── Top Creators ─── */}
-                    <View style={{ paddingHorizontal: hPad }}>
+                    <View>
                         <SectionHeader title="Top Creators" onViewAll={() => router.push('/(consumer)/all-creators')} />
                     </View>
                     {loadingArtists ? <SectionLoader /> : errorArtists ? (
@@ -276,8 +276,7 @@ export default function HomeScreen() {
                         <Animated.ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: hPad }}
-                            style={{ marginBottom: 40 }}
+                            style={{ marginHorizontal: -hPad, paddingHorizontal: hPad, marginBottom: 40 }}
                         >
                             {artists.map((artist) => (
                                 <CreatorCard
@@ -293,7 +292,7 @@ export default function HomeScreen() {
                     )}
 
                     {/* ─── NFT Drops ─── */}
-                    <View style={{ paddingHorizontal: hPad }}>
+                    <View>
                         <SectionHeader title="New NFT Drops" onViewAll={() => router.push('/(consumer)/all-nfts')} />
                     </View>
                     {loadingNFTs ? <SectionLoader /> : errorNFTs ? (
@@ -304,11 +303,10 @@ export default function HomeScreen() {
                         <Animated.ScrollView
                             horizontal
                             showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingHorizontal: hPad }}
-                            style={{ marginBottom: 20 }}
+                            style={{ marginHorizontal: -hPad, paddingHorizontal: hPad, marginBottom: 20 }}
                         >
                             {nftDrops.slice(0, 6).map((nft) => (
-                                <View key={nft.id} style={{ width: isWeb ? 220 : 176, marginRight: 16 }}>
+                                <View key={nft.id} style={{ width: isDesktopLayout ? 220 : 160, marginRight: 16 }}>
                                     <NFTCard
                                         cover={nft.coverImage}
                                         title={nft.songTitle}

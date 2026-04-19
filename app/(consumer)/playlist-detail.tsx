@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, Platform, ActivityIndicator, Alert, Animated } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, Alert, Animated } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
@@ -14,11 +15,10 @@ import { adaptSong } from '../../src/hooks/useData';
 import * as db from '../../src/services/database';
 import { Song } from '../../src/types';
 
-const isWeb = Platform.OS === 'web';
-
 export default function PlaylistDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { isDesktopLayout } = useResponsive();
     const insets = useSafeAreaInsets();
     const { isDark, colors } = useTheme();
     const { playSong, playQueue } = usePlayer();
@@ -105,14 +105,14 @@ export default function PlaylistDetailScreen() {
     const renderHeader = () => (
         <View>
             {/* Back button */}
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 16 }}>
+            <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 16 }}>
                 <AnimatedPressable preset="icon" onPress={() => router.back()} style={{ padding: 4, alignSelf: 'flex-start' }}>
                     <ChevronLeft size={24} color={colors.text.primary} />
                 </AnimatedPressable>
             </View>
 
             {/* Playlist Header */}
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16, marginBottom: 24, alignItems: 'center' }}>
+            <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 24, alignItems: 'center' }}>
                 {coverImage && (
                     <Image
                         source={{ uri: coverImage }}
@@ -134,7 +134,7 @@ export default function PlaylistDetailScreen() {
             </View>
 
             {/* Action buttons */}
-            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, paddingHorizontal: isWeb ? 32 : 16, marginBottom: 24 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 12, paddingHorizontal: isDesktopLayout ? 32 : 16, marginBottom: 24 }}>
                 <AnimatedPressable
                     preset="button"
                     onPress={handlePlayAll}
@@ -183,7 +183,7 @@ export default function PlaylistDetailScreen() {
 
     return (
         <ScreenScaffold dominantColor="#38b4ba" noScroll scrollY={scrollY}>
-            <View style={{ flex: 1, maxWidth: isWeb ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
+            <View style={{ flex: 1, maxWidth: isDesktopLayout ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 <FlatList
                     data={songs}
                     ListHeaderComponent={renderHeader}
@@ -202,8 +202,8 @@ export default function PlaylistDetailScreen() {
                     keyExtractor={(item) => item.id}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
-                        paddingHorizontal: isWeb ? 32 : 16,
-                        paddingTop: isWeb ? 80 : insets.top + 44,
+                        paddingHorizontal: isDesktopLayout ? 32 : 16,
+                        paddingTop: isDesktopLayout ? 80 : insets.top + 44,
                         paddingBottom: 140,
                     }}
                     onScroll={Animated.event(

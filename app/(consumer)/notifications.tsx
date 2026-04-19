@@ -1,13 +1,12 @@
 import React, { useEffect } from 'react';
-import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Bell, BellRing, DollarSign, UserPlus, Music, ShoppingBag, Megaphone } from 'lucide-react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import ErrorState from '../../src/components/shared/ErrorState';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useNotifications } from '../../src/hooks/useData';
-
-const isWeb = Platform.OS === 'web';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
 interface Notification {
     id: string;
@@ -47,6 +46,7 @@ function timeAgo(dateStr: string): string {
 export default function NotificationsScreen() {
     const router = useRouter();
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
     const { data: notifications, loading, error, refresh, markAllRead } = useNotifications();
 
     // Mark all as read when the screen is viewed
@@ -121,7 +121,7 @@ export default function NotificationsScreen() {
     return (
         <View style={{ flex: 1, backgroundColor: isDark ? colors.bg.base : '#f8fafc' }}>
             <View style={{
-                paddingTop: isWeb ? 24 : 56,
+                paddingTop: isDesktopLayout ? 24 : 56,
                 paddingHorizontal: 16,
                 paddingBottom: 12,
                 flexDirection: 'row',

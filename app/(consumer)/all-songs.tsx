@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Music } from 'lucide-react-native';
 import SongRow from '../../src/components/shared/SongRow';
@@ -11,10 +12,9 @@ import ErrorState from '../../src/components/shared/ErrorState';
 import EmptyState from '../../src/components/shared/EmptyState';
 import type { Song } from '../../src/types';
 
-const isWeb = Platform.OS === 'web';
-
 export default function AllSongsScreen() {
     const router = useRouter();
+    const { isDesktopLayout } = useResponsive();
     const { isDark, colors } = useTheme();
     const { playSong } = usePlayer();
     const params = useLocalSearchParams<{ section?: string }>();
@@ -48,7 +48,7 @@ export default function AllSongsScreen() {
     return (
         <View style={{ flex: 1, backgroundColor: isDark ? colors.bg.base : '#f8fafc' }}>
             <View style={{
-                paddingTop: isWeb ? 24 : 56,
+                paddingTop: isDesktopLayout ? 24 : 56,
                 paddingHorizontal: 16,
                 paddingBottom: 12,
                 flexDirection: 'row',

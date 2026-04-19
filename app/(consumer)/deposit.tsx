@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import {
-    View, Text, ScrollView, Platform, ActivityIndicator, Linking, Alert,
+    View, Text, ScrollView, ActivityIndicator, Linking, Alert,
     TextInput, StyleSheet,
 } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ChevronLeft, CreditCard, Wallet, ArrowDownLeft,
@@ -15,8 +16,6 @@ import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { activeChain } from '../../src/lib/thirdweb';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
-
-const isWeb = Platform.OS === 'web';
 
 const MAINNET_CHAIN_ID = 137; // Polygon mainnet
 const THIRDWEB_CLIENT_ID = process.env.EXPO_PUBLIC_THIRDWEB_CLIENT_ID || '64c9d6a04c2edcf1c8b117db980edd41';
@@ -40,6 +39,7 @@ export default function DepositScreen() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { walletAddress } = useAuth();
+    const { isDesktopLayout } = useResponsive();
     const [copied, setCopied] = useState(false);
     const [amount, setAmount] = useState('');
     const [loading, setLoading] = useState(false);
@@ -100,11 +100,11 @@ export default function DepositScreen() {
             <ScrollView
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{
-                    maxWidth: isWeb ? 600 : undefined,
+                    maxWidth: isDesktopLayout ? 600 : undefined,
                     width: '100%',
                     alignSelf: 'center',
-                    paddingHorizontal: isWeb ? 32 : 16,
-                    paddingTop: isWeb ? 24 : insets.top + 16,
+                    paddingHorizontal: isDesktopLayout ? 32 : 16,
+                    paddingTop: isDesktopLayout ? 24 : insets.top + 16,
                     paddingBottom: 100,
                 }}
             >
@@ -201,7 +201,7 @@ export default function DepositScreen() {
                         <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text.primary }}>MU6 Wallet</Text>
                         <Text style={{
                             fontSize: 12, color: colors.text.secondary, marginTop: 2,
-                            fontFamily: isWeb ? 'monospace' : undefined,
+                            fontFamily: isDesktopLayout ? 'monospace' : undefined,
                         }}>
                             {walletAddress || 'Not connected'}
                         </Text>

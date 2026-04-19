@@ -2,8 +2,8 @@ import React, { useRef } from 'react';
 import { View, Animated, Platform, ScrollViewProps } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../context/ThemeContext';
-import WebHeader from './WebHeader';
 import MobileHeader from './MobileHeader';
+import { useResponsive } from '../../hooks/useResponsive';
 
 const isWeb = Platform.OS === 'web';
 
@@ -59,10 +59,9 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
                 />
             </Animated.View>
 
-            {/* Web Header (Absolute Top) */}
-            {isWeb && <WebHeader scrollY={scrollY} />}
-
-            {/* Mobile Header (Absolute Top) */}
+            {/* Mobile Header (native only). On web the ConsumerWebHeader,
+               rendered by (consumer)/_layout.tsx, is the sole top nav — no
+               secondary header is needed here. */}
             {!isWeb && <MobileHeader scrollY={scrollY} />}
 
             {/* Main Content */}
@@ -83,8 +82,13 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
                     contentContainerStyle={[
                         contentContainerStyle,
                         {
-                            paddingTop: isWeb ? 80 : insets.top + 60,
-                            paddingBottom: isWeb ? 80 : 0,
+                            // On web the ConsumerWebHeader is position:sticky,
+                            // so scroll content flows right under it — no
+                            // paddingTop required.
+                            paddingTop: isWeb ? 0 : insets.top + 60,
+                            // Reserve space for the bottom player bar (web: 72px,
+                            // native: mini player sits on top of tab bar so 0).
+                            paddingBottom: isWeb ? 96 : 0,
                             backgroundColor: 'transparent'
                         }
                     ]}

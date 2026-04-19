@@ -15,6 +15,7 @@ import { useTheme } from '../../src/context/ThemeContext';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useSongById, useArtistSongs, useNFTReleases, useIsLiked } from '../../src/hooks/useData';
 import PlaylistSelectionSheet from '../../src/components/shared/PlaylistSelectionSheet';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
 function formatPlays(count: number): string {
     if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
@@ -24,7 +25,10 @@ function formatPlays(count: number): string {
 export default function SongDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const isWeb = Platform.OS === 'web';
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
+    // `useTwoColumn` is the old `isWeb` intent — two-column desktop layout.
+    // Phones (web or native) use the stacked single-column layout.
+    const useTwoColumn = isDesktopLayout;
     const { isDark, colors } = useTheme();
     const { playSong } = usePlayer();
     const [showPlaylistSheet, setShowPlaylistSheet] = useState(false);
@@ -67,7 +71,7 @@ export default function SongDetailScreen() {
     <>
         <ScreenScaffold dominantColor="#38b4ba" contentContainerStyle={{ paddingBottom: 120 }}>
             <View style={[
-                isWeb ? { maxWidth: 1200, width: '100%', alignSelf: 'center' } : { flex: 1 },
+                useTwoColumn ? { maxWidth: 1200, width: '100%', alignSelf: 'center' } : { flex: 1 },
             ]}>
                 {/* Back Button */}
                 <View style={{ paddingHorizontal: 16 }}>
@@ -75,7 +79,7 @@ export default function SongDetailScreen() {
                         preset="icon"
                         onPress={() => router.back()}
                         style={{
-                            width: 40, height: 40, borderRadius: 20, marginTop: isWeb ? 20 : 12, marginBottom: 8,
+                            width: 40, height: 40, borderRadius: 20, marginTop: useTwoColumn ? 20 : 12, marginBottom: 8,
                             backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)', alignItems: 'center', justifyContent: 'center',
                             borderWidth: 1, borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)',
                         }}
@@ -86,19 +90,23 @@ export default function SongDetailScreen() {
 
                 {/* Cover Art & Content */}
                 <View style={[
-                    isWeb ? { flexDirection: 'row', gap: 40, paddingVertical: 40, maxWidth: 1200, alignSelf: 'center', width: '100%', paddingHorizontal: 16 } : { paddingHorizontal: 24, alignItems: 'center' },
+                    useTwoColumn
+                        ? { flexDirection: 'row', gap: 40, paddingVertical: 40, maxWidth: 1200, alignSelf: 'center', width: '100%', paddingHorizontal: 16 }
+                        : { paddingHorizontal: 16, alignItems: 'center', paddingTop: 8 },
                 ]}>
                     {/* Cover Art */}
                     <View style={[
-                        { borderRadius: 32, overflow: 'hidden', marginBottom: 24 },
-                        isWeb ? { width: 400, height: 400, flexShrink: 0 } : { width: '100%', aspectRatio: 1, maxWidth: 350, shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.3, shadowRadius: 30, elevation: 10, backgroundColor: isDark ? '#000' : '#fff' },
+                        { borderRadius: 24, overflow: 'hidden', marginBottom: 20 },
+                        useTwoColumn
+                            ? { width: 400, height: 400, flexShrink: 0 }
+                            : { width: '100%', aspectRatio: 1, maxWidth: 360, shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.3, shadowRadius: 30, elevation: 10, backgroundColor: isDark ? '#000' : '#fff' },
                     ]}>
                         <Image
                             source={{ uri: song.coverImage }}
                             style={{ width: '100%', height: '100%' }}
                             contentFit="cover"
                         />
-                        {!isWeb && (
+                        {!useTwoColumn && (
                             <LinearGradient
                                 colors={['transparent', isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)'] as any}
                                 style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 100 }}
@@ -107,16 +115,16 @@ export default function SongDetailScreen() {
                     </View>
 
                     {/* Details */}
-                    <View style={isWeb ? { flex: 1 } : { width: '100%', alignItems: 'center' }}>
-                        <Text style={{ fontSize: isWeb ? 48 : 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, textAlign: isWeb ? 'left' : 'center' }}>{song.title}</Text>
-                        <Text style={{ fontSize: isWeb ? 24 : 18, color: colors.text.secondary, marginTop: 4, fontWeight: '500', textAlign: isWeb ? 'left' : 'center' }}>{song.artistName}</Text>
+                    <View style={useTwoColumn ? { flex: 1, minWidth: 0 } : { width: '100%', alignItems: 'center' }}>
+                        <Text style={{ fontSize: useTwoColumn ? 48 : 26, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, textAlign: useTwoColumn ? 'left' : 'center' }}>{song.title}</Text>
+                        <Text style={{ fontSize: useTwoColumn ? 24 : 16, color: colors.text.secondary, marginTop: 4, fontWeight: '500', textAlign: useTwoColumn ? 'left' : 'center' }}>{song.artistName}</Text>
 
-                        <View style={{ marginTop: 12, flexDirection: 'row', marginBottom: 32, justifyContent: isWeb ? 'flex-start' : 'center' }}>
+                        <View style={{ marginTop: 12, flexDirection: 'row', marginBottom: 24, justifyContent: useTwoColumn ? 'flex-start' : 'center' }}>
                             <GenreTag genre={song.genre} />
                         </View>
 
                         {/* Action Row */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 32, justifyContent: isWeb ? 'flex-start' : 'center' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 28, justifyContent: useTwoColumn ? 'flex-start' : 'center', flexWrap: 'wrap' }}>
                             <AnimatedPressable
                                 preset="button"
                                 onPress={() => playSong(song)}
@@ -284,7 +292,7 @@ export default function SongDetailScreen() {
 
                 {/* More by Artist */}
                 {filteredMoreSongs.length > 0 && (
-                    <View style={isWeb ? { maxWidth: 1200, alignSelf: 'center', width: '100%', marginTop: 40, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
+                    <View style={useTwoColumn ? { maxWidth: 1200, alignSelf: 'center', width: '100%', marginTop: 40, paddingHorizontal: 16 } : { paddingHorizontal: 16 }}>
                         <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>
                             More by {song.artistName}
                         </Text>

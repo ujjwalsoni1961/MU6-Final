@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, FlatList, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Users } from 'lucide-react-native';
 import CreatorCard from '../../src/components/shared/ArtistCard';
@@ -10,15 +11,14 @@ import ErrorState from '../../src/components/shared/ErrorState';
 import EmptyState from '../../src/components/shared/EmptyState';
 import type { Artist } from '../../src/types';
 
-const isWeb = Platform.OS === 'web';
-
 export default function AllCreatorsScreen() {
     const router = useRouter();
+    const { isDesktopLayout } = useResponsive();
     const { isDark, colors } = useTheme();
     const { data: artists, loading, error, refresh } = useArtists(100);
 
     const renderArtist = ({ item }: { item: Artist }) => (
-        <View style={{ width: isWeb ? '25%' : '33.33%', paddingHorizontal: 8, marginBottom: 20, alignItems: 'center' }}>
+        <View style={{ width: isDesktopLayout ? '25%' : '33.33%', paddingHorizontal: 8, marginBottom: 20, alignItems: 'center' }}>
             <CreatorCard
                 avatar={item.avatar}
                 name={item.name}
@@ -32,7 +32,7 @@ export default function AllCreatorsScreen() {
     return (
         <View style={{ flex: 1, backgroundColor: isDark ? colors.bg.base : '#f8fafc' }}>
             <View style={{
-                paddingTop: isWeb ? 24 : 56,
+                paddingTop: isDesktopLayout ? 24 : 56,
                 paddingHorizontal: 16,
                 paddingBottom: 12,
                 flexDirection: 'row',
@@ -57,7 +57,7 @@ export default function AllCreatorsScreen() {
                     data={artists}
                     renderItem={renderArtist}
                     keyExtractor={(item) => item.id}
-                    numColumns={isWeb ? 4 : 3}
+                    numColumns={isDesktopLayout ? 4 : 3}
                     contentContainerStyle={{ paddingHorizontal: 8, paddingBottom: 120 }}
                     showsVerticalScrollIndicator={false}
                     ListEmptyComponent={

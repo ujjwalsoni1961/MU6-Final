@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, ActivityIndicator } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -25,7 +25,6 @@ function formatFollowers(count: number): string {
 export default function CreatorProfileScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const isWeb = Platform.OS === 'web';
     const { isDark, colors } = useTheme();
 
     const { playSong } = usePlayer();

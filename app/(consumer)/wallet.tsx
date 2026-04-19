@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { View, Text, ScrollView, Animated, Platform, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, Animated, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import {
@@ -16,12 +16,11 @@ import { useAuth } from '../../src/context/AuthContext';
 import { useUserActivity } from '../../src/hooks/useData';
 import { getPublicUrl, UserActivity } from '../../src/services/database';
 import ErrorState from '../../src/components/shared/ErrorState';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useWalletBalance } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 import { CHAIN_ID, CHAIN_NAME, IS_MAINNET } from '../../src/config/network';
 import { formatPol } from '../../src/constants/fees';
-
-const isWeb = Platform.OS === 'web';
 
 const FILTER_TABS = [
     { key: 'all', label: 'All' },
@@ -183,6 +182,7 @@ function ActivityRow({
 
 export default function WalletScreen() {
     const { isDark, colors } = useTheme();
+    const { isDesktopLayout } = useResponsive();
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
     const router = useRouter();
@@ -226,12 +226,12 @@ export default function WalletScreen() {
 
     return (
         <ScreenScaffold dominantColor={colors.accent.purple} noScroll scrollY={scrollY}>
-            <View style={{ flex: 1, maxWidth: isWeb ? 800 : undefined, width: '100%', alignSelf: 'center' }}>
+            <View style={{ flex: 1, maxWidth: isDesktopLayout ? 800 : undefined, width: '100%', alignSelf: 'center' }}>
                 <ScrollView
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
-                        paddingHorizontal: isWeb ? 32 : 16,
-                        paddingTop: isWeb ? 80 : insets.top + 60,
+                        paddingHorizontal: isDesktopLayout ? 32 : 16,
+                        paddingTop: isDesktopLayout ? 80 : insets.top + 60,
                         paddingBottom: 100,
                     }}
                     onScroll={Animated.event(
@@ -327,7 +327,7 @@ export default function WalletScreen() {
                             }}>
                                 <Text style={{ fontSize: 12, color: colors.text.tertiary, marginBottom: 4 }}>{item.label}</Text>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <Text style={{ fontSize: 14, color: colors.text.primary, fontWeight: '600', fontFamily: item.label === 'Address' ? (isWeb ? 'monospace' : undefined) : undefined }}>
+                                    <Text style={{ fontSize: 14, color: colors.text.primary, fontWeight: '600', fontFamily: item.label === 'Address' ? (isDesktopLayout ? 'monospace' : undefined) : undefined }}>
                                         {item.val}
                                     </Text>
                                     {item.label === 'Address' && <ExternalLink size={14} color={colors.text.muted} />}

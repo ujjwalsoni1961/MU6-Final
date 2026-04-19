@@ -3,6 +3,7 @@ import {
     View, Text, ScrollView, Platform, Alert, TextInput,
     StyleSheet, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ChevronLeft, Building2, User as UserIcon, Hash,
@@ -14,13 +15,12 @@ import { useAuth } from '../../src/context/AuthContext';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import * as db from '../../src/services/database';
 
-const isWeb = Platform.OS === 'web';
-
 export default function BankDetailsScreen() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { profile } = useAuth();
+    const { isDesktopLayout } = useResponsive();
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -93,11 +93,11 @@ export default function BankDetailsScreen() {
                 <ScrollView
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
-                        maxWidth: isWeb ? 600 : undefined,
+                        maxWidth: isDesktopLayout ? 600 : undefined,
                         width: '100%',
                         alignSelf: 'center',
-                        paddingHorizontal: isWeb ? 32 : 16,
-                        paddingTop: isWeb ? 24 : insets.top + 16,
+                        paddingHorizontal: isDesktopLayout ? 32 : 16,
+                        paddingTop: isDesktopLayout ? 24 : insets.top + 16,
                         paddingBottom: 100,
                     }}
                     keyboardShouldPersistTaps="handled"

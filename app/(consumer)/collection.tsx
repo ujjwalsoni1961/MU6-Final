@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
-    View, Text, ScrollView, FlatList, Platform, useWindowDimensions,
+    View, Text, ScrollView, FlatList, useWindowDimensions,
     Animated, ActivityIndicator, Modal, TextInput, Alert,
     TouchableWithoutFeedback, PanResponder,
 } from 'react-native';
@@ -28,8 +28,8 @@ import {
     useCancelListing,
 } from '../../src/hooks/useData';
 import ErrorState from '../../src/components/shared/ErrorState';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
-const isWeb = Platform.OS === 'web';
 const filters = ['All', 'Legendary', 'Rare', 'Common'];
 
 type ModalMode = 'list' | 'manage';
@@ -38,6 +38,7 @@ export default function CollectionScreen() {
     const [activeFilter, setActiveFilter] = useState('All');
     const router = useRouter();
     const { width } = useWindowDimensions();
+    const { isDesktopLayout, isPhoneLayout } = useResponsive();
     const { isDark, colors } = useTheme();
     const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
@@ -138,7 +139,7 @@ export default function CollectionScreen() {
         return Object.values(groups);
     }, [filteredNFTs]);
 
-    const numCols = isWeb ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
+    const numCols = isDesktopLayout ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
 
     // ─── Modal openers ───
 
@@ -240,8 +241,8 @@ export default function CollectionScreen() {
 
     const renderHeader = () => (
         <View>
-            <View style={{ paddingHorizontal: isWeb ? 32 : 16 }}>
-                {!isWeb && (
+            <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16 }}>
+                {isPhoneLayout && (
                     <Text style={{ fontSize: 28, fontWeight: '800', color: colors.text.primary, letterSpacing: -1 }}>
                         My Collection
                     </Text>
@@ -252,7 +253,7 @@ export default function CollectionScreen() {
             </View>
 
             {/* Stats Row */}
-            <View style={{ flexDirection: 'row', paddingHorizontal: isWeb ? 32 : 16, gap: 12, marginBottom: 20 }}>
+            <View style={{ flexDirection: 'row', paddingHorizontal: isDesktopLayout ? 32 : 16, gap: 12, marginBottom: 20 }}>
                 <View style={{
                     flex: 1,
                     backgroundColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
@@ -290,7 +291,7 @@ export default function CollectionScreen() {
             <ScrollView
                 horizontal showsHorizontalScrollIndicator={false}
                 style={{ marginBottom: 16, flexGrow: 0 }}
-                contentContainerStyle={{ paddingHorizontal: isWeb ? 32 : 16, paddingVertical: 4 }}
+                contentContainerStyle={{ paddingHorizontal: isDesktopLayout ? 32 : 16, paddingVertical: 4 }}
             >
                 {filters.map((filter) => (
                     <TabPill key={filter} label={filter} active={activeFilter === filter} onPress={() => setActiveFilter(filter)} />
@@ -307,7 +308,7 @@ export default function CollectionScreen() {
 
     return (
         <ScreenScaffold dominantColor="#f59e0b" noScroll scrollY={scrollY}>
-            <View style={{ flex: 1, maxWidth: isWeb ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
+            <View style={{ flex: 1, maxWidth: isDesktopLayout ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
                 <FlatList
                     data={loading ? [] : groupedNFTs}
                     ListHeaderComponent={renderHeader}
@@ -317,7 +318,7 @@ export default function CollectionScreen() {
                         const badgeText = listedCount > 0 ? `${item.length} Owned · ${listedCount} Listed` : `${item.length} Owned`;
                         
                         return (
-                            <View style={{ width: `${100 / numCols}%` as any, maxWidth: isWeb ? 280 : undefined }}>
+                            <View style={{ width: `${100 / numCols}%` as any, maxWidth: isDesktopLayout ? 280 : undefined }}>
                                 <NFTGroupCard
                                     cover={firstItem.coverImage}
                                     title={firstItem.songTitle}
@@ -335,8 +336,8 @@ export default function CollectionScreen() {
                     numColumns={numCols}
                     key={`grid-${numCols}`}
                     contentContainerStyle={{
-                        paddingHorizontal: isWeb ? 26 : 10,
-                        paddingTop: isWeb ? 80 : insets.top + 44,
+                        paddingHorizontal: isDesktopLayout ? 26 : 10,
+                        paddingTop: isDesktopLayout ? 80 : insets.top + 44,
                         paddingBottom: 100,
                     }}
                     showsVerticalScrollIndicator={false}

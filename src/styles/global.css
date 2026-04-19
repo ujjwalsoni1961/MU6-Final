@@ -2,7 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Web-specific global styles ─── */
+/* ─── Global safety rail ───
+ * Prevent any descendant from causing horizontal overflow that would
+ * force the browser to render the viewport wider than the device width
+ * (which is the cause of the "white strip on the right" symptom on mobile).
+ */
+html, body, #root {
+    max-width: 100vw;
+    overflow-x: hidden;
+}
+body {
+    margin: 0;
+}
+
+/* ─── Desktop-only styles ─── */
 @media (min-width: 768px) {
 
     html,
