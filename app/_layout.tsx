@@ -39,7 +39,20 @@ export default function RootLayout() {
     return (
         <SafeAreaProvider>
             <ThirdwebProvider>
-                <AutoConnect client={thirdwebClient} wallets={supportedWallets} />
+                {/*
+                  Single source of truth for session restoration across the
+                  whole app. The login screen's <ConnectEmbed> is explicitly
+                  opted out of its internal AutoConnect (autoConnect={false})
+                  to avoid a race that produced "Failed to authenticate user"
+                  and "Cannot set a wallet without an account as active"
+                  errors on the login page. Timeout cancels stale/corrupt
+                  session restoration attempts cleanly instead of hanging.
+                */}
+                <AutoConnect
+                    client={thirdwebClient}
+                    wallets={supportedWallets}
+                    timeout={15000}
+                />
                 <ThemeProvider>
                     <AuthProvider>
                         <AdminAuthProvider>

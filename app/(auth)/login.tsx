@@ -24,6 +24,19 @@ function WalletConnect({ isDark }: { isDark?: boolean }) {
             theme={isDark ? 'dark' : 'light'}
             modalSize="compact"
             showThirdwebBranding={false}
+            // IMPORTANT: Disable ConnectEmbed's internal AutoConnect.
+            // The root <AutoConnect> in app/_layout.tsx is the single source of
+            // truth for session restoration across the whole app (needed on
+            // non-login pages on refresh). Running AutoConnect twice in parallel
+            // (once at root, once here) caused a race producing the thirdweb
+            // console errors:
+            //   • "Failed to authenticate user"
+            //   • "Error auto connecting wallet: Cannot set a wallet without an account as active"
+            // See https://portal.thirdweb.com/react/v5/AutoConnect — "If you are
+            // using ConnectButton or ConnectEmbed, you don't need to use this
+            // component as it is already included." We invert that: since the
+            // app already has a root-level AutoConnect, opt the embed out.
+            autoConnect={false}
             // Empty header with zero-height icon — thirdweb still renders a slot,
             // but passing an empty title+icon collapses it visually.
             header={{
