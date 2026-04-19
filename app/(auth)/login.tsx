@@ -71,12 +71,13 @@ function WebLogin() {
     const BrandBlock = (
         <View
             style={{
+                width: '100%',
                 flex: isNarrow ? 0 : 1,
                 alignItems: 'center',
                 justifyContent: 'center',
                 paddingHorizontal: isNarrow ? 24 : brandSpacing,
-                paddingTop: isNarrow ? 32 : brandSpacing,
-                paddingBottom: isNarrow ? 16 : brandSpacing,
+                paddingTop: isNarrow ? 48 : brandSpacing,
+                paddingBottom: isNarrow ? 24 : brandSpacing,
             }}
         >
             <Image
@@ -128,8 +129,15 @@ function WebLogin() {
                     Connect your wallet to continue.
                 </Text>
 
-                {/* Thirdweb Connect Embed – auto-creates in-app wallet via email/Google/Apple */}
-                <WalletConnect isDark={isDark} />
+                {/*
+                  Thirdweb ConnectEmbed – its root uses flex:1 which collapses
+                  inside a block container on web. Wrap with explicit minHeight
+                  so the embed renders with proper height and doesn't overflow
+                  its parent (preventing visual overlap with sibling blocks).
+                */}
+                <View style={{ width: '100%', minHeight: 430 }}>
+                    <WalletConnect isDark={isDark} />
+                </View>
 
                 {/* Artist registration link */}
                 <AnimatedPressable
@@ -146,17 +154,26 @@ function WebLogin() {
         </View>
     );
 
-    // Narrow viewport (phone browsers) — stacked single column with scroll.
+    // Narrow viewport (phone browsers) — render as a plain block-level
+    // div (no flex container) so Thirdweb ConnectEmbed's internal flex:1 /
+    // absolute-positioned children cannot pull siblings (BrandBlock) on top.
+    // Using `display: block` on the outermost web element forces normal
+    // document flow for stacking.
     if (isNarrow) {
         return (
-            <ScrollView
-                style={{ flex: 1, backgroundColor: '#030711' }}
-                contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center' }}
-                keyboardShouldPersistTaps="handled"
+            <View
+                // @ts-ignore — RNW allows raw style props; we need block layout
+                // here so children stack in document flow, immune to any
+                // flex/position quirks from ConnectEmbed's internal DOM.
+                style={{
+                    minHeight: '100%',
+                    backgroundColor: '#030711',
+                    ...(Platform.OS === 'web' ? { display: 'block' as any } : {}),
+                } as any}
             >
                 {BrandBlock}
                 {CardBlock}
-            </ScrollView>
+            </View>
         );
     }
 
