@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, Platform } from 'react-native';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Users } from 'lucide-react-native';
@@ -32,7 +32,7 @@ export default function AllCreatorsScreen() {
     return (
         <View style={{ flex: 1, backgroundColor: isDark ? colors.bg.base : '#f8fafc' }}>
             <View style={{
-                paddingTop: isDesktopLayout ? 24 : 56,
+                paddingTop: Platform.OS === 'web' ? 80 : 56,
                 paddingHorizontal: 16,
                 paddingBottom: 12,
                 flexDirection: 'row',

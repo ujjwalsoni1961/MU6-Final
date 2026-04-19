@@ -212,6 +212,7 @@ export default function EditProfileScreen() {
                         alignSelf: 'center' as any,
                         paddingHorizontal: isDesktopLayout ? 32 : 16,
                         paddingBottom: 60,
+                        paddingTop: Platform.OS === 'web' ? 80 : undefined,
                     }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"

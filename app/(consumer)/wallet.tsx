@@ -231,7 +231,7 @@ export default function WalletScreen() {
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{
                         paddingHorizontal: isDesktopLayout ? 32 : 16,
-                        paddingTop: isDesktopLayout ? 80 : insets.top + 60,
+                        paddingTop: Platform.OS === 'web' ? 80 : insets.top + 60,
                         paddingBottom: 100,
                     }}
                     onScroll={Animated.event(

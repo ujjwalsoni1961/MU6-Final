@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, FlatList, ActivityIndicator, ScrollView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -109,7 +109,7 @@ export default function SearchScreen() {
 
     return (
         <Container style={{ flex: 1, backgroundColor: isPhoneLayout ? 'transparent' : (isDark ? colors.bg.base : '#f8fafc') }}>
-            <View style={{ maxWidth: isDesktopLayout ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any, flex: 1 }}>
+            <View style={{ maxWidth: isDesktopLayout ? 800 : undefined, width: '100%' as any, alignSelf: 'center' as any, flex: 1, paddingTop: Platform.OS === 'web' ? 80 : 0 }}>
                 <View style={{ paddingHorizontal: isDesktopLayout ? 32 : 16, paddingTop: 16 }}>
                     <SearchInput
                         value={query}

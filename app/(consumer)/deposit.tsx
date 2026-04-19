@@ -104,7 +104,7 @@ export default function DepositScreen() {
                     width: '100%',
                     alignSelf: 'center',
                     paddingHorizontal: isDesktopLayout ? 32 : 16,
-                    paddingTop: isDesktopLayout ? 24 : insets.top + 16,
+                    paddingTop: Platform.OS === 'web' ? 80 : insets.top + 16,
                     paddingBottom: 100,
                 }}
             >

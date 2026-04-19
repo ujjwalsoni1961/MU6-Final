@@ -223,6 +223,7 @@ export default function SettingsScreen() {
                     alignSelf: 'center',
                     paddingHorizontal: isDesktopLayout ? 32 : 16,
                     paddingBottom: 60,
+                    paddingTop: Platform.OS === 'web' ? 80 : undefined,
                 }}
                 showsVerticalScrollIndicator={false}
             >
