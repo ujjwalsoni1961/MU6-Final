@@ -139,7 +139,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                 />
             </AnimatedPressable>
 
-            {/* Nav Links (Home / Market / Library / Collection) */}
+            {/* Nav Links (Home / Market / Library / Collection) — hidden on phone (reachable via bottom tab bar) */}
             {!isPhoneLayout && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: isTablet ? 20 : 32, gap: isTablet ? 4 : 8, zIndex: 51 }}>
                     {NAV_LINKS.map((link) => {
@@ -150,6 +150,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                                 label={link.label}
                                 isActive={!!isActive}
                                 onPress={() => router.push(link.path as any)}
+                                compact={isTablet}
                             />
                         );
                     })}
@@ -157,7 +158,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
             )}
 
             {/* Search Bar Container */}
-            <View style={{ position: 'relative', flex: 1, maxWidth: 420, marginLeft: isPhoneLayout ? 16 : (isTablet ? 20 : 32), zIndex: 101 }}>
+            <View style={{ position: 'relative', flex: 1, maxWidth: 420, marginLeft: isPhoneLayout ? 12 : (isTablet ? 20 : 32), zIndex: 101 }}>
 
                 {/* 
                     Using Pressable as a wrapper for Hover detection on Web. 
@@ -445,7 +446,7 @@ function DropdownItem({ icon, label, labelColor, onPress }: { icon: React.ReactN
     );
 }
 
-function NavLink({ label, isActive, onPress }: { label: string; isActive: boolean; onPress: () => void }) {
+function NavLink({ label, isActive, onPress, compact }: { label: string; isActive: boolean; onPress: () => void; compact?: boolean }) {
     const { isDark, colors } = useTheme();
     const [hovered, setHovered] = useState(false);
     return (
@@ -454,8 +455,8 @@ function NavLink({ label, isActive, onPress }: { label: string; isActive: boolea
             onHoverIn={() => setHovered(true)}
             onHoverOut={() => setHovered(false)}
             style={{
-                paddingHorizontal: 14,
-                paddingVertical: 8,
+                paddingHorizontal: compact ? 10 : 14,
+                paddingVertical: compact ? 6 : 8,
                 borderRadius: 10,
                 backgroundColor: isActive
                     ? (isDark ? 'rgba(56,180,186,0.12)' : 'rgba(56,180,186,0.10)')
@@ -471,7 +472,7 @@ function NavLink({ label, isActive, onPress }: { label: string; isActive: boolea
         >
             <Text
                 style={{
-                    fontSize: 14,
+                    fontSize: compact ? 13 : 14,
                     fontWeight: isActive ? '700' : '600',
                     color: isActive ? colors.accent.cyan : colors.text.primary,
                     letterSpacing: 0.2,

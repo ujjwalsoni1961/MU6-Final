@@ -1,11 +1,9 @@
 import React, { useRef } from 'react';
-import { View, Animated, Platform, ScrollViewProps } from 'react-native';
+import { View, Animated, ScrollViewProps } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../context/ThemeContext';
 import MobileHeader from './MobileHeader';
 import { useResponsive } from '../../hooks/useResponsive';
-
-const isWeb = Platform.OS === 'web';
 
 interface ScreenScaffoldProps {
     children: React.ReactNode;
@@ -26,6 +24,7 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
     const internalScrollY = useRef(new Animated.Value(0)).current;
     const scrollY = externalScrollY || internalScrollY;
     const insets = useSafeAreaInsets();
+    const { isWeb, isDesktopLayout, isPhoneLayout } = useResponsive();
 
     // Gradient Opacity: Fades out as you scroll down
     const gradientOpacity = scrollY.interpolate({
@@ -59,7 +58,7 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
                 />
             </Animated.View>
 
-            {/* Mobile Header (native only). On web the ConsumerWebHeader,
+            {/* Mobile Header (native only). On web the WebHeader,
                rendered by (consumer)/_layout.tsx, is the sole top nav — no
                secondary header is needed here. */}
             {!isWeb && <MobileHeader scrollY={scrollY} />}
@@ -82,13 +81,15 @@ export default function ScreenScaffold({ children, dominantColor, contentContain
                     contentContainerStyle={[
                         contentContainerStyle,
                         {
-                            // On web the ConsumerWebHeader is position:sticky,
+                            // On web the WebHeader is position:sticky,
                             // so scroll content flows right under it — no
                             // paddingTop required.
                             paddingTop: isWeb ? 0 : insets.top + 60,
-                            // Reserve space for the bottom player bar (web: 72px,
-                            // native: mini player sits on top of tab bar so 0).
-                            paddingBottom: isWeb ? 96 : 0,
+                            // Reserve space for the bottom bars.
+                            //  - Desktop web: just the player bar (≈ 96px)
+                            //  - Phone web: player bar + tab bar stacked (≈ 172px)
+                            //  - Native: mini player sits on top of tab bar so 0
+                            paddingBottom: isDesktopLayout ? 96 : (isPhoneLayout ? 172 : 0),
                             backgroundColor: 'transparent'
                         }
                     ]}

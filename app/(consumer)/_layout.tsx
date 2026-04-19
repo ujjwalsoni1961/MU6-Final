@@ -10,6 +10,7 @@ import { PlayerProvider } from '../../src/context/PlayerContext';
 import MusicPlayerOverlay from '../../src/components/player/MusicPlayerOverlay';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import WebHeader from '../../src/components/layout/WebHeader';
+import { useResponsive } from '../../src/hooks/useResponsive';
 
 /* Constants */
 const isWeb = Platform.OS === 'web';
@@ -40,6 +41,10 @@ export default function ConsumerLayout() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
     const { isConnected, isLoading, role, isBlocked } = useAuth();
+    const { isDesktopLayout } = useResponsive();
+    // Hide the bottom tab bar only on desktop web (where WebHeader has the nav links).
+    // On native and on phone-sized web, keep the bottom tab bar so Home/Market/Library/Collection remain reachable.
+    const hideTabBar = isDesktopLayout;
 
     if (isLoading) {
         return (
@@ -77,11 +82,11 @@ export default function ConsumerLayout() {
                         headerShown: false,
                         tabBarActiveTintColor: colors.accent.cyan,
                         tabBarInactiveTintColor: colors.text.muted,
-                        tabBarStyle: isWeb ? { display: 'none' } : getGlassTabBar(isDark, colors, insets) as any,
+                        tabBarStyle: hideTabBar ? { display: 'none' } : getGlassTabBar(isDark, colors, insets) as any,
                         tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginBottom: 0 },
-                        sceneStyle: { backgroundColor: isWeb ? 'transparent' : 'transparent' },
+                        sceneStyle: { backgroundColor: 'transparent' },
                         tabBarBackground: () => (
-                            isWeb ? null :
+                            hideTabBar ? null :
                                 <View style={{ flex: 1, backgroundColor: isDark ? 'rgba(3,7,17,0.9)' : 'rgba(255,255,255,0.9)' }} />
                         ),
                         tabBarButton: (props) => (
