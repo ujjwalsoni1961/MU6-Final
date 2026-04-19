@@ -118,14 +118,15 @@ export default function ConsumerWebHeader() {
     // tablet/desktop layouts. `transition` is a web-only CSS property that RN
     // ignores on native — safe since this component early-returns for non-web.
     const headerBg = isScrolled
-        ? (isDark ? '#000000' : '#ffffff')
+        ? (isDark ? 'rgba(3, 7, 17, 0.4)' : 'rgba(255, 255, 255, 0.4)')
         : 'transparent';
     const borderColor = isScrolled
-        ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)')
+        ? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)')
         : 'transparent';
     // @ts-ignore — web-only
     const bgTransition = { transition: 'background-color 200ms ease, border-color 200ms ease' } as any;
-    const backdropFilter: any = 'none';
+    const backdropFilter: any = isScrolled ? 'blur(30px) saturate(180%)' : 'none';
+    const webkitBackdropFilter: any = isScrolled ? 'blur(30px) saturate(180%)' : 'none';
 
     const avatarUrl = profile?.avatarPath
         ? `${SUPABASE_URL}/storage/v1/object/public/avatars/${profile.avatarPath}`
@@ -145,6 +146,7 @@ export default function ConsumerWebHeader() {
                 borderBottomColor: borderColor,
                 // @ts-ignore
                 backdropFilter,
+                WebkitBackdropFilter: webkitBackdropFilter,
                 ...bgTransition,
             }}>
                 {/* Bar */}
@@ -346,6 +348,7 @@ export default function ConsumerWebHeader() {
             position: 'sticky' as any, top: 0, zIndex: 100,
             // @ts-ignore
             backdropFilter,
+            WebkitBackdropFilter: webkitBackdropFilter,
             ...bgTransition,
         }}>
             {/* Brand */}

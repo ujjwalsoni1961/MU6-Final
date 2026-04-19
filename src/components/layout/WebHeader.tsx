@@ -152,11 +152,12 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                     style={{
                         position: 'absolute',
                         top: 0, left: 0, right: 0, bottom: 0,
-                        backgroundColor: isDark ? '#000000' : '#ffffff',
-                        backdropFilter: 'none',
+                        backgroundColor: isDark ? 'rgba(3, 7, 17, 0.4)' : 'rgba(255, 255, 255, 0.4)',
+                        backdropFilter: 'blur(30px) saturate(180%)',
+                        WebkitBackdropFilter: 'blur(30px) saturate(180%)',
                         opacity: isPhoneLayout ? 1 : headerOpacity,
                         borderBottomWidth: 1,
-                        borderBottomColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.5)',
+                        borderBottomColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
                     } as any}
                 />
             )}

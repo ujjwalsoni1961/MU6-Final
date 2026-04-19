@@ -129,7 +129,8 @@ export default function ProfileScreen() {
                     width: '100%' as any,
                     alignSelf: 'center' as any,
                     paddingHorizontal: isDesktopLayout ? 32 : 16,
-                    paddingBottom: 32,
+                    paddingVertical: 32,
+                    paddingTop: Platform.OS === 'web' ? 80 : undefined,
                 }}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
