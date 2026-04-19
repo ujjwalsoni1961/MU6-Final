@@ -14,9 +14,27 @@ import {
     computePrimaryPurchaseBreakdown,
     type FeeBreakdown,
 } from '../constants/fees';
+import type { Account } from 'thirdweb/wallets';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+
+/** Generate a random nonce for signed edge-function requests.
+ *  Uses crypto.randomUUID when available (browsers + modern RN) and falls
+ *  back to Math.random so we never crash the client. The nonce is persisted
+ *  server-side in payout_request_nonces to give replay protection.
+ */
+function generatePayoutNonce(): string {
+    try {
+        const c: any = (globalThis as any).crypto;
+        if (c?.randomUUID) return c.randomUUID();
+    } catch {
+        /* fall through */
+    }
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}-${Math.random()
+        .toString(36)
+        .slice(2, 10)}`;
+}
 
 // ────────────────────────────────────────────
 // Types (mirrors DB schema)
@@ -1445,13 +1463,34 @@ export function getPublicUrl(bucket: 'covers' | 'avatars', path: string): string
     return data.publicUrl;
 }
 
-/** Get a public URL for audio files.
- *  The audio bucket was made public so the anon client can read audio without signing.
+/** Get a short-lived signed URL for audio playback.
+ *  The audio bucket is private; URLs are issued by the get-audio-url edge
+ *  function which enforces rate limiting and logs access for light DRM.
  */
-export async function getAudioUrl(path: string, _expiresIn = 3600): Promise<string | null> {
+export async function getAudioUrl(path: string, expiresIn = 60): Promise<string | null> {
+    if (!path) return null;
     try {
-        const { data } = supabase.storage.from('audio').getPublicUrl(path);
-        return data.publicUrl || null;
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/get-audio-url`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ path, expiresIn }),
+        });
+
+        let result: any = null;
+        try {
+            result = await response.json();
+        } catch {
+            /* ignore parse error */
+        }
+
+        if (!response.ok || !result?.success || !result?.url) {
+            console.error('[db] getAudioUrl edge error:', result?.error || `HTTP ${response.status}`);
+            return null;
+        }
+        return result.url as string;
     } catch (error) {
         console.error('[db] getAudioUrl error:', error);
         return null;
@@ -2522,12 +2561,19 @@ export async function hasPendingPayout(profileId: string): Promise<boolean> {
     return (count ?? 0) > 0;
 }
 
-/** Create a payout request with balance validation */
+/** Create a payout request with balance validation.
+ *
+ *  A Thirdweb `Account` must be passed in from the caller so the request is
+ *  signed with the wallet tied to the profile. The edge function verifies
+ *  this EIP-191 signature against the canonical message and rejects requests
+ *  whose signer does not match profiles.wallet_address.
+ */
 export async function createPayoutRequest(
     profileId: string,
     amountEur: number,
     bankDetails: BankDetails,
     paymentMethod: string = 'bank_transfer',
+    account?: Account | null,
 ): Promise<{ id: string | null; error?: string }> {
     // PDF Fix #8: reject if an active (pending) request already exists.
     // The edge function + DB unique index also enforce this; we check here
@@ -2548,6 +2594,39 @@ export async function createPayoutRequest(
         };
     }
 
+    if (!account || !account.address) {
+        return {
+            id: null,
+            error: 'No wallet connected. Please sign in again before requesting a payout.',
+        };
+    }
+
+    // Sign canonical message (must match edge fn format exactly).
+    // issuedAt is a unix ms timestamp — the edge function calls Number(issuedAt)
+    // and checks Date.now() - issuedAt < 10 minutes for freshness.
+    const issuedAt = Date.now();
+    const nonce = generatePayoutNonce();
+    const message =
+        `MU6 Payout Request\n` +
+        `profileId: ${profileId}\n` +
+        `amountEur: ${amountEur}\n` +
+        `paymentMethod: ${paymentMethod}\n` +
+        `issuedAt: ${issuedAt}\n` +
+        `nonce: ${nonce}`;
+
+    let signature: string;
+    try {
+        signature = await account.signMessage({ message });
+    } catch (err: any) {
+        console.error('[db] createPayoutRequest signMessage error:', err);
+        return {
+            id: null,
+            error: err?.message?.includes('reject')
+                ? 'Signature was rejected. Payout not submitted.'
+                : 'Could not sign payout request. Please try again.',
+        };
+    }
+
     try {
         const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-request`, {
             method: 'POST',
@@ -2560,6 +2639,10 @@ export async function createPayoutRequest(
                 amountEur,
                 paymentMethod,
                 bankDetails,
+                signature,
+                signerAddress: account.address,
+                issuedAt,
+                nonce,
             }),
         });
 
@@ -2599,8 +2682,37 @@ export async function createPayoutRequest(
     }
 }
 
-/** Get payout requests for a specific user */
-export async function getPayoutRequests(profileId: string): Promise<PayoutRequest[]> {
+/** Get payout requests for a specific user.
+ *
+ *  If `account` is passed, we sign a "MU6 Payout List" message so the edge
+ *  function can verify the caller owns the profile's wallet. The admin path
+ *  (which uses the admin secret header) is handled separately in useAdminData.
+ */
+export async function getPayoutRequests(
+    profileId: string,
+    account?: Account | null,
+): Promise<PayoutRequest[]> {
+    if (!account || !account.address) {
+        console.warn('[db] getPayoutRequests called without a signer account');
+        return [];
+    }
+
+    const issuedAt = Date.now();
+    const nonce = generatePayoutNonce();
+    const message =
+        `MU6 Payout List\n` +
+        `profileId: ${profileId}\n` +
+        `issuedAt: ${issuedAt}\n` +
+        `nonce: ${nonce}`;
+
+    let signature: string;
+    try {
+        signature = await account.signMessage({ message });
+    } catch (err: any) {
+        console.error('[db] getPayoutRequests signMessage error:', err);
+        return [];
+    }
+
     try {
         const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-list`, {
             method: 'POST',
@@ -2608,7 +2720,13 @@ export async function getPayoutRequests(profileId: string): Promise<PayoutReques
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
             },
-            body: JSON.stringify({ profileId }),
+            body: JSON.stringify({
+                profileId,
+                signature,
+                signerAddress: account.address,
+                issuedAt,
+                nonce,
+            }),
         });
 
         const result = await response.json();

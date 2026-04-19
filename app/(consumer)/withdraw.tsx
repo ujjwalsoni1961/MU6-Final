@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
-import { useWalletBalance } from 'thirdweb/react';
+import { useWalletBalance, useActiveAccount } from 'thirdweb/react';
 import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
 import * as db from '../../src/services/database';
 
@@ -24,6 +24,7 @@ export default function WithdrawScreen() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { walletAddress, profile } = useAuth();
+    const account = useActiveAccount();
     const { isDesktopLayout } = useResponsive();
 
     const [step, setStep] = useState<Step>('loading');
@@ -128,13 +129,24 @@ export default function WithdrawScreen() {
             return;
         }
 
+        if (!account) {
+            Alert.alert('Wallet Required', 'Please connect your wallet before requesting a withdrawal.');
+            return;
+        }
+
         setSubmitting(true);
         try {
-            const result = await db.createPayoutRequest(profile.id, numAmount, bankDetails);
+            const result = await db.createPayoutRequest(
+                profile.id,
+                numAmount,
+                bankDetails,
+                bankDetails.paymentMethod,
+                account,
+            );
             if (result.id) {
                 setStep('success');
                 // Refresh history
-                const history = await db.getPayoutRequests(profile.id);
+                const history = await db.getPayoutRequests(profile.id, account);
                 setPayoutHistory(history);
             } else {
                 Alert.alert('Error', result.error || 'Failed to submit withdrawal request. Please try again.');
@@ -145,7 +157,7 @@ export default function WithdrawScreen() {
         } finally {
             setSubmitting(false);
         }
-    }, [profile?.id, bankDetails, amount]);
+    }, [profile?.id, bankDetails, amount, account]);
 
     const getStatusColor = (status: string) => {
         switch (status) {

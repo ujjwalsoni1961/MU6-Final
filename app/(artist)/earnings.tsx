@@ -11,6 +11,7 @@ import {
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { useActiveAccount } from 'thirdweb/react';
 import GlassCard from '../../src/components/shared/GlassCard';
 import { useCreatorRoyalties, useRoyaltyHistory } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
@@ -307,16 +308,23 @@ export default function EarningsScreen() {
         }
     }, [profile?.id]);
 
+    const account = useActiveAccount();
+
     const loadPayouts = useCallback(async () => {
         if (!profile?.id) return;
+        if (!account) {
+            // Wallet not yet connected — edge fn requires a signed request.
+            setPayouts([]);
+            return;
+        }
         setPayoutsLoading(true);
         try {
-            const p = await getPayoutRequests(profile.id);
+            const p = await getPayoutRequests(profile.id, account);
             setPayouts(p);
         } finally {
             setPayoutsLoading(false);
         }
-    }, [profile?.id]);
+    }, [profile?.id, account]);
 
     useEffect(() => {
         refreshBalance();
@@ -336,7 +344,18 @@ export default function EarningsScreen() {
 
         setRequestingPayout(true);
         try {
-            const result = await createPayoutRequest(profile.id, availableBalance.availableBalance, bankDetails, bankDetails.paymentMethod);
+            if (!account) {
+                const msg = 'Please connect your wallet before requesting a payout.';
+                Platform.OS === 'web' ? alert(msg) : Alert.alert('Wallet Required', msg);
+                return;
+            }
+            const result = await createPayoutRequest(
+                profile.id,
+                availableBalance.availableBalance,
+                bankDetails,
+                bankDetails.paymentMethod,
+                account,
+            );
             if (result.error) {
                 const msg = result.error;
                 Platform.OS === 'web' ? alert(msg) : Alert.alert('Error', msg);
