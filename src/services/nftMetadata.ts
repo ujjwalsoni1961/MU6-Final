@@ -430,26 +430,39 @@ export async function buildAndPinReleaseMetadata(
         throw new Error(`pinReleaseMetadata: invalid tokenId "${tokenIdStr}"`);
     }
 
-    // Wrap the JSON as a File whose NAME is the decimal tokenId (no extension).
-    // thirdweb's upload() preserves file names in the resulting directory CID.
-    // The resulting URI is `ipfs://<cid>/<tokenIdStr>` which is exactly what
-    // DropERC1155.uri(tokenId) will return after lazyMint with baseURI=`ipfs://<cid>/`.
+    // Wrap the JSON as a named buffer whose NAME is the decimal tokenId (no
+    // extension). thirdweb's upload() preserves file names in the resulting
+    // directory CID. The resulting URI is `ipfs://<cid>/<tokenIdStr>` which is
+    // exactly what DropERC1155.uri(tokenId) will return after lazyMint with
+    // baseURI=`ipfs://<cid>/`.
+    //
+    // IMPORTANT: thirdweb's `upload()` detects the input shape via
+    // `isFileInstance(File)` and `isBufferOrStringWithName({data,name})`.
+    //   - `new File([json], name)` only matches when a REAL `File` global
+    //     exists. On React Native (Hermes / Expo Go) there is no `File` global,
+    //     so a polyfilled File-shaped object falls through both checks and
+    //     thirdweb renames the file to its array index ("0"). That silently
+    //     broke token 7 on prod (baseURI `ipfs://<cid>/0` instead of `.../`
+    //     → `uri(7)` → `ipfs://<cid>/07` → 404).
+    //   - The portable, environment-independent shape is
+    //     `{ data: Uint8Array, name: string }`, which thirdweb explicitly
+    //     supports in `isBufferOrStringWithName` and preserves verbatim. This
+    //     works on web, Hermes, Node, and Deno.
     const jsonText = JSON.stringify(metadataJson);
-    // Use a Blob-backed File where `File` exists (web + modern RN); otherwise
-    // thirdweb's storage accepts a Blob with an implicit filename, but we must
-    // set it explicitly — fall back to constructing a File-shaped object.
-    let file: File;
-    if (typeof File !== 'undefined') {
-        file = new File([jsonText], tokenIdStr, { type: 'application/json' });
-    } else {
-        const blob = new Blob([jsonText], { type: 'application/json' });
-        // Shim a minimal File interface when File global is missing.
-        file = Object.assign(blob as any, { name: tokenIdStr }) as File;
-    }
+    const jsonBytes = (() => {
+        if (typeof TextEncoder !== 'undefined') {
+            return new TextEncoder().encode(jsonText);
+        }
+        // Hermes before SDK 50 lacked TextEncoder; Buffer is available in RN.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { Buffer } = require('buffer');
+        return new Uint8Array(Buffer.from(jsonText, 'utf8'));
+    })();
+    const namedFile = { data: jsonBytes, name: tokenIdStr };
 
     const uploadedUri = await upload({
         client: thirdwebClient,
-        files: [file],
+        files: [namedFile as any],
     });
     const metadataUri = Array.isArray(uploadedUri)
         ? uploadedUri[0]

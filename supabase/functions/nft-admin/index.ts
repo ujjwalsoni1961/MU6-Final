@@ -728,6 +728,26 @@ Deno.serve(async (req: Request) => {
             if (!amount) return jsonResponse({ error: "Missing amount" }, 400);
             if (!baseURI) baseURI = "ipfs://QmWYNy1tmd2UvBQNE9mT1TfQCu85GzD9x237wDdf5ahcWk/";
 
+            // Server-side defense: DropERC1155 concatenates `baseURI + tokenId`
+            // as decimal strings. If baseURI doesn't end with '/', every
+            // minted token's uri() returns a non-existent IPFS path
+            // (e.g. baseURI `ipfs://<cid>/0` + tokenId `7` → `ipfs://<cid>/07`
+            // which 404s). This has silently broken multiple releases when
+            // clients running stale bundles submitted malformed baseURIs.
+            // Reject at the edge so the chain never gets corrupted.
+            if (typeof baseURI !== "string" || !baseURI.endsWith("/")) {
+                return jsonResponse({
+                    success: false,
+                    error: `lazyMint rejected: baseURI must be a string ending with '/'. Got: ${JSON.stringify(baseURI)}. The client may be running a stale bundle; hard-refresh and retry.`,
+                }, 400);
+            }
+            if (!/^ipfs:\/\/[A-Za-z0-9]+\/$/.test(baseURI)) {
+                return jsonResponse({
+                    success: false,
+                    error: `lazyMint rejected: baseURI must be of shape ipfs://<cid>/ (no sub-path). Got: ${baseURI}. The client may be running a stale bundle; hard-refresh and retry.`,
+                }, 400);
+            }
+
             const requestBody = {
                 executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
                 params: [{
