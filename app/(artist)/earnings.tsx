@@ -10,7 +10,7 @@ import {
     DollarSign,
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useActiveAccount } from 'thirdweb/react';
 import GlassCard from '../../src/components/shared/GlassCard';
 import { useCreatorRoyalties, useRoyaltyHistory } from '../../src/hooks/useData';
@@ -28,6 +28,7 @@ import {
 } from '../../src/services/database';
 import { formatFiat, formatToken } from '../../src/services/fxRate';
 import { EXPLORER_BASE as POLYGONSCAN_BASE, RPC_URL } from '../../src/config/network';
+import { supabase } from '../../src/lib/supabase';
 
 const isWeb = Platform.OS === 'web';
 
@@ -332,6 +333,41 @@ export default function EarningsScreen() {
         loadPayouts();
     }, [refreshBalance, loadNFTSales, loadPayouts]);
 
+    // Refresh whenever the screen regains focus (e.g. admin approved a payout
+    // in another session/device — artist returns to this tab).
+    useFocusEffect(
+        useCallback(() => {
+            refreshBalance();
+            loadPayouts();
+        }, [refreshBalance, loadPayouts])
+    );
+
+    // Realtime: subscribe to this artist's payout_requests rows so balance +
+    // history update immediately when admin flips status (pending → completed /
+    // failed). Source of truth stays the DB; this is pure UI liveness.
+    useEffect(() => {
+        if (!profile?.id) return;
+        const channel = supabase
+            .channel(`payouts:${profile.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'payout_requests',
+                    filter: `profile_id=eq.${profile.id}`,
+                },
+                () => {
+                    refreshBalance();
+                    loadPayouts();
+                },
+            )
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [profile?.id, refreshBalance, loadPayouts]);
+
     const handleRequestPayout = async () => {
         if (!profile?.id || !availableBalance || availableBalance.availableBalance <= 0) return;
 
@@ -410,7 +446,7 @@ export default function EarningsScreen() {
                 {/* ── Section 1: Overview Cards ── */}
                 <View style={{ flexDirection: 'row', marginBottom: 4 }}>
                     {/* Streaming revenue is EUR; NFT sale POL totals come from the wallet card below. */}
-                    <OverviewCard title="Streaming" amount={`€${streamingRevenue.toFixed(2)}`} subtitle="Accrued" color="#38b4ba" />
+                    <OverviewCard title="Streaming" amount={`€${streamingRevenue.toFixed(2)}`} subtitle="Total earned — does not debit" color="#38b4ba" />
                     <OverviewCard title="NFT Royalties" amount={`€${totalNFTRevenue.toFixed(2)}`} subtitle="Split-sheet accrual" color="#8b5cf6" />
                 </View>
                 <View style={{ flexDirection: 'row', marginBottom: 20 }}>

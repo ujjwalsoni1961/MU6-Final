@@ -228,18 +228,41 @@ Deno.serve(async (req: Request) => {
         );
     }
 
-    // Server-side balance check — recompute, do not trust client number.
-    // Reuse whatever `artist_available_balance_eur` view/rpc the app uses;
-    // fall back to sum(song earnings) - sum(paid payouts). Here we trust the
-    // client-supplied amount but bound it against a generous upper bound so
-    // we never approve > a plausible balance. A full rewrite of the balance
-    // calc lives in the app; pragmatic patch: cap at €100k per request.
-    if (amountEur <= 0 || amountEur > 100_000) {
+    // Basic sanity bound before the real balance check.
+    if (!Number.isFinite(amountEur) || amountEur <= 0) {
         return jsonResponse(
             {
                 success: false,
                 error: "Invalid payout amount.",
                 code: "AMOUNT_INVALID",
+            },
+            400,
+        );
+    }
+
+    // Server-side balance check — authoritative. Never trust the client.
+    // Uses the same get_artist_balance RPC the UI shows (migration 017),
+    // which subtracts pending+completed payouts from streaming-only earnings.
+    const { data: balanceRows, error: balanceErr } = await supabaseAdmin
+        .rpc("get_artist_balance", { p_profile_id: profileId });
+    if (balanceErr) {
+        console.error("[payout-request] balance RPC error:", balanceErr);
+        return jsonResponse(
+            { success: false, error: "Failed to verify balance", code: "BALANCE_LOOKUP_FAILED" },
+            500,
+        );
+    }
+    const balanceRow = Array.isArray(balanceRows) ? balanceRows[0] : balanceRows;
+    const availableBalance = Number(balanceRow?.available_balance ?? 0);
+    // Tolerance for floating-point drift at the cent level.
+    const EPSILON = 0.005;
+    if (amountEur > availableBalance + EPSILON) {
+        return jsonResponse(
+            {
+                success: false,
+                error: `Insufficient balance. Available: €${availableBalance.toFixed(2)}, requested: €${Number(amountEur).toFixed(2)}.`,
+                code: "INSUFFICIENT_BALANCE",
+                availableBalance,
             },
             400,
         );
