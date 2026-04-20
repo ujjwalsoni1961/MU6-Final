@@ -195,7 +195,16 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
             )}
 
             {/* Search Bar Container */}
-            <View style={{ position: 'relative', flex: 1, maxWidth: 420, marginLeft: isPhoneLayout ? 12 : (isTablet ? 20 : 32), zIndex: 101 }}>
+            {/*
+              `minWidth: 0` is critical in a flex row: without it, the flex item
+              inherits `minWidth: auto` (content size), and the TextInput's
+              intrinsic placeholder width ("Search songs, creators, NFTs...")
+              forces the container wider than the viewport on phones, pushing
+              the avatar off-screen and the search bar past the right edge.
+              With minWidth:0 the container can actually shrink to share
+              available row space.
+            */}
+            <View style={{ position: 'relative', flex: 1, minWidth: 0 as any, maxWidth: 420, marginLeft: isPhoneLayout ? 12 : (isTablet ? 20 : 32), marginRight: isPhoneLayout ? 12 : 0, zIndex: 101 }}>
 
                 {/* 
                     Using Pressable as a wrapper for Hover detection on Web. 
@@ -235,7 +244,7 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                 >
                     <Search size={16} color={isSearchFocused ? colors.accent.cyan : colors.text.muted} style={{ marginRight: 12 }} />
                     <TextInput
-                        placeholder="Search songs, creators, NFTs..."
+                        placeholder={isPhoneLayout ? 'Search...' : 'Search songs, creators, NFTs...'}
                         placeholderTextColor={isDark ? colors.text.secondary : colors.text.muted}
                         value={searchQuery}
                         onChangeText={setSearchQuery}
@@ -384,7 +393,14 @@ export default function WebHeader({ scrollY }: WebHeaderProps) {
                 )}
             </View>
 
-            <View style={{ flex: 1 }} />
+            {/*
+              On phone layout the search container already uses flex:1 and a
+              fixed margin to the avatar — an additional flex:1 spacer would
+              steal width from the search input and reintroduce overflow.
+              Only render the spacer on tablet+ where the search is capped at
+              maxWidth:420 and we want the avatar to hug the right edge.
+            */}
+            {!isPhoneLayout && <View style={{ flex: 1 }} />}
 
             {/* Profile Avatar with Hover Dropdown */}
             <View style={{ position: 'relative', zIndex: 1000 }}>
