@@ -26,8 +26,13 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import { supabase } from '../../src/lib/supabase';
-import { createErc1155Release, resolveArtistErc1155Contract } from '../../src/services/blockchain';
+import {
+    createErc1155Release,
+    getErc1155NextTokenIdToMint,
+    resolveArtistErc1155Contract,
+} from '../../src/services/blockchain';
 import { buildAndPinReleaseMetadata } from '../../src/services/nftMetadata';
+import { extFromBlobOrUri, mimeFromBlobOrExt } from '../../src/utils/fileExt';
 import { CONTRACT_ADDRESSES, CHAIN_ID } from '../../src/config/network';
 
 // ERC-1155 contract address — read from env; falls back to Amoy testnet default.
@@ -191,12 +196,17 @@ export default function NFTManagerScreen() {
         if (!coverImageUri) return null;
         setCoverImageUploading(true);
         try {
-            const ext = coverImageUri.split('.').pop() || 'jpg';
-            const fileName = `nft-cover-${Date.now()}.${ext}`;
+            // Fetch the picker URI FIRST so we can infer extension from the
+            // actual Blob MIME type. Using `coverImageUri.split('.').pop()` on
+            // a blob:/app:/file:// URL yields junk like `app/976cfcb5-…`
+            // which then gets baked into the filename and the IPFS path.
             const response = await fetch(coverImageUri);
             const blob = await response.blob();
+            const ext = extFromBlobOrUri(blob, coverImageUri, 'jpg');
+            const fileName = `nft-cover-${Date.now()}.${ext}`;
+            const contentType = mimeFromBlobOrExt(blob, ext);
             const { error } = await supabase.storage.from('covers').upload(`nft-covers/${fileName}`, blob, {
-                contentType: `image/${ext}`,
+                contentType,
                 upsert: true,
             });
             if (error) throw error;
@@ -282,6 +292,34 @@ export default function NFTManagerScreen() {
                 throw new Error('Song has no cover image. Please add one before minting.');
             }
 
+            // Resolve the target ERC-1155 contract FIRST (per-artist or shared).
+            // We need its address both to read `nextTokenIdToMint` (for pinning
+            // metadata at the exact id the lazyMint will consume) and for the
+            // subsequent release creation call.
+            const contractForRelease = profile?.id
+                ? await resolveArtistErc1155Contract(profile.id, ERC1155_CONTRACT)
+                : ERC1155_CONTRACT;
+            if (contractForRelease !== ERC1155_CONTRACT) {
+                console.log('[nft-manager] using per-artist contract:', contractForRelease);
+            }
+
+            // Read the on-chain nextTokenIdToMint so we can pin the metadata
+            // JSON as a file literally named `<nextTokenId>`. DropERC1155
+            // computes `uri(tokenId) = baseURI + tokenId`, so uploading the
+            // JSON with the correct filename is what makes the lazy-minted
+            // token resolve to real metadata. Without this, only tokenId 0
+            // works (the legacy bug).
+            setErc1155Progress('Reading on-chain token counter…');
+            let expectedNextTokenId: bigint;
+            try {
+                expectedNextTokenId = await getErc1155NextTokenIdToMint(contractForRelease);
+            } catch (err: any) {
+                setErc1155CreateError(`Could not read on-chain token counter: ${err?.message || err}`);
+                return;
+            }
+            const expectedTokenId = expectedNextTokenId.toString();
+            console.log('[nft-manager] expected nextTokenIdToMint:', expectedTokenId);
+
             setErc1155Progress('Preparing NFT metadata…');
             const pin = await buildAndPinReleaseMetadata(
                 {
@@ -299,20 +337,14 @@ export default function NFTManagerScreen() {
                     releaseDate: selectedSong.credits?.releaseDate,
                     benefits: benefits.length > 0 ? benefits : undefined,
                 },
+                expectedTokenId,
                 (step) => setErc1155Progress(step),
             );
-            const metadataUri = pin.metadataUri;
-            console.log('[nft-manager] metadata pinned:', metadataUri, pin);
-
-            // Per-artist contract (Fix 4). Falls back to shared contract
-            // when EXPO_PUBLIC_PER_ARTIST_CONTRACTS is not enabled or the
-            // artist hasn't deployed their own.
-            const contractForRelease = profile?.id
-                ? await resolveArtistErc1155Contract(profile.id, ERC1155_CONTRACT)
-                : ERC1155_CONTRACT;
-            if (contractForRelease !== ERC1155_CONTRACT) {
-                console.log('[nft-manager] using per-artist contract:', contractForRelease);
-            }
+            console.log('[nft-manager] metadata pinned:', {
+                tokenId: pin.tokenId,
+                baseURI: pin.baseURI,
+                metadataUri: pin.metadataUri,
+            });
 
             setErc1155Progress('Lazy-minting token on-chain (server wallet)…');
 
@@ -323,7 +355,8 @@ export default function NFTManagerScreen() {
                     rarity,
                     maxSupply: maxSupplyVal,
                     pricePol: price,
-                    metadataUri,
+                    baseURI: pin.baseURI,
+                    expectedTokenId: pin.tokenId,
                     description: description.trim() || undefined,
                     coverImagePath: uploadedCoverPath || undefined,
                     benefits: benefits.length > 0 ? benefits : undefined,

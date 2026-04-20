@@ -240,10 +240,12 @@ export async function serverLazyMint(
     amount: number,
     baseURI: string,
     contractAddress?: string,
-): Promise<{ success: boolean; error?: string }> {
+    opts: { waitForConfirm?: boolean } = {},
+): Promise<{ success: boolean; error?: string; transactionHash?: string; transactionId?: string }> {
+    const waitForConfirm = opts.waitForConfirm !== false; // default true
     try {
         const url = `${SUPABASE_URL}/functions/v1/nft-admin`;
-        console.log('[blockchain] serverLazyMint: calling edge function', { amount, baseURI });
+        console.log('[blockchain] serverLazyMint: calling edge function', { amount, baseURI, waitForConfirm });
 
         const response = await fetch(url, {
             method: 'POST',
@@ -253,6 +255,7 @@ export async function serverLazyMint(
                 amount,
                 baseURI,
                 contractAddress: contractAddress || CONTRACTS.SONG_NFT,
+                waitForConfirm,
             }),
         });
 
@@ -263,7 +266,11 @@ export async function serverLazyMint(
             return { success: false, error: result.error || `HTTP ${response.status}` };
         }
 
-        return { success: true };
+        return {
+            success: true,
+            transactionHash: result.transactionHash,
+            transactionId: result.transactionId,
+        };
     } catch (err: any) {
         console.error('[blockchain] serverLazyMint error:', err);
         return { success: false, error: err.message };
@@ -662,8 +669,20 @@ export interface Erc1155MintConfig {
     pricePol: number;
     /** Unix timestamp (seconds) when claim goes live — 0 = now */
     startTime?: number;
-    /** IPFS metadata base URI */
-    metadataUri: string;
+    /**
+     * IPFS baseURI passed verbatim to DropERC1155.lazyMint. Must end with '/'
+     * and the folder must contain a file literally named `<expectedTokenId>`
+     * so `uri(tokenId)` resolves. Produced by `buildAndPinReleaseMetadata`.
+     */
+    baseURI: string;
+    /**
+     * TokenId the caller expected at the time of metadata pinning. The
+     * create flow will compare this against the actual on-chain id after
+     * the lazyMint confirms; a mismatch means another tx raced in and the
+     * pinned metadata doesn't match the new id — we surface a repair flag
+     * instead of silently corrupting the release.
+     */
+    expectedTokenId: string;
     /** Optional description */
     description?: string;
     /** Optional cover image path in Supabase storage */
@@ -681,7 +700,7 @@ export interface Erc1155MintConfig {
  * This is the token_id that the upcoming lazyMint will assign.
  * Uses eth_call directly so it works without a connected wallet.
  */
-async function getErc1155NextTokenIdToMint(contractAddress: string): Promise<bigint> {
+export async function getErc1155NextTokenIdToMint(contractAddress: string): Promise<bigint> {
     const SUPABASE_URL_LOCAL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
     const THIRDWEB_CLIENT_ID = process.env.EXPO_PUBLIC_THIRDWEB_CLIENT_ID || '';
     const chainId = CHAIN_ID;
@@ -716,12 +735,24 @@ async function getErc1155NextTokenIdToMint(contractAddress: string): Promise<big
 /**
  * Create a new ERC-1155 release on the shared DropERC1155 contract.
  *
- * Steps:
- *  1. Read nextTokenIdToMint (determines the token_id this release will get)
- *  2. Call nft-admin lazyMint (amount=1, baseURI=metadataUri) via server wallet
- *  3. Insert nft_releases row with token_id + contract_address (DropERC1155)
- *  4. Call setClaimConditionForToken with price/supply
- *  5. Call setRoyaltyInfoForToken with artist's bps + recipient
+ * Flow (race-safe + atomic):
+ *  1. Caller has already read `nextTokenIdToMint` and pinned metadata under
+ *     a folder where the file literally named `<expectedTokenId>` is the
+ *     JSON for this release. Those arrive in `config.baseURI` +
+ *     `config.expectedTokenId`.
+ *  2. Call nft-admin lazyMint via server wallet AND wait for the tx to
+ *     confirm on-chain — this is critical; the previous fire-and-forget
+ *     behaviour allowed a second concurrent release to race ahead, which
+ *     left the DB pointing at a token whose on-chain URI was minted by
+ *     someone else (observed: 7 on-chain tokens, 2 DB rows, orphaned 1-6).
+ *  3. Re-read `nextTokenIdToMint` — the token we just created is
+ *     `actualNext - 1`. If that mismatches `expectedTokenId`, a concurrent
+ *     tx raced in between step 1 and step 2, so the pinned metadata no
+ *     longer matches the new id. We DO NOT insert a bad DB row in that
+ *     case — surface a repair-needed error instead. (Defer: add
+ *     auto-repin + `updateBatchBaseURI`.)
+ *  4. Insert `nft_releases` using the verified `actualTokenId`.
+ *  5. Set claim condition + royalty info for that token id.
  *
  * Returns releaseId, tokenId on success.
  */
@@ -733,27 +764,103 @@ export async function createErc1155Release(
     releaseId?: string;
     tokenId?: string;
     error?: string;
+    needsRepair?: boolean;
+    repairContext?: {
+        expectedTokenId: string;
+        actualTokenId: string;
+        baseURI: string;
+        txHash?: string;
+    };
 }> {
-    // --- Step 1: Read next token ID before lazy-minting ---
-    let nextTokenId: bigint;
-    try {
-        nextTokenId = await getErc1155NextTokenIdToMint(erc1155ContractAddress);
-        console.log('[blockchain] ERC-1155 nextTokenIdToMint:', nextTokenId.toString());
-    } catch (err: any) {
-        console.error('[blockchain] getErc1155NextTokenIdToMint error:', err);
-        return { success: false, error: `Could not read on-chain token counter: ${err.message}` };
+    const expectedTokenId = String(config.expectedTokenId);
+    if (!config.baseURI || !config.baseURI.endsWith('/')) {
+        return { success: false, error: 'baseURI missing or not trailing-slash terminated' };
+    }
+    if (!/^\d+$/.test(expectedTokenId)) {
+        return { success: false, error: `expectedTokenId not a positive integer: ${expectedTokenId}` };
     }
 
-    const tokenId = nextTokenId.toString();
+    // --- Step 1: pre-flight check that nextTokenIdToMint matches expectation.
+    //     (If it already diverges, the metadata we pinned is wrong — bail.) ---
+    try {
+        const preNext = await getErc1155NextTokenIdToMint(erc1155ContractAddress);
+        if (preNext.toString() !== expectedTokenId) {
+            console.warn(
+                '[blockchain] createErc1155Release: nextTokenIdToMint drift BEFORE lazyMint',
+                { expected: expectedTokenId, onChain: preNext.toString() },
+            );
+            return {
+                success: false,
+                error: `Another release raced ahead (expected token id ${expectedTokenId}, chain reports ${preNext.toString()}). Please retry; metadata will be re-pinned with the correct id.`,
+            };
+        }
+    } catch (err: any) {
+        console.error('[blockchain] pre-lazyMint getErc1155NextTokenIdToMint error:', err);
+        return { success: false, error: `Could not read on-chain token counter: ${err?.message || err}` };
+    }
 
-    // --- Step 2: Lazy mint 1 token on the shared DropERC1155 ---
-    const lazyMintResult = await serverLazyMint(1, config.metadataUri, erc1155ContractAddress);
+    // --- Step 2: Lazy mint 1 token on the shared DropERC1155, WAIT for confirm ---
+    const lazyMintResult = await serverLazyMint(
+        1,
+        config.baseURI,
+        erc1155ContractAddress,
+        { waitForConfirm: true },
+    );
     if (!lazyMintResult.success) {
         return { success: false, error: `Lazy mint failed: ${lazyMintResult.error}` };
     }
-    console.log('[blockchain] ERC-1155 lazyMint succeeded for tokenId', tokenId);
+    console.log(
+        '[blockchain] ERC-1155 lazyMint confirmed',
+        { expectedTokenId, txHash: lazyMintResult.transactionHash, baseURI: config.baseURI },
+    );
 
-    // --- Step 3: Insert DB row ---
+    // --- Step 3: Verify the on-chain tokenId the lazyMint actually produced ---
+    let actualTokenId: string;
+    try {
+        const postNext = await getErc1155NextTokenIdToMint(erc1155ContractAddress);
+        if (postNext <= 0n) {
+            return { success: false, error: 'Post-lazyMint nextTokenIdToMint returned 0 (unexpected)' };
+        }
+        actualTokenId = (postNext - 1n).toString();
+    } catch (err: any) {
+        console.error('[blockchain] post-lazyMint getErc1155NextTokenIdToMint error:', err);
+        return {
+            success: false,
+            error: `lazyMint confirmed but could not re-read nextTokenIdToMint to verify tokenId: ${err?.message || err}`,
+            needsRepair: true,
+            repairContext: {
+                expectedTokenId,
+                actualTokenId: 'unknown',
+                baseURI: config.baseURI,
+                txHash: lazyMintResult.transactionHash,
+            },
+        };
+    }
+
+    if (actualTokenId !== expectedTokenId) {
+        console.error(
+            '[blockchain] createErc1155Release tokenId DRIFT — metadata pinned at wrong id',
+            { expectedTokenId, actualTokenId, baseURI: config.baseURI },
+        );
+        // DO NOT write a corrupt DB row. Surface repair context so the caller
+        // can either retry (if they haven't consumed credits) or schedule a
+        // re-pin + updateBatchBaseURI remediation.
+        return {
+            success: false,
+            error: `Token id mismatch: metadata pinned for id ${expectedTokenId} but lazyMint produced id ${actualTokenId}. Likely cause: a concurrent release raced this tx. Re-pin metadata under baseURI/<${actualTokenId}> and call updateBatchBaseURI, or retry the flow.`,
+            needsRepair: true,
+            repairContext: {
+                expectedTokenId,
+                actualTokenId,
+                baseURI: config.baseURI,
+                txHash: lazyMintResult.transactionHash,
+            },
+        };
+    }
+
+    const tokenId = actualTokenId;
+
+    // --- Step 4: Insert DB row using verified tokenId ---
     const priceWei = BigInt(Math.round(config.pricePol * 1e18)).toString();
     const maxSupplyVal = config.maxSupply > 0 ? config.maxSupply : 1_000_000;
 
@@ -782,8 +889,23 @@ export async function createErc1155Release(
         .single();
 
     if (dbError) {
-        console.error('[blockchain] createErc1155Release DB insert error:', dbError);
-        return { success: false, error: dbError.message };
+        // Log the full error body — the prior '[object Object]' was useless.
+        console.error(
+            '[blockchain] createErc1155Release DB insert error:',
+            JSON.stringify(dbError, null, 2),
+            { expectedTokenId, actualTokenId: tokenId, baseURI: config.baseURI },
+        );
+        return {
+            success: false,
+            error: `DB insert failed for tokenId=${tokenId}: ${dbError.message || JSON.stringify(dbError)}`,
+            needsRepair: true,
+            repairContext: {
+                expectedTokenId,
+                actualTokenId: tokenId,
+                baseURI: config.baseURI,
+                txHash: lazyMintResult.transactionHash,
+            },
+        };
     }
 
     const releaseId = release.id;

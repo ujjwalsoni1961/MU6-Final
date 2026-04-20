@@ -716,8 +716,14 @@ Deno.serve(async (req: Request) => {
         }
 
         // ── Lazy Mint ──
+        //
+        // We now WAIT for confirmation before returning so the caller can
+        // immediately read `nextTokenIdToMint` and know the tx landed. This
+        // is what makes the `createErc1155Release` serialization work: the
+        // caller reads next-id → pins metadata for that id → calls this →
+        // waits here → verifies next-id advanced by exactly `amount`.
         if (action === "lazyMint") {
-            let { amount, baseURI, contractAddress } = body;
+            let { amount, baseURI, contractAddress, waitForConfirm } = body;
             if (!amount) return jsonResponse({ error: "Missing amount" }, 400);
             if (!baseURI) baseURI = "ipfs://QmWYNy1tmd2UvBQNE9mT1TfQCu85GzD9x237wDdf5ahcWk/";
 
@@ -730,12 +736,32 @@ Deno.serve(async (req: Request) => {
                 }],
             };
 
-            console.log("[nft-admin] lazyMint:", amount);
+            console.log("[nft-admin] lazyMint:", amount, "baseURI:", baseURI);
             const { ok, status, result } = await callEngine(requestBody);
             console.log("[nft-admin] lazyMint response:", status);
             if (!ok) return jsonResponse({ success: false, error: result }, status);
             const txId = result?.result?.transactions?.[0]?.id;
-            return jsonResponse({ success: true, transactionId: txId, result });
+
+            // Default to waiting — old clients that pass `waitForConfirm: false`
+            // get the legacy fire-and-forget behaviour.
+            if (waitForConfirm === false) {
+                return jsonResponse({ success: true, transactionId: txId, result });
+            }
+            if (!txId) {
+                return jsonResponse({ success: false, error: "Engine did not return a transaction id" }, 500);
+            }
+            const { confirmed, hash, error: waitErr } = await waitForTx(txId, 60000);
+            if (!confirmed) {
+                const errMsg = typeof waitErr === "string" ? waitErr : (waitErr || "lazyMint tx did not confirm");
+                return jsonResponse({ success: false, error: errMsg, transactionId: txId }, 500);
+            }
+            console.log("[nft-admin] lazyMint confirmed, hash:", hash);
+            return jsonResponse({
+                success: true,
+                transactionId: txId,
+                transactionHash: hash,
+                result,
+            });
         }
 
         // ── Server Claim (DropERC1155) ──

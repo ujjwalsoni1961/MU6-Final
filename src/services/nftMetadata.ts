@@ -24,6 +24,7 @@ import { upload } from 'thirdweb/storage';
 import { thirdwebClient } from '../lib/thirdweb';
 import { supabase } from '../lib/supabase';
 import { getAudioUrl } from './database';
+import { extFromBlobOrUri, mimeFromBlobOrExt } from '../utils/fileExt';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -74,7 +75,16 @@ export interface NftMetadataInput {
 }
 
 export interface NftMetadataUploadResult {
-    metadataUri: string; // ipfs://<cid>/0
+    /**
+     * Base URI that, when concatenated with a decimal token id, resolves to
+     * a valid OpenSea-schema metadata JSON on IPFS. Always ends with '/'.
+     * The baseURI is what you pass to DropERC1155.lazyMint(amount, baseURI).
+     */
+    baseURI: string;
+    /** Human-debug: `ipfs://<cid>/<tokenId>` for the pinned tokenId. */
+    metadataUri: string;
+    /** The on-chain tokenId this upload is bound to. */
+    tokenId: string;
     coverImageUri: string; // ipfs://<cid>/… pinned cover
     animationUri: string | null; // ipfs://… preview, or null if unavailable
     metadataJson: Record<string, unknown>;
@@ -126,9 +136,9 @@ async function resolveCoverToIpfs(
             );
         }
         blob = await resp.blob();
-        const ext = source.value.split('.').pop()?.split('?')[0] || 'jpg';
+        const ext = extFromBlobOrUri(blob, source.value, 'jpg');
         fileName = `cover.${ext}`;
-        mimeType = blob.type || `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        mimeType = mimeFromBlobOrExt(blob, ext);
     } else if (source.kind === 'supabase-path') {
         // Public bucket — build download URL and fetch.
         const { data } = supabase.storage
@@ -144,9 +154,11 @@ async function resolveCoverToIpfs(
             );
         }
         blob = await resp.blob();
-        const ext = source.value.split('.').pop() || 'jpg';
+        // Prefer MIME from the downloaded blob; only fall back to the
+        // stored Supabase path suffix when MIME is unknown.
+        const ext = extFromBlobOrUri(blob, source.value, 'jpg');
         fileName = `cover.${ext}`;
-        mimeType = blob.type || `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+        mimeType = mimeFromBlobOrExt(blob, ext);
     } else {
         throw new Error(`Unknown cover source kind: ${(source as any).kind}`);
     }
@@ -346,19 +358,34 @@ export function buildMetadataJson(
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Given a metadata input, pin cover + (optional) audio preview + metadata JSON,
- * and return the final `ipfs://…` URI that should be passed to `lazyMint` as baseURI.
+ * Given a metadata input + the exact on-chain tokenId this release will land
+ * at, pin cover + (optional) audio preview + metadata JSON, and return a
+ * baseURI suitable for `DropERC1155.lazyMint(1, baseURI)`.
  *
- * Thirdweb's DropERC1155 lazyMint expects the baseURI such that tokenId N
- * resolves to `<baseURI>/<N>`. Since we're minting a single token at a time
- * (amount=1 per release), we upload a single JSON file and pass its URI —
- * DropERC1155 strips the trailing filename and treats the folder as baseURI.
+ * Why tokenId matters here:
+ *   DropERC1155's on-chain `uri(tokenId)` resolves to `baseURI + tokenId`
+ *   using the GLOBAL tokenId as a decimal string (verified empirically on
+ *   contract 0x1045…B5Ad: token 5 → `ipfs://…/05`, token 6 → `ipfs://…/06`
+ *   when baseURI was `ipfs://…/0`). So the IPFS file inside the pinned
+ *   folder MUST be named exactly `<tokenId>` (no extension) or the
+ *   on-chain URI won't resolve.
  *
- * Implementation: we upload the JSON in a 1-element `files` array. Thirdweb
- * returns a directory-scoped URI `ipfs://<cid>/0`. That's exactly what we want.
+ *   thirdweb's default `upload(files: [json])` returns `ipfs://<cid>/0`
+ *   — a folder with a single file named `0`. That only works for tokenId=0.
+ *   To work for ANY tokenId we wrap the JSON as a File named literally
+ *   `<tokenId>` before uploading. The resulting URI is `ipfs://<cid>/<tokenId>`,
+ *   and we pass `ipfs://<cid>/` as baseURI to lazyMint.
+ *
+ * Caller contract:
+ *   The caller MUST serialize: read `nextTokenIdToMint` → call this
+ *   function with that id → call lazyMint(1, result.baseURI) → wait for
+ *   confirmation → verify `nextTokenIdToMint` advanced by 1. If another tx
+ *   slipped in between the read and our lazyMint, the tokenId assigned
+ *   on-chain won't match the filename we pinned — detect and repair.
  */
 export async function buildAndPinReleaseMetadata(
     input: NftMetadataInput,
+    tokenId: string | number | bigint,
     onProgress?: (step: string) => void,
 ): Promise<NftMetadataUploadResult> {
     onProgress?.('Pinning cover image to IPFS…');
@@ -396,14 +423,33 @@ export async function buildAndPinReleaseMetadata(
         pinnedAnimationUri,
     );
 
-    // Upload JSON object — pass the metadata object DIRECTLY (not wrapped
-    // in { name, data }) so the pinned file's top-level keys are the OpenSea
-    // schema (name, description, image, attributes, animation_url, …).
-    // Wrapping produces a file shaped like { name: '0', data: {…} } which
-    // marketplaces cannot parse.
+    const tokenIdStr = typeof tokenId === 'bigint'
+        ? tokenId.toString()
+        : String(tokenId);
+    if (!/^\d+$/.test(tokenIdStr)) {
+        throw new Error(`pinReleaseMetadata: invalid tokenId "${tokenIdStr}"`);
+    }
+
+    // Wrap the JSON as a File whose NAME is the decimal tokenId (no extension).
+    // thirdweb's upload() preserves file names in the resulting directory CID.
+    // The resulting URI is `ipfs://<cid>/<tokenIdStr>` which is exactly what
+    // DropERC1155.uri(tokenId) will return after lazyMint with baseURI=`ipfs://<cid>/`.
+    const jsonText = JSON.stringify(metadataJson);
+    // Use a Blob-backed File where `File` exists (web + modern RN); otherwise
+    // thirdweb's storage accepts a Blob with an implicit filename, but we must
+    // set it explicitly — fall back to constructing a File-shaped object.
+    let file: File;
+    if (typeof File !== 'undefined') {
+        file = new File([jsonText], tokenIdStr, { type: 'application/json' });
+    } else {
+        const blob = new Blob([jsonText], { type: 'application/json' });
+        // Shim a minimal File interface when File global is missing.
+        file = Object.assign(blob as any, { name: tokenIdStr }) as File;
+    }
+
     const uploadedUri = await upload({
         client: thirdwebClient,
-        files: [metadataJson],
+        files: [file],
     });
     const metadataUri = Array.isArray(uploadedUri)
         ? uploadedUri[0]
@@ -412,8 +458,20 @@ export async function buildAndPinReleaseMetadata(
         throw new Error('thirdweb upload returned empty metadata URI');
     }
 
+    // metadataUri should be `ipfs://<cid>/<tokenIdStr>` — strip the trailing
+    // filename to get the baseURI the contract will concatenate against.
+    const baseURI = metadataUri.replace(/\/[^/]+$/, '/');
+    // Sanity: baseURI + tokenIdStr must equal metadataUri.
+    if (`${baseURI}${tokenIdStr}` !== metadataUri) {
+        throw new Error(
+            `pinReleaseMetadata: unexpected metadataUri shape "${metadataUri}" for tokenId ${tokenIdStr}`,
+        );
+    }
+
     return {
+        baseURI,
         metadataUri,
+        tokenId: tokenIdStr,
         coverImageUri: pinnedCoverUri,
         animationUri: pinnedAnimationUri,
         metadataJson,
