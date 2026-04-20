@@ -86,7 +86,7 @@ interface TokenRow {
     owner_wallet_address: string | null;
     on_chain_token_id: string | null;
     is_voided: boolean | null;
-    created_at: string | null;
+    minted_at: string | null;
     release: { contract_address: string | null } | null;
 }
 
@@ -110,7 +110,7 @@ serve(async (req) => {
         const { data: rawTokens, error } = await supabase
             .from("nft_tokens")
             .select(
-                "id, owner_wallet_address, on_chain_token_id, is_voided, created_at, release:nft_releases(contract_address)",
+                "id, owner_wallet_address, on_chain_token_id, is_voided, minted_at, release:nft_releases(contract_address)",
             )
             .not("on_chain_token_id", "is", null)
             .or("is_voided.is.null,is_voided.eq.false");
@@ -162,8 +162,8 @@ serve(async (req) => {
             // Ledger overcounts — void the oldest rows until counts match.
             const excess = Number(dbCount - onChainBal);
             const sorted = [...rows].sort((a, b) => {
-                const ta = a.created_at ? Date.parse(a.created_at) : 0;
-                const tb = b.created_at ? Date.parse(b.created_at) : 0;
+                const ta = a.minted_at ? Date.parse(a.minted_at) : 0;
+                const tb = b.minted_at ? Date.parse(b.minted_at) : 0;
                 return ta - tb; // oldest first
             });
             const toVoid = sorted.slice(0, excess);

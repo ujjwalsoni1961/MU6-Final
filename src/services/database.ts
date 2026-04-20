@@ -1605,6 +1605,57 @@ export async function getErc1155OwnedTokens(walletAddress: string): Promise<NFTT
 }
 
 /**
+ * Get the universe of ERC-1155 releases for on-chain ownership scanning.
+ *
+ * Chain-first collection view (useOwnedNFTsWithStatus) needs to know which
+ * (contract, tokenId) pairs exist so it can call balanceOfBatch once per
+ * contract and discover everything a wallet holds — *including* tokens the
+ * wallet bought on secondary without us having ever written an nft_tokens row.
+ *
+ * Returns releases that:
+ *   - are ERC-1155 (nft_standard = 'erc1155')
+ *   - have been lazy-minted (token_id IS NOT NULL — pre-mint rows have no
+ *     on-chain slot yet so no wallet can own them)
+ *   - have a contract_address set
+ *   - belong to a song that is not soft-deleted (PDF #11 invariant)
+ *
+ * Ghost tokens (legacy pre-prod ids listed in nft_ghost_tokens) are NOT
+ * filtered here — callers filter with `getGhostTokenIds()` if they want to
+ * hide them. Keeping the universe complete at this layer lets admin tools
+ * still see ghost tokens if needed.
+ *
+ * Joined song + creator so the hook can render a card with zero extra DB
+ * round-trips when a wallet owns one of these tokens.
+ */
+export async function getAllErc1155ReleasesForScan(): Promise<NFTRelease[]> {
+    const { data, error } = await supabase
+        .from('nft_releases')
+        .select(`
+            *,
+            song:songs!song_id (
+                id, title, cover_path, creator_id, deleted_at,
+                creator:profiles!creator_id (
+                    id, display_name, avatar_path
+                )
+            )
+        `)
+        .eq('nft_standard', 'erc1155')
+        .eq('is_active', true)
+        .not('token_id', 'is', null)
+        .not('contract_address', 'is', null);
+
+    if (error || !data) {
+        if (error) console.error('[db] getAllErc1155ReleasesForScan error:', error);
+        return [];
+    }
+
+    // Drop releases whose song was soft-deleted (admin delete should remove
+    // the NFT from every collection immediately).
+    const rows = (data as any[]).filter((r) => !r.song?.deleted_at);
+    return rows.map(mapNFTReleaseRow);
+}
+
+/**
  * Get the set of on-chain token ids that the UI must treat as non-existent.
  *
  * These are legacy / pre-production tokens that live on the drop contract
