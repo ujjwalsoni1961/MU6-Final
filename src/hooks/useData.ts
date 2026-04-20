@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import * as db from '../services/database';
 import * as blockchain from '../services/blockchain';
-import { readErc1155BalanceBatch, fetchTokenMetadataFromChain } from './useOnChainNFT';
+import { readErc1155BalanceBatch, fetchTokenMetadataFromChain, readErc1155TotalSupplyForPairs } from './useOnChainNFT';
 import type {
     Song as DbSong,
     ArtistProfile as DbArtist,
@@ -143,9 +143,9 @@ export function adaptNFTRelease(r: DbNFTRelease): NFT {
         coverImage: r.coverImagePath ? coverUrl(r.coverImagePath) : coverUrl(r.song?.coverPath),
         nftCoverImage: r.coverImagePath ? coverUrl(r.coverImagePath) : undefined,
         price: r.priceEth || 0,
-        editionNumber: r.mintedCount, // how many minted so far
+        editionNumber: clampMintedCount(r.mintedCount, r.totalSupply), // how many minted so far
         totalEditions: r.totalSupply,
-        mintedCount: r.mintedCount,
+        mintedCount: clampMintedCount(r.mintedCount, r.totalSupply),
         owner: '', // not applicable for releases
         rarity: (r.rarity as NFT['rarity']) || 'common',
         tierName: r.tierName,
@@ -153,6 +153,21 @@ export function adaptNFTRelease(r: DbNFTRelease): NFT {
         benefits: r.benefits,
         allocatedRoyaltyPercent: r.allocatedRoyaltyPercent,
     };
+}
+
+/**
+ * Clamp minted count to total supply.
+ *
+ * Defense in depth against DB `minted_count` drift. The ERC-1155 contract
+ * enforces the hard cap on-chain (see migration 050 for the root-cause
+ * write-up) so any value above `total_supply` is by definition stale. We
+ * clamp at the UI adapter boundary so no code path can ever render an
+ * impossible label like "7 of 5 minted".
+ */
+function clampMintedCount(minted: number | null | undefined, total: number | null | undefined): number {
+    const m = Math.max(0, Number(minted) || 0);
+    const t = Number(total) || 0;
+    return t > 0 ? Math.min(m, t) : m;
 }
 
 /** Convert a DB NFTToken (owned) to the flat UI NFT type.
@@ -178,7 +193,7 @@ export function adaptNFTToken(t: DbNFTToken, editionNum?: number): NFT {
             : (t.pricePaidEth != null ? t.pricePaidEth : (release?.priceEth || 0)),
         editionNumber: editionNum ?? 0,
         totalEditions: release?.totalSupply || 0,
-        mintedCount: release?.mintedCount || 0,
+        mintedCount: clampMintedCount(release?.mintedCount, release?.totalSupply),
         owner: t.ownerWalletAddress,
         rarity: (release?.rarity as NFT['rarity']) || 'common',
         tierName: release?.tierName,
@@ -210,7 +225,7 @@ export function adaptListing(l: DbListing, editionNum?: number): NFT & { listing
         price: l.priceEth,
         editionNumber: editionNum ?? 0,
         totalEditions: release?.totalSupply || 0,
-        mintedCount: release?.mintedCount || 0,
+        mintedCount: clampMintedCount(release?.mintedCount, release?.totalSupply),
         owner: l.sellerWallet,
         rarity: (release?.rarity as NFT['rarity']) || 'common',
         tierName: release?.tierName,
@@ -1164,7 +1179,18 @@ export function useOwnedNFTsWithStatus() {
             // user clicks "Sell". If no row exists, that's fine; the card
             // still renders as unlisted and the listing flow will create one
             // on-demand via an admin edge function.
-            const walletLedger = await db.getErc1155OwnedTokens(wallet);
+            // Step 4a: read on-chain `totalSupply(tokenId)` for every owned
+            // pair in parallel with the wallet-ledger query. This is the
+            // authoritative "how many copies of this token exist" number —
+            // DB `minted_count` is a cache that can drift (see migration
+            // 050). Reading chain here means UI never displays impossible
+            // values like "7 of 5 minted" even if the DB is behind.
+            const [walletLedger, totalSupplyByPair] = await Promise.all([
+                db.getErc1155OwnedTokens(wallet),
+                readErc1155TotalSupplyForPairs(
+                    ownedPairs.map((p) => ({ contract: p.contract, tokenId: p.tokenId })),
+                ),
+            ]);
             const walletTokenByPair = new Map<PairKey, DbNFTToken>();
             for (const t of walletLedger) {
                 const contract = (t.release?.contractAddress || '').toLowerCase();
@@ -1226,7 +1252,17 @@ export function useOwnedNFTsWithStatus() {
                         : (walletToken?.pricePaidEth != null ? walletToken.pricePaidEth : (release.priceEth || 0)),
                     editionNumber: 0,
                     totalEditions: release.totalSupply || 0,
-                    mintedCount: release.mintedCount || 0,
+                    // Chain-first minted count with DB fallback. Also clamp
+                    // to totalEditions as a last-line defense: the contract
+                    // itself enforces the cap, so any value above it is by
+                    // definition stale and should never reach the pixel.
+                    mintedCount: (() => {
+                        const chainKey = `${contract}:${tokenIdStr}`;
+                        const onChain = totalSupplyByPair.get(chainKey);
+                        const cap = release.totalSupply || 0;
+                        const raw = onChain != null ? Number(onChain) : (release.mintedCount || 0);
+                        return cap > 0 ? Math.min(raw, cap) : raw;
+                    })(),
                     owner: wallet,
                     ownerWallet: wallet,
                     rarity: (release.rarity as NFT['rarity']) || 'common',

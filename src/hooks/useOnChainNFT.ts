@@ -160,6 +160,95 @@ export async function readErc1155BalanceBatch(
 }
 
 // ────────────────────────────────────────────
+// On-chain total supply (ERC-1155 totalSupply(uint256))
+// ────────────────────────────────────────────
+//
+// DropERC1155 implements `totalSupply(uint256 id)` returning the current
+// circulating supply of `id` (sum of all balances). Because the contract is
+// the only thing that can mint, this number is the TRUE count of how many
+// copies exist. Reading it defensively means the UI never displays
+// impossible values like "7 of 5 minted" even if the DB `minted_count`
+// column drifts.
+
+type TotalSupplyCacheEntry = { value: bigint; at: number };
+const totalSupplyCache = new Map<string, TotalSupplyCacheEntry>();
+const TOTAL_SUPPLY_CACHE_MS = 60_000;
+
+function totalSupplyCacheKey(contract: string, tokenId: bigint): string {
+    return `${contract.toLowerCase()}:${tokenId.toString()}`;
+}
+
+/**
+ * Read ERC-1155 `totalSupply(uint256)` for a single (contract, tokenId).
+ * Returns `null` on error so callers can distinguish "unknown" from "zero"
+ * and fall back to the DB value instead of displaying a false 0.
+ *
+ * Selector `totalSupply(uint256)` = `0xbd85b039`.
+ */
+export async function readErc1155TotalSupply(
+    contract: string,
+    tokenId: bigint,
+): Promise<bigint | null> {
+    const key = totalSupplyCacheKey(contract, tokenId);
+    const cached = totalSupplyCache.get(key);
+    if (cached && Date.now() - cached.at < TOTAL_SUPPLY_CACHE_MS) {
+        return cached.value;
+    }
+    try {
+        const tokenHex = uint256Hex(tokenId);
+        const res = await rpcCall('eth_call', [{
+            to: contract,
+            data: '0xbd85b039' + tokenHex,
+        }, 'latest']);
+        if (!res || res === '0x') return null;
+        const value = BigInt(res);
+        totalSupplyCache.set(key, { value, at: Date.now() });
+        return value;
+    } catch (err: any) {
+        console.warn('[useOnChainNFT] readErc1155TotalSupply failed:', err?.message);
+        return null;
+    }
+}
+
+/**
+ * Batched variant: read totalSupply for many (contract, tokenId) pairs in
+ * parallel. Returns a Map keyed `contract_lower:tokenIdDecimal` so callers
+ * can look up the canonical minted count without iterating.
+ *
+ * No multicall: each call is independent and cached. This is cheaper than a
+ * custom aggregator contract and avoids any extra infrastructure.
+ */
+export async function readErc1155TotalSupplyForPairs(
+    pairs: Array<{ contract: string; tokenId: bigint }>,
+): Promise<Map<string, bigint>> {
+    const out = new Map<string, bigint>();
+    if (pairs.length === 0) return out;
+    // De-dupe first.
+    const seen = new Set<string>();
+    const unique = pairs.filter((p) => {
+        const k = totalSupplyCacheKey(p.contract, p.tokenId);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
+    const results = await Promise.all(
+        unique.map(async (p) => {
+            const v = await readErc1155TotalSupply(p.contract, p.tokenId);
+            return { key: totalSupplyCacheKey(p.contract, p.tokenId), value: v };
+        }),
+    );
+    for (const r of results) {
+        if (r.value !== null) out.set(r.key, r.value);
+    }
+    return out;
+}
+
+/** Invalidate the totalSupply cache (call after a mint tx confirms). */
+export function invalidateTotalSupplyCache() {
+    totalSupplyCache.clear();
+}
+
+// ────────────────────────────────────────────
 // On-chain metadata (ERC-1155 uri(tokenId) → IPFS JSON)
 // ────────────────────────────────────────────
 
