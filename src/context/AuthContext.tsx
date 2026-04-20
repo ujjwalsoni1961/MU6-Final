@@ -29,6 +29,8 @@ interface AuthContextType {
     role: 'listener' | 'creator' | 'admin' | null;
     /** PDF #13 — true when profile.is_blocked is true. Routing layer uses this to show a suspended screen. */
     isBlocked: boolean;
+    /** PDF #13 — false when admin has disabled the account. Routing layer treats !isActive the same as isBlocked. */
+    isActive: boolean;
     refreshProfile: () => Promise<void>;
     signOut: () => Promise<void>;
 }
@@ -182,6 +184,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 walletAddress,
                 role: profile?.role || null,
                 isBlocked: profile?.isBlocked === true,
+                // Default true when no profile yet so we don't gate the loading state.
+                isActive: profile ? profile.isActive !== false : true,
                 refreshProfile,
                 signOut,
             }}

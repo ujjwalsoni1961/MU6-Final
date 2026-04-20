@@ -40,7 +40,7 @@ import { ActivityIndicator, Text } from 'react-native';
 export default function ConsumerLayout() {
     const { isDark, colors } = useTheme();
     const insets = useSafeAreaInsets();
-    const { isConnected, isLoading, role, isBlocked } = useAuth();
+    const { isConnected, isLoading, role, isBlocked, isActive } = useAuth();
     const { isDesktopLayout } = useResponsive();
     // Hide the bottom tab bar only on desktop web (where WebHeader has the nav links).
     // On native and on phone-sized web, keep the bottom tab bar so Home/Market/Library/Collection remain reachable.
@@ -59,8 +59,8 @@ export default function ConsumerLayout() {
         return <Redirect href="/(auth)/login" />;
     }
 
-    // PDF #13 — blocked users are bounced to the suspended screen.
-    if (isBlocked) {
+    // PDF #13 — blocked OR disabled users are bounced to the suspended screen.
+    if (isBlocked || !isActive) {
         return <Redirect href="/suspended" />;
     }
 

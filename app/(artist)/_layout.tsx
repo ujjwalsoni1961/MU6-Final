@@ -156,7 +156,7 @@ import { ActivityIndicator } from 'react-native';
 /* ─── Layout Entry Point ─── */
 export default function CreatorLayout() {
     const { isDark, colors } = useTheme();
-    const { isConnected, isLoading, role, isBlocked } = useAuth();
+    const { isConnected, isLoading, role, isBlocked, isActive } = useAuth();
 
     if (isLoading) {
         return (
@@ -171,8 +171,8 @@ export default function CreatorLayout() {
         return <Redirect href="/(auth)/login" />;
     }
 
-    // PDF #13 — blocked users are bounced to the suspended screen.
-    if (isBlocked) {
+    // PDF #13 — blocked OR disabled users are bounced to the suspended screen.
+    if (isBlocked || !isActive) {
         return <Redirect href="/suspended" />;
     }
 
