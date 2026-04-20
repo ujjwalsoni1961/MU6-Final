@@ -295,6 +295,18 @@ export async function readErc1155BalancesForPairs(
     }
     if (accounts.length === 0) return [];
 
+    // Defense-in-depth: every address MUST be a real 20-byte hex value or
+    // the ABI encoder will produce a malformed payload and the entire batch
+    // call fails — which would silently zero out every wallet's balance.
+    // Callers are expected to validate upstream, but we assert here so a
+    // regression surfaces loudly instead of as "0 balances everywhere".
+    const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+    for (const a of accounts) {
+        if (!ADDR_RE.test(a)) {
+            throw new Error(`readErc1155BalancesForPairs: invalid address "${a}" (expected 0x + 40 hex chars)`);
+        }
+    }
+
     // Respect the per-pair cache already used by `readErc1155BalanceBatch`
     // so the admin page and the consumer page share a TTL-based cache.
     const cacheKeys = accounts.map(

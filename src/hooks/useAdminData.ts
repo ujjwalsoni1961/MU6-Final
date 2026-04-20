@@ -406,16 +406,22 @@ export function useAdminNFTTokensOnChain() {
                 supabase.from('marketplace_listings').select('seller_wallet').not('seller_wallet', 'is', null),
             ]);
 
+            // Accept only real 0x-prefixed 20-byte hex addresses. Historic
+            // test / seed data in `profiles` contains placeholder strings
+            // like `0xluna000300...` that are not valid hex — they would
+            // poison the ABI encoding for balanceOfBatch and cause the whole
+            // call to fail, collapsing the admin view to 0 rows. Filter
+            // them at the edge instead of inside the encoder.
+            const VALID_ADDR = /^0x[0-9a-f]{40}$/i;
             const walletSet = new Set<string>();
-            for (const p of profilesRes.data || []) {
-                if (p.wallet_address) walletSet.add(String(p.wallet_address).toLowerCase());
-            }
-            for (const t of tokenRowsRes.data || []) {
-                if (t.owner_wallet_address) walletSet.add(String(t.owner_wallet_address).toLowerCase());
-            }
-            for (const l of listingsRes.data || []) {
-                if (l.seller_wallet) walletSet.add(String(l.seller_wallet).toLowerCase());
-            }
+            const addIfValid = (raw: unknown) => {
+                if (typeof raw !== 'string') return;
+                const addr = raw.trim().toLowerCase();
+                if (VALID_ADDR.test(addr)) walletSet.add(addr);
+            };
+            for (const p of profilesRes.data || []) addIfValid(p.wallet_address);
+            for (const t of tokenRowsRes.data || []) addIfValid(t.owner_wallet_address);
+            for (const l of listingsRes.data || []) addIfValid(l.seller_wallet);
             const candidateWallets = Array.from(walletSet);
             if (candidateWallets.length === 0) return [];
 
