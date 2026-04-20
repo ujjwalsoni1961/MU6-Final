@@ -1628,6 +1628,17 @@ export async function getErc1155OwnedTokens(walletAddress: string): Promise<NFTT
  * round-trips when a wallet owns one of these tokens.
  */
 export async function getAllErc1155ReleasesForScan(): Promise<NFTRelease[]> {
+    // NOTE: we intentionally do NOT filter by nft_standard here.
+    //
+    // The production DB schema predates migration 034 (nft_standard column
+    // was never applied), so filtering on it returns 0 rows and the hook
+    // returns an empty collection for every wallet. The correct invariant is
+    // simpler anyway: an ERC-1155 release is one that has a numeric
+    // `token_id` set and a `contract_address` — that's the shape the batch
+    // balanceOfBatch scanner needs. ERC-721 releases on the legacy contract
+    // have `token_id IS NULL` in this table (each minted token carries its
+    // own id in nft_tokens.on_chain_token_id), so this filter still excludes
+    // them cleanly.
     const { data, error } = await supabase
         .from('nft_releases')
         .select(`
@@ -1639,7 +1650,6 @@ export async function getAllErc1155ReleasesForScan(): Promise<NFTRelease[]> {
                 )
             )
         `)
-        .eq('nft_standard', 'erc1155')
         .eq('is_active', true)
         .not('token_id', 'is', null)
         .not('contract_address', 'is', null);
@@ -1677,6 +1687,40 @@ export async function getGhostTokenIds(): Promise<Set<string>> {
         return new Set<string>();
     }
     return new Set<string>((data as any[]).map((r) => String(r.on_chain_token_id)));
+}
+
+/**
+ * Contract-scoped ghost key lookup.
+ *
+ * The ghost table stores (contract_address, on_chain_token_id) pairs — a
+ * tokenId is only "ghost" when paired with the specific contract it was
+ * minted on. Historically the helper above collapsed this to tokenId only,
+ * which over-filtered the chain-first collection view: tokenId 0 is in the
+ * ghost table for the legacy ERC-721 contract, but the active ERC-1155
+ * contract legitimately has its own tokenId 0 (first lazy-mint on a fresh
+ * drop). Using this contract-aware variant keeps real holdings visible.
+ *
+ * Returns a Set of `${contract.toLowerCase()}:${tokenId}` keys.
+ * Fail-open on DB error (empty set) so a transient hiccup never hides real
+ * tokens — same invariant as getGhostTokenIds.
+ */
+export async function getGhostTokenPairKeys(): Promise<Set<string>> {
+    const { data, error } = await supabase
+        .from('nft_ghost_tokens')
+        .select('contract_address, on_chain_token_id');
+
+    if (error || !data) {
+        if (error) console.warn('[db] getGhostTokenPairKeys failed (fail-open):', error.message);
+        return new Set<string>();
+    }
+    const out = new Set<string>();
+    for (const r of data as any[]) {
+        const contract = (r.contract_address || '').toLowerCase();
+        const tokenId = r.on_chain_token_id != null ? String(r.on_chain_token_id) : '';
+        if (!contract || !tokenId) continue;
+        out.add(`${contract}:${tokenId}`);
+    }
+    return out;
 }
 
 /**

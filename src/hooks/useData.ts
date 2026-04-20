@@ -1097,16 +1097,16 @@ export function useOwnedNFTsWithStatus() {
             const wallet = walletAddress.toLowerCase();
 
             // Step 1: universe of ERC-1155 releases. Each row is a (contract,
-            // tokenId) pair with DB metadata already joined.
-            const [releases, ghostIds] = await Promise.all([
+            // tokenId) pair with DB metadata already joined. Ghost filtering
+            // is contract-scoped (see getGhostTokenPairKeys) so we don't
+            // accidentally hide a real tokenId that happens to collide with
+            // a ghost id on a DIFFERENT contract.
+            const [releases, ghostPairs] = await Promise.all([
                 db.getAllErc1155ReleasesForScan(),
-                db.getGhostTokenIds(),
+                db.getGhostTokenPairKeys(),
             ]);
             if (releases.length === 0) return [] as OwnedNFT[];
 
-            // Index by (contract, tokenId). Drop ghost tokens — they live on
-            // the drop contract but carry no real metadata, so we never want
-            // them surfaced in a user's collection.
             type PairKey = string;
             const pairKey = (contract: string, tokenId: string | number): PairKey =>
                 `${contract.toLowerCase()}:${String(tokenId)}`;
@@ -1119,9 +1119,9 @@ export function useOwnedNFTsWithStatus() {
             for (const r of releases) {
                 if (!r.contractAddress || r.tokenId == null) continue;
                 const tokenIdStr = String(r.tokenId);
-                if (ghostIds.has(tokenIdStr)) continue;
                 const contract = r.contractAddress.toLowerCase();
                 const key = pairKey(contract, tokenIdStr);
+                if (ghostPairs.has(key)) continue;
                 if (releaseByPair.has(key)) continue; // dedupe belt-and-braces
                 releaseByPair.set(key, r);
                 const arr = tokenIdsByContract.get(contract) || [];
