@@ -168,7 +168,14 @@ export function adaptNFTToken(t: DbNFTToken, editionNum?: number): NFT {
         artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
         coverImage: release?.coverImagePath ? coverUrl(release.coverImagePath) : coverUrl(song?.coverPath),
         nftCoverImage: release?.coverImagePath ? coverUrl(release.coverImagePath) : undefined,
-        price: t.pricePaidEth || release?.priceEth || 0,
+        // Price shown on a card = last traded price (LTP) of this specific
+        // token. Fall back to `pricePaidEth` (what the current owner paid)
+        // and finally to the release's primary drop price. A `null` LTP
+        // means the token never sold; 0 is a legit value (free mint) so we
+        // use explicit null-checks, not truthy-falsy fallback chains.
+        price: (t.lastSalePriceToken != null)
+            ? t.lastSalePriceToken
+            : (t.pricePaidEth != null ? t.pricePaidEth : (release?.priceEth || 0)),
         editionNumber: editionNum ?? 0,
         totalEditions: release?.totalSupply || 0,
         mintedCount: release?.mintedCount || 0,
@@ -1204,7 +1211,12 @@ export function useOwnedNFTsWithStatus() {
                     artistName: (song as any)?.creator?.displayName || 'Unknown Artist',
                     coverImage: resolvedCover,
                     nftCoverImage: release.coverImagePath ? coverUrl(release.coverImagePath) : undefined,
-                    price: walletToken?.pricePaidEth || release.priceEth || 0,
+                    // Prefer last traded price (LTP) for this token. See
+                    // `adaptNFTToken` above for the full rationale; same logic
+                    // applies here for the chain-first collection path.
+                    price: (walletToken?.lastSalePriceToken != null)
+                        ? walletToken.lastSalePriceToken
+                        : (walletToken?.pricePaidEth != null ? walletToken.pricePaidEth : (release.priceEth || 0)),
                     editionNumber: 0,
                     totalEditions: release.totalSupply || 0,
                     mintedCount: release.mintedCount || 0,

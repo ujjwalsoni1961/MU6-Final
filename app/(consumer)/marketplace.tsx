@@ -278,10 +278,23 @@ export default function MarketplaceScreen() {
                             </AnimatedPressable>
                         </View>
 
+                        {/*
+                          Fix: group modal cards were pinned to `width: '50%'`,
+                          which made them huge on desktop. Mirror the collection
+                          page's responsive column logic: 4 cols on wide desktops
+                          (>=1200px), 3 on medium (>=1024px), 2 otherwise; and 3
+                          on larger phones/tablets (>=640px), 2 on narrow phones.
+                        */}
+                        {(() => {
+                            const modalCols = isDesktopLayout
+                                ? (width >= 1200 ? 4 : width >= 1024 ? 3 : 2)
+                                : (width >= 640 ? 3 : 2);
+                            const cellWidth = `${100 / modalCols}%`;
+                            return (
                         <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 40 }}>
                             <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                                 {selectedGroup.map((item, index) => (
-                                    <View key={`${item.id}-${index}`} style={{ width: '50%', padding: 6 }}>
+                                    <View key={`${item.id}-${index}`} style={{ width: cellWidth as any, padding: 6 }}>
                                         <View>
                                             <NFTCard
                                                 cover={item.coverImage}
@@ -329,6 +342,8 @@ export default function MarketplaceScreen() {
                                 ))}
                             </View>
                         </ScrollView>
+                            );
+                        })()}
                     </View>
                 </View>
             </Modal>

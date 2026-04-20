@@ -100,7 +100,16 @@ export interface NFTToken {
     onChainTokenId: string | null;
     ownerWalletAddress: string;
     mintedAt: string;
+    /** Legacy column — price the CURRENT owner paid when they acquired the
+     *  token (mint price for original mints, last-buy price otherwise).
+     *  Kept for backward compat but superseded by `lastSalePriceToken`. */
     pricePaidEth: number | null;
+    /** Last traded price (LTP) in the native token (POL/MATIC), sourced from
+     *  `nft_tokens.last_sale_price_token`. Populated by marketplace/mint flows
+     *  in blockchain.ts and marketplace.ts. Prefer this over `pricePaidEth`
+     *  when displaying a card price — it reflects the most recent trade on
+     *  the secondary market. `null` if the token has never sold. */
+    lastSalePriceToken: number | null;
     // Joined fields
     release?: NFTRelease;
 }
@@ -2109,6 +2118,12 @@ function mapNFTTokenRow(row: any): NFTToken {
         ownerWalletAddress: row.owner_wallet_address,
         mintedAt: row.minted_at,
         pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : null,
+        // `last_sale_price_token` is the LTP in POL/MATIC. Treat 0 as a valid
+        // value (e.g. a free mint) — only fall back to null when the column
+        // is genuinely absent / NULL in the DB.
+        lastSalePriceToken: row.last_sale_price_token != null
+            ? parseFloat(row.last_sale_price_token)
+            : null,
         release: row.release ? mapNFTReleaseRow(row.release) : undefined,
     };
 }

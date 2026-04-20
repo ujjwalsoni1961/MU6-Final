@@ -12,9 +12,11 @@ import NFTCard from '../../src/components/shared/NFTCard';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import { useTheme } from '../../src/context/ThemeContext';
 import { useAuth } from '../../src/context/AuthContext';
-import { useActiveAccount, PayEmbed } from 'thirdweb/react';
-import { prepareTransaction } from 'thirdweb';
-import { thirdwebClient, activeChain } from '../../src/lib/thirdweb';
+import { useActiveAccount } from 'thirdweb/react';
+// Pay-with-card (PayEmbed / thirdweb Pay widget) removed per product decision —
+// mint and buy happen directly against the marketplace/ERC-1155 contract via
+// the wallet-connected flow. `prepareTransaction`, `PayEmbed`, `thirdwebClient`,
+// and `activeChain` are no longer needed in this file.
 import { CONTRACT_ADDRESSES, EXPLORER_BASE, tokenUrl, txUrl, CHAIN_NAME, IS_MAINNET, CHAIN_ID } from '../../src/config/network';
 import {
     useNFTReleases,
@@ -630,37 +632,8 @@ export default function NFTDetailScreen() {
                                 )}
                             </AnimatedPressable>
 
-                            {/* PayEmbed — fiat card payment option (web only) */}
-                            {useTwoColumn && !actionSuccess && walletAddress && typeof PayEmbed !== 'undefined' && PayEmbed && (
-                                (isPrimary && canMint && !isSoldOut) || (!isPrimary && listing && !isOwnListing)
-                            ) && (
-                                <View style={{ marginTop: 16 }}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-                                        <View style={{ flex: 1, height: 1, backgroundColor: colors.text.secondary + '30' }} />
-                                        <Text style={{ color: colors.text.secondary, fontSize: 11, fontWeight: '600', marginHorizontal: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
-                                            or pay with card
-                                        </Text>
-                                        <View style={{ flex: 1, height: 1, backgroundColor: colors.text.secondary + '30' }} />
-                                    </View>
-                                    <PayEmbed
-                                        client={thirdwebClient}
-                                        payOptions={{
-                                            mode: 'transaction',
-                                            transaction: prepareTransaction({
-                                                to: '0x76BCCe5DBDc244021bCF7D2fc4376F1B62d74c39',
-                                                chain: activeChain,
-                                                client: thirdwebClient,
-                                                value: BigInt(Math.round((nft.price || 0) * 1e18)),
-                                            }),
-                                            metadata: {
-                                                name: nft.songTitle,
-                                                image: nft.coverImage,
-                                            },
-                                        }}
-                                        theme="dark"
-                                    />
-                                </View>
-                            )}
+                            {/* Pay-with-card section intentionally removed.
+                                See imports block for context. */}
                         </GlassCard>
 
                         {/* Benefits / Perks Section */}

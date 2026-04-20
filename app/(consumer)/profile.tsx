@@ -5,12 +5,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Gem, Heart, Users as UsersIcon, Copy, Settings, ExternalLink, Wallet, Brush, ChevronRight, ShoppingCart, Coins, ArrowUpRight, Tag } from 'lucide-react-native';
-import GlassCard from '../../src/components/shared/GlassCard';
-import NFTCard from '../../src/components/shared/NFTCard';
+// NOTE: NFTCard/GlassCard/useCurrency intentionally not imported here —
+// the inline "My NFTs" section was removed; the NFT count in the stats
+// card comes from `useOwnedNFTs().data.length` directly.
 import { useAuth } from '../../src/context/AuthContext';
 import { useOwnedNFTs, useLikedSongs, useUserActivity, useFollowCounts } from '../../src/hooks/useData';
 import { useTheme } from '../../src/context/ThemeContext';
-import { useCurrency } from '../../src/hooks/useCurrency';
 import * as Clipboard from 'expo-clipboard';
 import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
 import { PRESET_AVATAR_IDS } from '../../src/hooks/useData';
@@ -55,11 +55,13 @@ export default function ProfileScreen() {
     const { profile, walletAddress, role } = useAuth();
     const { isDark, colors } = useTheme();
     const { isDesktopLayout, isPhoneLayout } = useResponsive();
-    const { fiatCurrency } = useCurrency();
     const [refreshing, setRefreshing] = React.useState(false);
 
     // Real data hooks
-    const { data: ownedNFTs, loading: loadingNFTs, refresh: refreshNFTs } = useOwnedNFTs();
+    // Note: `ownedNFTs` is still fetched to drive the NFT count in the stats card.
+    // The inline "My NFTs" list was removed per product decision — users view
+    // their NFTs on the Collection page (chain-first source of truth).
+    const { data: ownedNFTs, refresh: refreshNFTs } = useOwnedNFTs();
     const { data: likedSongs, refresh: refreshLiked } = useLikedSongs();
     const { data: recentActivity, loading: loadingActivity, refresh: refreshActivity } = useUserActivity();
     const { following: followingCount, refresh: refreshFollowCounts } = useFollowCounts(profile?.id);
@@ -279,35 +281,6 @@ export default function ProfileScreen() {
                     <StatCard icon={<Heart size={22} color="#ef4444" />} value={likedSongs.length} label="Liked" />
                     <StatCard icon={<UsersIcon size={22} color="#38b4ba" />} value={followingCount} label="Following" />
                 </View>
-
-                {/* My NFTs */}
-                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>My NFTs</Text>
-                {loadingNFTs ? (
-                    <View style={{ padding: 20, alignItems: 'center' }}><ActivityIndicator size="small" color="#38b4ba" /></View>
-                ) : ownedNFTs.length > 0 ? (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 28 }}>
-                        {ownedNFTs.slice(0, 5).map((nft) => (
-                            <View key={nft.id} style={{ width: isDesktopLayout ? 220 : 176, marginRight: 16 }}>
-                                <NFTCard
-                                    cover={nft.coverImage}
-                                    title={nft.songTitle}
-                                    artist={nft.artistName}
-                                    price={nft.price}
-                                    editionNumber={nft.editionNumber}
-                                    mintedCount={nft.mintedCount}
-                                    totalEditions={nft.totalEditions}
-                                    rarity={nft.rarity}
-                                    fiatCurrency={fiatCurrency}
-                                    onPress={() => router.push({ pathname: '/(consumer)/nft-detail', params: { id: nft.id } })}
-                                />
-                            </View>
-                        ))}
-                    </ScrollView>
-                ) : (
-                    <View style={{ padding: 20, marginBottom: 28 }}>
-                        <Text style={{ color: colors.text.secondary }}>No NFTs collected yet. Visit the Marketplace to get started.</Text>
-                    </View>
-                )}
 
                 {/* Recent Activity */}
                 <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5, marginBottom: 16 }}>Recent Activity</Text>

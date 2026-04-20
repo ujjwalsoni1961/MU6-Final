@@ -47,7 +47,7 @@ const navSections: NavSection[] = [
             { path: '/(admin)/nft-tokens', match: '/nft-tokens', label: 'NFT Tokens', Icon: Tag },
             { path: '/(admin)/primary-sale-payouts', match: '/primary-sale-payouts', label: 'Primary Sale Payouts', Icon: Coins },
             { path: '/(admin)/nft-limit-requests', match: '/nft-limit-requests', label: 'Limit Requests', Icon: Gem },
-            { path: '/(admin)/marketplace', match: '/marketplace', label: 'Marketplace', Icon: ShoppingBag },
+            { path: '/(admin)/admin-marketplace', match: '/admin-marketplace', label: 'Marketplace', Icon: ShoppingBag },
             { path: '/(admin)/contracts', match: '/contracts', label: 'Contracts', Icon: FileCode },
             { path: '/(admin)/on-chain-activity', match: '/on-chain-activity', label: 'On-Chain Activity', Icon: Wallet },
             { path: '/(admin)/nft-health', match: '/nft-health', label: 'NFT Health', Icon: Activity },
@@ -208,7 +208,7 @@ function AdminSidebar() {
 /* ─── All tab screen definitions ─── */
 const allScreens = [
     'dashboard', 'users', 'songs', 'playlists',
-    'nft-releases', 'nft-tokens', 'primary-sale-payouts', 'nft-limit-requests', 'marketplace', 'contracts', 'on-chain-activity', 'nft-health',
+    'nft-releases', 'nft-tokens', 'primary-sale-payouts', 'nft-limit-requests', 'admin-marketplace', 'contracts', 'on-chain-activity', 'nft-health',
     'streams', 'royalty-events', 'royalty-shares', 'song-splits', 'unregistered-revenue', 'payouts', 'transactions',
     'platform-settings', 'audit-log', 'notifications',
 ];
