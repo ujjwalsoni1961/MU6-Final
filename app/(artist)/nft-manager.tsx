@@ -252,6 +252,24 @@ export default function NFTManagerScreen() {
             return;
         }
 
+        // Auto-commit any benefit the artist typed into the add-benefit inputs
+        // but didn't press "Add" before clicking Create. Without this, pending
+        // text was silently dropped — which is how real releases (SINGA,
+        // GOD Level) ended up with `benefits: []` in both DB and IPFS.
+        // We compute `effectiveBenefits` here and pass it to the metadata
+        // pin + DB insert instead of reading `benefits` from state (state
+        // updates are async and wouldn't flush in time for the pin call).
+        const effectiveBenefits = [...benefits];
+        const pendingTitle = newBenefitTitle.trim();
+        const pendingDesc = newBenefitDesc.trim();
+        if (pendingTitle) {
+            effectiveBenefits.push({ title: pendingTitle, description: pendingDesc });
+            // Reflect the auto-commit in the UI so the artist sees what was included.
+            setBenefits(effectiveBenefits);
+            setNewBenefitTitle('');
+            setNewBenefitDesc('');
+        }
+
         // Upload custom cover image if selected
         let uploadedCoverPath: string | null = null;
         if (coverImageUri) {
@@ -335,7 +353,7 @@ export default function NFTManagerScreen() {
                     audioPath: selectedSong._audioPath || null,
                     songId: selectedSong.id,
                     releaseDate: selectedSong.credits?.releaseDate,
-                    benefits: benefits.length > 0 ? benefits : undefined,
+                    benefits: effectiveBenefits.length > 0 ? effectiveBenefits : undefined,
                 },
                 expectedTokenId,
                 (step) => setErc1155Progress(step),
@@ -359,7 +377,7 @@ export default function NFTManagerScreen() {
                     expectedTokenId: pin.tokenId,
                     description: description.trim() || undefined,
                     coverImagePath: uploadedCoverPath || undefined,
-                    benefits: benefits.length > 0 ? benefits : undefined,
+                    benefits: effectiveBenefits.length > 0 ? effectiveBenefits : undefined,
                     royaltyBps,
                     royaltyRecipientWallet,
                 },
@@ -740,6 +758,11 @@ export default function NFTManagerScreen() {
                                     <Plus size={14} color="#8b5cf6" />
                                     <Text style={{ color: '#8b5cf6', fontWeight: '600', fontSize: 13 }}>Add Benefit</Text>
                                 </AnimatedPressable>
+                                {newBenefitTitle.trim().length > 0 && (
+                                    <Text style={{ color: '#8b5cf6', fontSize: 11, marginTop: 4, fontStyle: 'italic' as const }}>
+                                        This benefit will be included when you create the release.
+                                    </Text>
+                                )}
                             </View>
 
                             {/* Rarity (PDF Fix #9: locked tiers show a lock icon and cannot be selected) */}
