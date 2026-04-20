@@ -682,6 +682,7 @@ Deno.serve(async (req: Request) => {
         "refreshCollectionStats",
         "setContractURI",
         "deployDropERC1155",
+        "updateBatchBaseURI",
     ]);
     const MU6_ADMIN_SECRET_ENV = Deno.env.get("MU6_ADMIN_SECRET") || "";
     function ctEqual(a: string, b: string): boolean {
@@ -761,6 +762,57 @@ Deno.serve(async (req: Request) => {
                 transactionId: txId,
                 transactionHash: hash,
                 result,
+            });
+        }
+
+        // ── updateBatchBaseURI ──
+        //
+        // Admin-only: repairs a batch whose baseURI was set wrong at lazyMint
+        // time (e.g. filename mismatch). The server wallet holds METADATA_ROLE
+        // on the shared DropERC1155. Caller passes the batch array INDEX
+        // (0-based position within getBaseURICount()) — NOT the batchId.
+        //
+        // For a contract that has N sequential single-token batches, tokenId
+        // equals the batch index, so index=tokenId works for those.
+        if (action === "updateBatchBaseURI") {
+            const { index, baseURI, contractAddress } = body;
+            if (index === undefined || index === null) {
+                return jsonResponse({ success: false, error: "Missing index" }, 400);
+            }
+            if (!baseURI) return jsonResponse({ success: false, error: "Missing baseURI" }, 400);
+            if (!String(baseURI).endsWith("/")) {
+                return jsonResponse({
+                    success: false,
+                    error: "baseURI must end with '/' — contract concatenates baseURI + tokenId",
+                }, 400);
+            }
+
+            const requestBody = {
+                executionOptions: { from: SERVER_WALLET, chainId: CHAIN_ID, type: "EOA" },
+                params: [{
+                    contractAddress: contractAddress || DEFAULT_CONTRACT,
+                    method: "function updateBatchBaseURI(uint256 _index, string _uri)",
+                    params: [String(index), baseURI],
+                }],
+            };
+
+            console.log("[nft-admin] updateBatchBaseURI:", { index, baseURI, contractAddress });
+            const { ok, status, result } = await callEngine(requestBody);
+            if (!ok) return jsonResponse({ success: false, error: result }, status);
+            const txId = result?.result?.transactions?.[0]?.id;
+            if (!txId) {
+                return jsonResponse({ success: false, error: "Engine did not return a transaction id" }, 500);
+            }
+            const { confirmed, hash, error: waitErr } = await waitForTx(txId, 60000);
+            if (!confirmed) {
+                const errMsg = typeof waitErr === "string" ? waitErr : (waitErr || "updateBatchBaseURI tx did not confirm");
+                return jsonResponse({ success: false, error: errMsg, transactionId: txId }, 500);
+            }
+            console.log("[nft-admin] updateBatchBaseURI confirmed, hash:", hash);
+            return jsonResponse({
+                success: true,
+                transactionId: txId,
+                transactionHash: hash,
             });
         }
 
