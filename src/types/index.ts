@@ -109,6 +109,13 @@ export type NFTOwnershipStatus = 'unlisted' | 'listed' | 'sold';
 export interface OwnedNFT extends NFT {
     tokenDbId: string;
     onChainTokenId: string;
+    /**
+     * ERC-1155 contract address for this ownership pair. Carried alongside
+     * the tokenId so flows that don't have a DB `nft_tokens` row yet (chain-
+     * first discovery) can still list / manage the NFT using the canonical
+     * (contract, tokenId) pair as the source of truth.
+     */
+    contractAddress: string;
     ownershipStatus: NFTOwnershipStatus;
     activeListingId?: string;
     activeListingPrice?: number;

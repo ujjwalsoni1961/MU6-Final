@@ -39,43 +39,143 @@ import { SECONDARY_ROYALTY_BPS } from '../constants/fees';
  * target the release's contract_address — the default SONG_NFT is just a
  * safety net.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX_ADDR_RE = /^0x[0-9a-f]{40}$/i;
+const NUMERIC_RE = /^\d+$/;
+
+/**
+ * Resolve the on-chain identity of an NFT the user wants to list.
+ *
+ * Chain-first, DB-as-ledger-cache philosophy:
+ *   - If we're given a real `nft_tokens.id` UUID, look up the row and use it.
+ *   - Otherwise fall back to the canonical (contract, on_chain_token_id)
+ *     pair — the REAL identity of the ERC-1155 token — and either find the
+ *     matching ledger row for the seller or self-heal by inserting one.
+ *
+ * Either path ends with a valid `tokenDbId` the marketplace can FK-reference
+ * in `marketplace_listings.nft_token_id`. That insert is non-negotiable for
+ * the DB schema; returning empty string is never safe.
+ */
 async function resolveNftContractForToken(
-    nftTokenId: string,
+    args: {
+        nftTokenId?: string;
+        contractAddress?: string;
+        onChainTokenId?: string;
+        sellerWallet: string;
+    },
 ): Promise<
     | { ok: true; address: string; contract: ReturnType<typeof getContractInstance>; onChainTokenId: string; tokenDbId: string; ownerWallet: string }
     | { ok: false; error: string }
 > {
-    const { data, error } = await supabase
-        .from('nft_tokens')
-        .select(`
-            id,
-            token_id,
-            on_chain_token_id,
-            owner_wallet_address,
-            release:nft_releases!nft_release_id (
-                contract_address
-            )
-        `)
-        .eq('id', nftTokenId)
-        .maybeSingle();
+    // ── Path A: DB UUID known and well-formed ──
+    if (args.nftTokenId && UUID_RE.test(args.nftTokenId)) {
+        const { data, error } = await supabase
+            .from('nft_tokens')
+            .select(`
+                id,
+                token_id,
+                on_chain_token_id,
+                owner_wallet_address,
+                release:nft_releases!nft_release_id (
+                    contract_address
+                )
+            `)
+            .eq('id', args.nftTokenId)
+            .maybeSingle();
 
-    if (error || !data) return { ok: false, error: error?.message || 'Token not found' };
-
-    const chainTokenIdStr = (data as any).on_chain_token_id;
-    if (!chainTokenIdStr || !/^\d+$/.test(String(chainTokenIdStr))) {
-        return { ok: false, error: 'This NFT is not verifiable on-chain and cannot be listed. Please contact support.' };
+        if (!error && data) {
+            const chainTokenIdStr = (data as any).on_chain_token_id;
+            if (chainTokenIdStr && NUMERIC_RE.test(String(chainTokenIdStr))) {
+                const release: any = (data as any).release;
+                const address: string = release?.contract_address || CONTRACTS.SONG_NFT;
+                return {
+                    ok: true,
+                    address,
+                    contract: getContractInstance(address),
+                    onChainTokenId: String(chainTokenIdStr),
+                    tokenDbId: (data as any).id,
+                    ownerWallet: (data as any).owner_wallet_address,
+                };
+            }
+        }
+        // If the UUID lookup failed silently (no row / bad row) and we also
+        // have a (contract, tokenId) pair, fall through to the chain-first
+        // branch below instead of surfacing a misleading error.
     }
 
-    const release: any = (data as any).release;
-    const address: string = release?.contract_address || CONTRACTS.SONG_NFT;
+    // ── Path B: chain-first (contract, tokenId) pair ──
+    if (!args.contractAddress || !HEX_ADDR_RE.test(args.contractAddress)) {
+        return { ok: false, error: 'Cannot identify this NFT. Please refresh your collection and try again.' };
+    }
+    if (!args.onChainTokenId || !NUMERIC_RE.test(String(args.onChainTokenId))) {
+        return { ok: false, error: 'Cannot identify this NFT on-chain. Please refresh your collection and try again.' };
+    }
 
+    const contractAddrLc = args.contractAddress.toLowerCase();
+    const tokenIdStr = String(args.onChainTokenId);
+    const sellerLc = args.sellerWallet.toLowerCase();
+
+    // B1. Find the release this (contract, tokenId) belongs to so we satisfy
+    // the NOT NULL FK on nft_tokens.nft_release_id when self-healing.
+    const { data: releaseRow, error: releaseErr } = await supabase
+        .from('nft_releases')
+        .select('id, contract_address, token_id')
+        .ilike('contract_address', contractAddrLc)
+        .eq('token_id', Number(tokenIdStr))
+        .maybeSingle();
+    if (releaseErr || !releaseRow) {
+        return { ok: false, error: 'This NFT is not registered for listing.' };
+    }
+
+    // B2. Prefer an existing ledger row this wallet already owns for this pair.
+    const { data: existingToken } = await supabase
+        .from('nft_tokens')
+        .select('id, owner_wallet_address, on_chain_token_id, nft_release_id')
+        .eq('nft_release_id', releaseRow.id)
+        .eq('on_chain_token_id', tokenIdStr)
+        .eq('owner_wallet_address', sellerLc)
+        .eq('is_voided', false)
+        .order('minted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    let tokenDbId: string;
+    let ownerWallet: string;
+    if (existingToken?.id) {
+        tokenDbId = existingToken.id;
+        ownerWallet = existingToken.owner_wallet_address;
+    } else {
+        // B3. Self-heal: insert a minimal ledger row so downstream FK inserts
+        // succeed. We do NOT set mint_tx_hash (that's sacred for attribution
+        // — see migration 041). This row represents the wallet holding the
+        // token on-chain "now", which is exactly what ownership tracking is
+        // supposed to reflect.
+        const { data: inserted, error: insertErr } = await supabase
+            .from('nft_tokens')
+            .insert({
+                nft_release_id: releaseRow.id,
+                token_id: tokenIdStr,
+                on_chain_token_id: tokenIdStr,
+                owner_wallet_address: sellerLc,
+                is_voided: false,
+            })
+            .select('id, owner_wallet_address')
+            .single();
+        if (insertErr || !inserted) {
+            return { ok: false, error: insertErr?.message || 'Could not prepare NFT for listing' };
+        }
+        tokenDbId = inserted.id;
+        ownerWallet = inserted.owner_wallet_address;
+    }
+
+    const address = releaseRow.contract_address || args.contractAddress;
     return {
         ok: true,
         address,
         contract: getContractInstance(address),
-        onChainTokenId: String(chainTokenIdStr),
-        tokenDbId: (data as any).id,
-        ownerWallet: (data as any).owner_wallet_address,
+        onChainTokenId: tokenIdStr,
+        tokenDbId,
+        ownerWallet,
     };
 }
 
@@ -232,21 +332,38 @@ async function verifyBuyOwnershipTransfer(args: {
  */
 export async function createMarketplaceListing(
     config: {
-        nftTokenId: string;   // DB UUID of the nft_token row
+        /**
+         * Preferred: DB UUID of the nft_tokens row. May be empty when the
+         * collection view discovered the copy chain-first and no ledger row
+         * exists yet — in that case the resolver falls back to (contract,
+         * onChainTokenId) and self-heals the ledger.
+         */
+        nftTokenId: string;
         pricePol: number;     // listing price in POL
         sellerWallet: string;
+        /** Chain-first fallback pair; used when nftTokenId is missing */
+        contractAddress?: string;
+        onChainTokenId?: string;
     },
     account: Account,
 ): Promise<{ success: boolean; listingId?: string; error?: string }> {
     try {
         // 1. Resolve the ERC-1155 contract + tokenId for this NFT row.
-        const resolved = await resolveNftContractForToken(config.nftTokenId);
+        const resolved = await resolveNftContractForToken({
+            nftTokenId: config.nftTokenId,
+            contractAddress: config.contractAddress,
+            onChainTokenId: config.onChainTokenId,
+            sellerWallet: config.sellerWallet,
+        });
         if (!resolved.ok) return { success: false, error: resolved.error };
 
         if (resolved.ownerWallet.toLowerCase() !== config.sellerWallet.toLowerCase()) {
             return { success: false, error: 'Not the token owner' };
         }
 
+        // Use the RESOLVED UUID downstream — critical when the caller passed
+        // an empty string and the resolver self-healed a new ledger row.
+        const resolvedTokenDbId = resolved.tokenDbId;
         const chainTokenIdStr = resolved.onChainTokenId;
         const nftContract = resolved.contract;
         const nftAddress = resolved.address;
@@ -272,7 +389,7 @@ export async function createMarketplaceListing(
         const { data: existingListing } = await supabase
             .from('marketplace_listings')
             .select('id')
-            .eq('nft_token_id', config.nftTokenId)
+            .eq('nft_token_id', resolvedTokenDbId)
             .eq('is_active', true)
             .maybeSingle();
 
@@ -363,7 +480,7 @@ export async function createMarketplaceListing(
         const { data: listing, error: dbErr } = await supabase
             .from('marketplace_listings')
             .insert({
-                nft_token_id: config.nftTokenId,
+                nft_token_id: resolvedTokenDbId,
                 seller_wallet: config.sellerWallet.toLowerCase(),
                 price_eth: config.pricePol,
                 price_token: config.pricePol,

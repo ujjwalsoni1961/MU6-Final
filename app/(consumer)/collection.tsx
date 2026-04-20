@@ -170,7 +170,17 @@ export default function CollectionScreen() {
             return;
         }
         const listingId = await listForSaleHook.execute(
-            { nftTokenId: selectedNFT.tokenDbId, priceEth: price, sellerWallet: walletAddress },
+            {
+                nftTokenId: selectedNFT.tokenDbId,
+                priceEth: price,
+                sellerWallet: walletAddress,
+                // Chain-first fallback: if the DB `nft_tokens` UUID isn't
+                // known (e.g. the user owns the copy on-chain but no ledger
+                // row has been written yet), the listing flow will resolve /
+                // create the row using this (contract, tokenId) pair.
+                contractAddress: selectedNFT.contractAddress,
+                onChainTokenId: selectedNFT.onChainTokenId,
+            },
             account || undefined,
         );
         if (listingId) {

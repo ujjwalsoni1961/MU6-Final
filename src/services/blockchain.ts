@@ -1346,6 +1346,15 @@ export async function listForSale(
         nftTokenId: string;
         priceEth: number;
         sellerWallet: string;
+        /**
+         * Chain-first fallback: when the DB `nft_tokens` UUID is missing
+         * (user discovered their copy on-chain but no ledger row was ever
+         * written — or the one we knew about just got reshuffled), the
+         * listing flow resolves by this (contract, tokenId) pair and
+         * self-heals the ledger.
+         */
+        contractAddress?: string;
+        onChainTokenId?: string;
     },
     account?: Account,
 ): Promise<{ success: boolean; listingId?: string; error?: string }> {
@@ -1357,6 +1366,8 @@ export async function listForSale(
                 nftTokenId: config.nftTokenId,
                 pricePol: config.priceEth,
                 sellerWallet: config.sellerWallet,
+                contractAddress: config.contractAddress,
+                onChainTokenId: config.onChainTokenId,
             },
             account,
         );
@@ -1364,6 +1375,13 @@ export async function listForSale(
 
     // Fallback: DB-only listing (no wallet connected)
     try {
+        // Guard: without a wallet we can't create on-chain listings, and
+        // without a valid UUID Postgres throws 22P02. Surface a clean error
+        // instead of an opaque DB message.
+        if (!config.nftTokenId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(config.nftTokenId)) {
+            return { success: false, error: 'Connect your wallet to list this NFT for sale.' };
+        }
+
         const { data: token } = await supabase
             .from('nft_tokens')
             .select('id, owner_wallet_address, token_id')

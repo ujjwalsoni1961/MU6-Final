@@ -967,7 +967,14 @@ export function useListForSale() {
     const [state, setState] = useState<MutationState>({ loading: false, error: null, success: false });
 
     const execute = useCallback(async (
-        config: { nftTokenId: string; priceEth: number; sellerWallet: string },
+        config: {
+            nftTokenId: string;
+            priceEth: number;
+            sellerWallet: string;
+            /** Chain-first fallback when nftTokenId UUID is missing */
+            contractAddress?: string;
+            onChainTokenId?: string;
+        },
         account?: any,
     ) => {
         setState({ loading: true, error: null, success: false });
@@ -1228,6 +1235,7 @@ export function useOwnedNFTsWithStatus() {
                     benefits: release.benefits,
                     allocatedRoyaltyPercent: release.allocatedRoyaltyPercent,
                     onChainTokenId: tokenIdStr,
+                    contractAddress: contract,
                     tokenDbId: walletToken?.id || '',
                     ownershipStatus: activeListing ? 'listed' : 'unlisted',
                     activeListingId: activeListing?.id,
