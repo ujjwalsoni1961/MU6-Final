@@ -7,6 +7,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import * as db from '../services/database';
+import { readErc1155BalancesForPairs } from './useOnChainNFT';
 
 // ────────────────────────────────────────────
 // Generic async hook helper
@@ -313,6 +315,240 @@ export function useAdminNFTReleases(limit = 50) {
 // ────────────────────────────────────────────
 // NFT TOKENS
 // ────────────────────────────────────────────
+
+/**
+ * Chain-first admin view of NFT holdings.
+ *
+ * Mirrors the consumer-side `useOwnedNFTsWithStatus` pattern but enumerates
+ * every wallet known to the platform (profiles ∪ nft_tokens owners ∪
+ * marketplace sellers). For each (contract, tokenId) release the hook asks
+ * the chain "which of these wallets actually holds a balance > 0?" and emits
+ * exactly ONE row per live copy. DB is only consulted for enrichment
+ * (song/tier/rarity/minted_at) and to carry the UUID for admin-only actions
+ * like `voidToken` that operate on a DB ledger row.
+ *
+ * Why chain-first:
+ *   The DB ledger records one row per claim, but on-chain ERC-1155 balances
+ *   can diverge (burns, transfers outside the marketplace, legacy
+ *   pre-production mints). The admin screen previously rendered 5 DB ghost
+ *   rows for a token that has only 1 real copy on chain. After this change
+ *   the UI reflects ground truth: one row per on-chain copy, not per DB
+ *   record.
+ *
+ * Row shape matches the existing `useAdminNFTTokens` consumer in
+ * app/(admin)/nft-tokens.tsx so the screen file needs no re-work beyond
+ * swapping the hook import.
+ */
+export interface AdminNFTTokenRow {
+    id: string;
+    songTitle: string;
+    tierName: string;
+    rarity: string;
+    ownerWallet: string;
+    onChainTokenId: string;
+    legacyEditionId: string;
+    pricePaidEth: number;
+    isVoided: boolean;
+    mintedAt: string | null;
+    onChainVerifiable: boolean;
+    /** True when this row maps to a real nft_tokens UUID (admin actions enabled). */
+    hasDbRow: boolean;
+    contractAddress: string;
+}
+
+export function useAdminNFTTokensOnChain() {
+    return useAsync<AdminNFTTokenRow[]>(
+        async () => {
+            // Step 1: universe of ERC-1155 (contract, tokenId) pairs + ghost filter.
+            const [releases, ghostPairs] = await Promise.all([
+                db.getAllErc1155ReleasesForScan(),
+                db.getGhostTokenPairKeys(),
+            ]);
+            if (releases.length === 0) return [];
+
+            const pairKey = (contract: string, tokenId: string | number) =>
+                `${contract.toLowerCase()}:${String(tokenId)}`;
+
+            type ReleaseInfo = {
+                contract: string;
+                tokenId: string;
+                songTitle: string;
+                tierName: string;
+                rarity: string;
+                priceEth: number;
+            };
+            const releaseByPair = new Map<string, ReleaseInfo>();
+            for (const r of releases) {
+                if (!r.contractAddress || r.tokenId == null) continue;
+                const contract = r.contractAddress.toLowerCase();
+                const tokenIdStr = String(r.tokenId);
+                const key = pairKey(contract, tokenIdStr);
+                if (ghostPairs.has(key)) continue;
+                if (releaseByPair.has(key)) continue;
+                releaseByPair.set(key, {
+                    contract,
+                    tokenId: tokenIdStr,
+                    songTitle: r.song?.title || 'Unknown',
+                    tierName: r.tierName || '',
+                    rarity: r.rarity || '',
+                    priceEth: r.priceEth || 0,
+                });
+            }
+            if (releaseByPair.size === 0) return [];
+
+            // Step 2: build candidate wallet union (profiles ∪ token owners ∪
+            // marketplace sellers). Mirrors the pattern used in
+            // useAdminOnChainActivity so the two admin views scan the same
+            // wallet universe.
+            const [profilesRes, tokenRowsRes, listingsRes] = await Promise.all([
+                supabase.from('profiles').select('wallet_address').not('wallet_address', 'is', null),
+                supabase.from('nft_tokens').select('id, owner_wallet_address, on_chain_token_id, price_paid_eth, minted_at, is_voided, nft_release_id'),
+                supabase.from('marketplace_listings').select('seller_wallet').not('seller_wallet', 'is', null),
+            ]);
+
+            const walletSet = new Set<string>();
+            for (const p of profilesRes.data || []) {
+                if (p.wallet_address) walletSet.add(String(p.wallet_address).toLowerCase());
+            }
+            for (const t of tokenRowsRes.data || []) {
+                if (t.owner_wallet_address) walletSet.add(String(t.owner_wallet_address).toLowerCase());
+            }
+            for (const l of listingsRes.data || []) {
+                if (l.seller_wallet) walletSet.add(String(l.seller_wallet).toLowerCase());
+            }
+            const candidateWallets = Array.from(walletSet);
+            if (candidateWallets.length === 0) return [];
+
+            // Step 3: for each (contract, tokenId), read balance of every
+            // candidate wallet via balanceOfBatch. We issue the batch once per
+            // pair using length-N parallel arrays: all accounts, all repeated
+            // with the same tokenId. On a pair-per-pair basis this is the
+            // cheapest way to get the answer for many wallets in one RPC.
+            const balanceQueries: Array<Promise<{ contract: string; tokenId: string; balances: bigint[] }>> = [];
+            for (const r of releaseByPair.values()) {
+                const tokenIdBig = BigInt(r.tokenId);
+                const tokenIds = candidateWallets.map(() => tokenIdBig);
+                balanceQueries.push(
+                    readErc1155BalancesForPairs(r.contract, candidateWallets, tokenIds)
+                        .then((balances) => ({ contract: r.contract, tokenId: r.tokenId, balances })),
+                );
+            }
+            const balanceResults = await Promise.all(balanceQueries);
+
+            // Step 4: build enrichment map keyed by (contract, tokenId, wallet)
+            // so each on-chain copy can pull its DB ledger row if one exists.
+            // We still need the UUID for admin actions (voidToken), minted_at
+            // for display, and is_voided for the status pill.
+            //
+            // IMPORTANT: a wallet may have multiple DB rows for the same pair
+            // (historically one row was written per claim). We pick the most
+            // recent non-voided row when available; otherwise the most recent.
+            const dbRowsByTriple = new Map<string, {
+                id: string;
+                pricePaidEth: number;
+                mintedAt: string | null;
+                isVoided: boolean;
+                legacyEditionId: string;
+            }>();
+
+            // We also need the release_id → on_chain_token_id map so we can
+            // join nft_tokens rows (which reference release_id, not tokenId)
+            // back to the pair they belong to.
+            const releaseIdToPair = new Map<string, { contract: string; tokenId: string }>();
+            for (const r of releases) {
+                if (!r.contractAddress || r.tokenId == null) continue;
+                releaseIdToPair.set(r.id, {
+                    contract: r.contractAddress.toLowerCase(),
+                    tokenId: String(r.tokenId),
+                });
+            }
+
+            for (const row of tokenRowsRes.data || []) {
+                if (!row.owner_wallet_address || !row.nft_release_id) continue;
+                const pair = releaseIdToPair.get(row.nft_release_id);
+                if (!pair) continue;
+                const wallet = String(row.owner_wallet_address).toLowerCase();
+                const tripleKey = `${pair.contract}:${pair.tokenId}:${wallet}`;
+                const existing = dbRowsByTriple.get(tripleKey);
+                const candidate = {
+                    id: row.id,
+                    pricePaidEth: row.price_paid_eth ? parseFloat(row.price_paid_eth) : 0,
+                    mintedAt: row.minted_at || null,
+                    isVoided: row.is_voided === true,
+                    legacyEditionId: row.on_chain_token_id ? String(row.on_chain_token_id) : '',
+                };
+                // Prefer non-voided over voided; among same-state, prefer the
+                // most recently minted row. Ordering is best-effort since the
+                // query above didn't sort — this keeps the preference
+                // deterministic without an extra DB round-trip.
+                if (!existing) {
+                    dbRowsByTriple.set(tripleKey, candidate);
+                } else if (existing.isVoided && !candidate.isVoided) {
+                    dbRowsByTriple.set(tripleKey, candidate);
+                } else if (existing.isVoided === candidate.isVoided) {
+                    const a = existing.mintedAt ? Date.parse(existing.mintedAt) : 0;
+                    const b = candidate.mintedAt ? Date.parse(candidate.mintedAt) : 0;
+                    if (b > a) dbRowsByTriple.set(tripleKey, candidate);
+                }
+            }
+
+            // Step 5: emit one row per on-chain copy. `quantity > 1` on
+            // ERC-1155 means the wallet holds multiple copies of the same
+            // tokenId; expand to N rows so the admin count matches chain
+            // reality (5 wallets × 1 copy is different from 1 wallet × 5
+            // copies — both render 5 rows but owner-distribution is visible).
+            const out: AdminNFTTokenRow[] = [];
+            for (const { contract, tokenId, balances } of balanceResults) {
+                const release = releaseByPair.get(pairKey(contract, tokenId));
+                if (!release) continue;
+                for (let i = 0; i < candidateWallets.length; i++) {
+                    const bal = balances[i];
+                    if (bal <= 0n) continue;
+                    const wallet = candidateWallets[i];
+                    const dbRow = dbRowsByTriple.get(`${contract}:${tokenId}:${wallet}`);
+                    const copies = Number(bal);
+                    for (let c = 0; c < copies; c++) {
+                        out.push({
+                            id: dbRow && c === 0
+                                ? dbRow.id
+                                // Synthetic id for copies beyond what the DB
+                                // ledger tracks. Still stable for React keys.
+                                : `onchain-${contract}-${tokenId}-${wallet}-${c}`,
+                            songTitle: release.songTitle,
+                            tierName: release.tierName,
+                            rarity: release.rarity,
+                            ownerWallet: wallet,
+                            onChainTokenId: tokenId,
+                            legacyEditionId: dbRow?.legacyEditionId || '',
+                            pricePaidEth: dbRow?.pricePaidEth ?? release.priceEth,
+                            // Chain says the copy exists; DB's is_voided flag
+                            // is a ledger-only status and does NOT reflect
+                            // chain reality. Keep the pill for visibility but
+                            // never hide a real on-chain copy behind it.
+                            isVoided: dbRow?.isVoided === true,
+                            mintedAt: dbRow?.mintedAt || null,
+                            // This IS on-chain — by definition verifiable.
+                            onChainVerifiable: true,
+                            hasDbRow: !!(dbRow && c === 0),
+                            contractAddress: contract,
+                        });
+                    }
+                }
+            }
+
+            // Sort newest mint first (null mintedAt last).
+            out.sort((a, b) => {
+                const ta = a.mintedAt ? Date.parse(a.mintedAt) : 0;
+                const tb = b.mintedAt ? Date.parse(b.mintedAt) : 0;
+                return tb - ta;
+            });
+
+            return out;
+        },
+        [],
+        [],
+    );
+}
 
 export function useAdminNFTTokens(limit = 50) {
     return useAsync(

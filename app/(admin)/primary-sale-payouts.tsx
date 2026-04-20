@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Platform, TouchableOpacity, Linking } from 'react-native';
 import { Coins, RefreshCw, Zap, ExternalLink, AlertTriangle } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
@@ -6,6 +6,7 @@ import { ActionButton, ConfirmModal } from '../../src/components/admin/AdminActi
 import { useAdminPrimarySalePayouts, AdminPrimarySalePayout } from '../../src/hooks/useAdminData';
 import { useAdminPrimarySalePayoutActions } from '../../src/hooks/useAdminActions';
 import { useTheme } from '../../src/context/ThemeContext';
+import { fetchTxStatus, invalidateTxStatusCache, type TxStatus } from '../../src/hooks/useOnChainNFT';
 
 const isWeb = Platform.OS === 'web';
 
@@ -45,6 +46,41 @@ function openExternal(url: string) {
     }
 }
 
+// Chain verification kind per-tx. Keeps render logic declarative.
+type ChainBadge = 'verified' | 'mismatch' | 'unconfirmed' | 'failed' | 'skipped';
+
+function badgeStyle(kind: ChainBadge): { label: string; color: string; bg: string } {
+    switch (kind) {
+        case 'verified': return { label: '✓ Verified', color: '#10b981', bg: 'rgba(16,185,129,0.15)' };
+        case 'mismatch': return { label: '⚠ Mismatch', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' };
+        case 'unconfirmed': return { label: '⋯ Unconfirmed', color: '#94a3b8', bg: 'rgba(148,163,184,0.15)' };
+        case 'failed': return { label: '✕ Failed', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' };
+        case 'skipped': return { label: '— No tx', color: '#6b7280', bg: 'rgba(107,114,128,0.15)' };
+    }
+}
+
+function ChainVerifyBadge({ kind, detail }: { kind: ChainBadge; detail?: string }) {
+    const s = badgeStyle(kind);
+    return (
+        <View style={{
+            alignSelf: 'flex-start',
+            backgroundColor: s.bg,
+            borderRadius: 6,
+            paddingHorizontal: 6,
+            paddingVertical: 2,
+            marginTop: 4,
+            maxWidth: 180,
+        }}>
+            <Text style={{ color: s.color, fontSize: 10, fontWeight: '600' }}>{s.label}</Text>
+            {detail ? (
+                <Text style={{ color: s.color, fontSize: 9, opacity: 0.8 }} numberOfLines={1}>
+                    {detail}
+                </Text>
+            ) : null}
+        </View>
+    );
+}
+
 export default function AdminPrimarySalePayoutsScreen() {
     const { data: payouts, loading, error, refresh } = useAdminPrimarySalePayouts(100);
     const { retry, sweep } = useAdminPrimarySalePayoutActions(refresh);
@@ -53,6 +89,67 @@ export default function AdminPrimarySalePayoutsScreen() {
     const [retryTarget, setRetryTarget] = useState<AdminPrimarySalePayout | null>(null);
     const [sweepOpen, setSweepOpen] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
+
+    // Per-row chain verification state. Keyed by tx hash so the same hash
+    // isn't re-fetched when it appears on multiple payouts (rare but
+    // possible if a retry re-used a hash).
+    const [txStatusMap, setTxStatusMap] = useState<Record<string, TxStatus>>({});
+
+    // Load chain status for every claim + forward tx on the current page.
+    // Runs once per payouts list change; internal cache in `fetchTxStatus`
+    // prevents hammering the RPC on re-render.
+    useEffect(() => {
+        if (payouts.length === 0) return;
+        let cancelled = false;
+        const hashes = new Set<string>();
+        for (const p of payouts) {
+            if (p.claimTxHash) hashes.add(p.claimTxHash);
+            if (p.forwardTxHash) hashes.add(p.forwardTxHash);
+        }
+        if (hashes.size === 0) return;
+        (async () => {
+            const results = await Promise.all(
+                Array.from(hashes).map(async (h) => [h, await fetchTxStatus(h)] as const),
+            );
+            if (cancelled) return;
+            setTxStatusMap((prev) => {
+                const next = { ...prev };
+                for (const [h, s] of results) next[h] = s;
+                return next;
+            });
+        })();
+        return () => { cancelled = true; };
+    }, [payouts]);
+
+    // Wrap refresh to also invalidate the tx-status cache so the admin gets
+    // a truly fresh chain read when they hit the Refresh button.
+    const refreshAll = () => {
+        invalidateTxStatusCache();
+        setTxStatusMap({});
+        refresh();
+    };
+
+    // Classify a tx against an expected wei value. `expectedWei` may be '0'
+    // for the claim tx (we don't assert its value because claim flows differ
+    // per contract); pass undefined to skip the value comparison.
+    const classifyTx = (hash: string, expectedWei?: string): { kind: ChainBadge; detail?: string } => {
+        if (!hash) return { kind: 'skipped' };
+        const status = txStatusMap[hash];
+        if (!status) return { kind: 'unconfirmed', detail: 'Loading…' };
+        if (status.missing) return { kind: 'unconfirmed', detail: 'Not yet mined' };
+        if (!status.ok) return { kind: 'failed', detail: status.blockNumber ? `Block ${status.blockNumber}` : 'Reverted' };
+        if (expectedWei && status.valueWei !== null) {
+            try {
+                const expected = BigInt(expectedWei);
+                if (expected !== status.valueWei) {
+                    return { kind: 'mismatch', detail: `On-chain ≠ DB` };
+                }
+            } catch {
+                // If expectedWei isn't a valid bigint string, skip the check.
+            }
+        }
+        return { kind: 'verified', detail: status.blockNumber ? `Block ${status.blockNumber}` : undefined };
+    };
 
     const summary = useMemo(() => {
         const s = { forwarded: 0, pending: 0, pending_retry: 0, failed: 0, other: 0 };
@@ -124,7 +221,7 @@ export default function AdminPrimarySalePayoutsScreen() {
                     icon={<RefreshCw size={14} color={colors.accent.cyan} />}
                     label="Refresh"
                     color={colors.accent.cyan}
-                    onPress={refresh}
+                    onPress={refreshAll}
                     size="medium"
                 />
             </View>
@@ -140,6 +237,14 @@ export default function AdminPrimarySalePayoutsScreen() {
                     const claimUrl = p.claimTxHash ? `${EXPLORER_TX_BASE}${p.claimTxHash}` : '';
                     const forwardUrl = p.forwardTxHash ? `${EXPLORER_TX_BASE}${p.forwardTxHash}` : '';
                     const artistAddrUrl = p.artistWallet ? `${EXPLORER_ADDR_BASE}${p.artistWallet}` : '';
+
+                    // Chain verification: claim tx is status-only (value is
+                    // contract-call data, not a native transfer). Forward tx
+                    // is a native transfer — its `value` should equal
+                    // artistWei exactly. A mismatch is a red flag the ledger
+                    // and the wire disagree.
+                    const claimBadge = classifyTx(p.claimTxHash);
+                    const forwardBadge = classifyTx(p.forwardTxHash, p.artistWei);
 
                     if (!isWeb) {
                         // Compact mobile card
@@ -170,20 +275,26 @@ export default function AdminPrimarySalePayoutsScreen() {
                                 )}
                                 <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                                     {claimUrl ? (
-                                        <ActionButton
-                                            icon={<ExternalLink size={11} color={colors.text.secondary} />}
-                                            label="Claim"
-                                            color={colors.text.secondary}
-                                            onPress={() => openExternal(claimUrl)}
-                                        />
+                                        <View>
+                                            <ActionButton
+                                                icon={<ExternalLink size={11} color={colors.text.secondary} />}
+                                                label="Claim"
+                                                color={colors.text.secondary}
+                                                onPress={() => openExternal(claimUrl)}
+                                            />
+                                            <ChainVerifyBadge kind={claimBadge.kind} detail={claimBadge.detail} />
+                                        </View>
                                     ) : null}
                                     {forwardUrl ? (
-                                        <ActionButton
-                                            icon={<ExternalLink size={11} color={colors.status.success} />}
-                                            label="Forward"
-                                            color={colors.status.success}
-                                            onPress={() => openExternal(forwardUrl)}
-                                        />
+                                        <View>
+                                            <ActionButton
+                                                icon={<ExternalLink size={11} color={colors.status.success} />}
+                                                label="Forward"
+                                                color={colors.status.success}
+                                                onPress={() => openExternal(forwardUrl)}
+                                            />
+                                            <ChainVerifyBadge kind={forwardBadge.kind} detail={forwardBadge.detail} />
+                                        </View>
                                     ) : null}
                                     {canRetry ? (
                                         <ActionButton
@@ -286,46 +397,58 @@ export default function AdminPrimarySalePayoutsScreen() {
                             {/* Claim Tx */}
                             <View style={{ flex: 0.7 }}>
                                 {p.claimTxHash ? (
-                                    <TouchableOpacity
-                                        onPress={() => openExternal(claimUrl)}
-                                        style={{ flexDirection: 'row', alignItems: 'center' }}
-                                    >
-                                        <Text style={{
-                                            color: colors.accent.cyan,
-                                            fontSize: 11,
-                                            fontFamily: 'monospace',
-                                            textDecorationLine: 'underline',
-                                            marginRight: 4,
-                                        }}>
-                                            {truncateHex(p.claimTxHash)}
-                                        </Text>
-                                        <ExternalLink size={10} color={colors.accent.cyan} />
-                                    </TouchableOpacity>
+                                    <>
+                                        <TouchableOpacity
+                                            onPress={() => openExternal(claimUrl)}
+                                            style={{ flexDirection: 'row', alignItems: 'center' }}
+                                        >
+                                            <Text style={{
+                                                color: colors.accent.cyan,
+                                                fontSize: 11,
+                                                fontFamily: 'monospace',
+                                                textDecorationLine: 'underline',
+                                                marginRight: 4,
+                                            }}>
+                                                {truncateHex(p.claimTxHash)}
+                                            </Text>
+                                            <ExternalLink size={10} color={colors.accent.cyan} />
+                                        </TouchableOpacity>
+                                        <ChainVerifyBadge kind={claimBadge.kind} detail={claimBadge.detail} />
+                                    </>
                                 ) : (
-                                    <Text style={{ color: colors.text.muted, fontSize: 11 }}>—</Text>
+                                    <>
+                                        <Text style={{ color: colors.text.muted, fontSize: 11 }}>—</Text>
+                                        <ChainVerifyBadge kind="skipped" />
+                                    </>
                                 )}
                             </View>
 
                             {/* Forward Tx */}
                             <View style={{ flex: 0.7 }}>
                                 {p.forwardTxHash ? (
-                                    <TouchableOpacity
-                                        onPress={() => openExternal(forwardUrl)}
-                                        style={{ flexDirection: 'row', alignItems: 'center' }}
-                                    >
-                                        <Text style={{
-                                            color: colors.status.success,
-                                            fontSize: 11,
-                                            fontFamily: 'monospace',
-                                            textDecorationLine: 'underline',
-                                            marginRight: 4,
-                                        }}>
-                                            {truncateHex(p.forwardTxHash)}
-                                        </Text>
-                                        <ExternalLink size={10} color={colors.status.success} />
-                                    </TouchableOpacity>
+                                    <>
+                                        <TouchableOpacity
+                                            onPress={() => openExternal(forwardUrl)}
+                                            style={{ flexDirection: 'row', alignItems: 'center' }}
+                                        >
+                                            <Text style={{
+                                                color: colors.status.success,
+                                                fontSize: 11,
+                                                fontFamily: 'monospace',
+                                                textDecorationLine: 'underline',
+                                                marginRight: 4,
+                                            }}>
+                                                {truncateHex(p.forwardTxHash)}
+                                            </Text>
+                                            <ExternalLink size={10} color={colors.status.success} />
+                                        </TouchableOpacity>
+                                        <ChainVerifyBadge kind={forwardBadge.kind} detail={forwardBadge.detail} />
+                                    </>
                                 ) : (
-                                    <Text style={{ color: colors.text.muted, fontSize: 11 }}>—</Text>
+                                    <>
+                                        <Text style={{ color: colors.text.muted, fontSize: 11 }}>—</Text>
+                                        <ChainVerifyBadge kind="skipped" />
+                                    </>
                                 )}
                             </View>
 

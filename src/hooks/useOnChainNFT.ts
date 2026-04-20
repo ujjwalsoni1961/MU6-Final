@@ -265,3 +265,180 @@ export async function fetchTokenMetadataFromChain(
 export function invalidateOnChainMetadataCache() {
     metadataCache.clear();
 }
+
+// ──────────────────────────────────
+// Pairwise balanceOfBatch (many wallets, one tokenId each)
+// ──────────────────────────────────
+
+/**
+ * Pairwise ERC-1155 balanceOfBatch: read balance of (accounts[i], tokenIds[i])
+ * for every i. Both arrays MUST have the same length.
+ *
+ * Differs from `readErc1155BalanceBatch` above (which fans one wallet across
+ * many tokenIds). Use this when the admin global view needs to ask
+ * "what is each wallet's balance of a specific tokenId?" — pass a parallel
+ * wallets[] and tokenIds[] of equal length.
+ *
+ * ABI encoding follows the ERC-1155 spec:
+ *   balanceOfBatch(address[] accounts, uint256[] ids) → uint256[]
+ *
+ * Fails-closed: on any error every entry returns 0n so callers treat the
+ * pair as not-owned and never surface stale DB data as chain-verified.
+ */
+export async function readErc1155BalancesForPairs(
+    contract: string,
+    accounts: string[],
+    tokenIds: bigint[],
+): Promise<bigint[]> {
+    if (accounts.length !== tokenIds.length) {
+        throw new Error(`readErc1155BalancesForPairs: accounts.length (${accounts.length}) !== tokenIds.length (${tokenIds.length})`);
+    }
+    if (accounts.length === 0) return [];
+
+    // Respect the per-pair cache already used by `readErc1155BalanceBatch`
+    // so the admin page and the consumer page share a TTL-based cache.
+    const cacheKeys = accounts.map(
+        (w, i) => `${contract.toLowerCase()}:${w.toLowerCase()}:${tokenIds[i].toString()}`,
+    );
+    const now = Date.now();
+    const cachedResults: (bigint | null)[] = cacheKeys.map((k) => {
+        const c = erc1155BalanceCache.get(k);
+        return c && now - c.at < ERC1155_BALANCE_CACHE_MS ? c.balance : null;
+    });
+    if (cachedResults.every((v) => v !== null)) {
+        return cachedResults as bigint[];
+    }
+
+    // balanceOfBatch(address[] accounts, uint256[] ids) selector = 0x4e1273f4
+    const n = BigInt(accounts.length);
+    const accountsOffset = uint256Hex(0x40n);
+    const idsOffset = uint256Hex(0x40n + 0x20n + n * 0x20n);
+    const accountsLen = uint256Hex(n);
+    const accountsBody = accounts
+        .map((w) => w.replace(/^0x/, '').toLowerCase().padStart(64, '0'))
+        .join('');
+    const idsLen = uint256Hex(n);
+    const idsBody = tokenIds.map((id) => uint256Hex(id)).join('');
+    const data = '0x4e1273f4' + accountsOffset + idsOffset + accountsLen + accountsBody + idsLen + idsBody;
+
+    try {
+        const res: string = await rpcCall('eth_call', [{ to: contract, data }, 'latest']);
+        const hex = (res || '0x').replace(/^0x/, '');
+        if (hex.length < 64 * 2) throw new Error('balanceOfBatch: response too short');
+        const length = Number(BigInt('0x' + hex.slice(64, 128)));
+        const balances: bigint[] = [];
+        for (let i = 0; i < length; i++) {
+            const start = 128 + i * 64;
+            const word = hex.slice(start, start + 64);
+            balances.push(BigInt('0x' + word));
+        }
+        if (balances.length !== accounts.length) {
+            throw new Error(`balanceOfBatch length mismatch: got ${balances.length}, expected ${accounts.length}`);
+        }
+        for (let i = 0; i < balances.length; i++) {
+            erc1155BalanceCache.set(cacheKeys[i], { balance: balances[i], at: now });
+        }
+        return balances;
+    } catch (err: any) {
+        console.warn('[useOnChainNFT] readErc1155BalancesForPairs failed:', err?.message);
+        for (const k of cacheKeys) {
+            erc1155BalanceCache.set(k, { balance: 0n, at: now });
+        }
+        return accounts.map(() => 0n);
+    }
+}
+
+// ──────────────────────────────────
+// Transaction receipt / value lookups (for payout verification)
+// ──────────────────────────────────
+
+export interface TxStatus {
+    hash: string;
+    /** true if the tx was mined AND the receipt.status == 0x1. */
+    ok: boolean;
+    /** true if the tx receipt could not be found (unmined / dropped / unknown). */
+    missing: boolean;
+    blockNumber: number | null;
+    /** Native-token value transferred (wei as bigint). Null if lookup failed. */
+    valueWei: bigint | null;
+    from: string | null;
+    to: string | null;
+}
+
+type TxStatusCacheEntry = { status: TxStatus; at: number };
+const txStatusCache = new Map<string, TxStatusCacheEntry>();
+// Mined-tx receipts are immutable. 5 minutes is enough to avoid hammering the
+// RPC when an admin reloads the page; pending/dropped lookups return `missing`
+// and we re-try on each call (short-circuited by a 10s negative cache).
+const TX_STATUS_CACHE_MS = 5 * 60 * 1000;
+const TX_STATUS_NEG_CACHE_MS = 10 * 1000;
+
+/**
+ * Fetch on-chain tx status + native value for a hash. Used by the admin
+ * primary-sale-payouts screen to verify claim and forward transactions match
+ * what the DB ledger says.
+ *
+ * Combines `eth_getTransactionByHash` (for value/from/to) and
+ * `eth_getTransactionReceipt` (for status). A successful native transfer has
+ * tx.value > 0 and receipt.status === '0x1'.
+ *
+ * Fails-soft: on any RPC error returns `{ ok: false, missing: true, ... }`
+ * so UI shows an "unverified" badge rather than crashing.
+ */
+export async function fetchTxStatus(hash: string): Promise<TxStatus> {
+    if (!hash) {
+        return { hash, ok: false, missing: true, blockNumber: null, valueWei: null, from: null, to: null };
+    }
+    const key = hash.toLowerCase();
+    const cached = txStatusCache.get(key);
+    if (cached) {
+        const ttl = cached.status.missing ? TX_STATUS_NEG_CACHE_MS : TX_STATUS_CACHE_MS;
+        if (Date.now() - cached.at < ttl) return cached.status;
+    }
+
+    try {
+        const [txRaw, receiptRaw] = await Promise.all([
+            rpcCall('eth_getTransactionByHash', [hash]),
+            rpcCall('eth_getTransactionReceipt', [hash]),
+        ]);
+        const tx = txRaw as { value?: string; from?: string; to?: string; blockNumber?: string } | null;
+        const receipt = receiptRaw as { status?: string; blockNumber?: string } | null;
+
+        if (!tx && !receipt) {
+            const status: TxStatus = { hash, ok: false, missing: true, blockNumber: null, valueWei: null, from: null, to: null };
+            txStatusCache.set(key, { status, at: Date.now() });
+            return status;
+        }
+
+        const valueWei = tx?.value ? BigInt(tx.value) : null;
+        const blockNumber = receipt?.blockNumber
+            ? Number(BigInt(receipt.blockNumber))
+            : (tx?.blockNumber ? Number(BigInt(tx.blockNumber)) : null);
+        const ok = receipt?.status === '0x1';
+        // If there's no receipt yet the tx is pending — treat as missing so
+        // the UI renders "unconfirmed" instead of "verified".
+        const missing = !receipt;
+
+        const status: TxStatus = {
+            hash,
+            ok,
+            missing,
+            blockNumber,
+            valueWei,
+            from: tx?.from || null,
+            to: tx?.to || null,
+        };
+        txStatusCache.set(key, { status, at: Date.now() });
+        return status;
+    } catch (err: any) {
+        console.warn('[useOnChainNFT] fetchTxStatus failed:', hash, err?.message);
+        const status: TxStatus = { hash, ok: false, missing: true, blockNumber: null, valueWei: null, from: null, to: null };
+        txStatusCache.set(key, { status, at: Date.now() });
+        return status;
+    }
+}
+
+/** Clear the tx status cache. Called from the admin "Refresh" button. */
+export function invalidateTxStatusCache() {
+    txStatusCache.clear();
+}

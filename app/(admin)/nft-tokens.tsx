@@ -3,14 +3,17 @@ import { View, Text, Platform, Pressable, ActivityIndicator } from 'react-native
 import { Tag, Ban, RefreshCw } from 'lucide-react-native';
 import { AdminScreen, AdminDataTable, StatusBadge } from '../../src/components/admin/AdminScreenWrapper';
 import { ActionButton, ConfirmModal, RowActions } from '../../src/components/admin/AdminActionComponents';
-import { useAdminNFTTokens } from '../../src/hooks/useAdminData';
+import { useAdminNFTTokensOnChain } from '../../src/hooks/useAdminData';
 import { useAdminNFTTokenActions } from '../../src/hooks/useAdminActions';
 import { useTheme } from '../../src/context/ThemeContext';
 
 const isWeb = Platform.OS === 'web';
 
 export default function AdminNFTTokensScreen() {
-    const { data: tokens, loading, error, refresh } = useAdminNFTTokens();
+    // Chain-first view: one row per live on-chain copy, DB used only for
+    // enrichment (song/tier/rarity) and admin-action UUID. See
+    // `useAdminNFTTokensOnChain` for the full rationale.
+    const { data: tokens, loading, error, refresh } = useAdminNFTTokensOnChain();
     const actions = useAdminNFTTokenActions(refresh);
     const [voidTarget, setVoidTarget] = useState<{ id: string; tokenId: string } | null>(null);
     const [actionLoading, setActionLoading] = useState(false);
@@ -108,7 +111,11 @@ export default function AdminNFTTokensScreen() {
                                 </View>
                                 <View style={{ flex: 0.7 }}>
                                     <RowActions>
-                                        {!t.isVoided && (
+                                        {/* Void is a DB-ledger-only action. The chain-first
+                                            view emits rows that may not have a DB row (e.g.
+                                            multi-copy wallets, legacy transfers). Only show
+                                            Void when we have a real nft_tokens UUID to void. */}
+                                        {!t.isVoided && t.hasDbRow && (
                                             <ActionButton
                                                 icon={<Ban size={12} color={colors.status.error} />}
                                                 label="Void"
@@ -135,7 +142,7 @@ export default function AdminNFTTokensScreen() {
                                     <Text style={{ color: colors.text.muted, fontSize: 11 }}>
                                         Owner: {t.ownerWallet ? `${t.ownerWallet.slice(0, 8)}...` : '—'}
                                     </Text>
-                                    {!t.isVoided && (
+                                    {!t.isVoided && t.hasDbRow && (
                                         <ActionButton
                                             icon={<Ban size={12} color={colors.status.error} />}
                                             label="Void"
