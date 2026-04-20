@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import {
     View, Text, ScrollView, FlatList, useWindowDimensions,
-    Animated, ActivityIndicator, Modal, TextInput, Alert,
+    Animated, ActivityIndicator, Modal, TextInput,
     TouchableWithoutFeedback, PanResponder, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,6 +29,7 @@ import {
 } from '../../src/hooks/useData';
 import ErrorState from '../../src/components/shared/ErrorState';
 import { useResponsive } from '../../src/hooks/useResponsive';
+import { confirmPrompt, notify } from '../../src/utils/prompts';
 
 const filters = ['All', 'Legendary', 'Rare', 'Common'];
 
@@ -166,7 +167,7 @@ export default function CollectionScreen() {
         if (!selectedNFT || !walletAddress) return;
         const price = parseFloat(listPrice);
         if (isNaN(price) || price <= 0) {
-            Alert.alert('Invalid Price', 'Please enter a valid price in POL.');
+            await notify('Invalid Price', 'Please enter a valid price in POL.');
             return;
         }
         const listingId = await listForSaleHook.execute(
@@ -184,25 +185,29 @@ export default function CollectionScreen() {
             account || undefined,
         );
         if (listingId) {
-            Alert.alert('Listed!', `Your NFT is now listed for ${price} POL on the marketplace.`, [
-                {
-                    text: 'View Marketplace',
-                    onPress: () => {
-                        setModalVisible(false);
-                        router.push('/(consumer)/marketplace');
-                    },
-                },
-                { text: 'OK', onPress: () => setModalVisible(false) },
-            ]);
+            // Close the manage-listing sheet first, then either notify or
+            // navigate. Using confirmPrompt here gives the user a real
+            // "View Marketplace vs Stay" choice on every platform — the
+            // previous multi-button Alert.alert silently dropped its
+            // onPress callbacks on web.
+            setModalVisible(false);
             refresh();
+            const viewMarketplace = await confirmPrompt(
+                'Listed!',
+                `Your NFT is now listed for ${price} POL on the marketplace.`,
+                { confirmLabel: 'View Marketplace', cancelLabel: 'Stay Here' },
+            );
+            if (viewMarketplace) {
+                router.push('/(consumer)/marketplace');
+            }
         }
-    }, [selectedNFT, walletAddress, listPrice, account, listForSaleHook.execute, refresh]);
+    }, [selectedNFT, walletAddress, listPrice, account, listForSaleHook.execute, refresh, router]);
 
     const handleUpdatePrice = useCallback(async () => {
         if (!selectedNFT || !walletAddress || !selectedNFT.activeListingId) return;
         const price = parseFloat(newPrice);
         if (isNaN(price) || price <= 0) {
-            Alert.alert('Invalid Price', 'Please enter a valid price in POL.');
+            await notify('Invalid Price', 'Please enter a valid price in POL.');
             return;
         }
         const success = await updatePriceHook.execute(
@@ -214,37 +219,44 @@ export default function CollectionScreen() {
             account || undefined,
         );
         if (success) {
-            Alert.alert('Updated', `Listing price updated to ${price} POL.`);
             setModalVisible(false);
             refresh();
+            await notify('Updated', `Listing price updated to ${price} POL.`);
         }
     }, [selectedNFT, walletAddress, newPrice, account, updatePriceHook.execute, refresh]);
 
     const handleCancelListing = useCallback(async () => {
         if (!selectedNFT || !walletAddress || !selectedNFT.activeListingId) return;
-        Alert.alert(
+
+        // confirmPrompt wraps Alert.alert on native + window.confirm on web.
+        // react-native-web's Alert.alert polyfill drops the buttons[] array
+        // and never fires onPress, which silently broke this entire flow on
+        // mobile web browsers. Using a platform-aware helper makes the
+        // destructive confirmation actually reach the cancel call-site.
+        const confirmed = await confirmPrompt(
             'Cancel Listing',
             'Are you sure you want to cancel this listing? The NFT will be removed from the marketplace.',
-            [
-                { text: 'Keep Listed', style: 'cancel' },
-                {
-                    text: 'Cancel Listing',
-                    style: 'destructive',
-                    onPress: async () => {
-                        const success = await cancelListingHook.execute(
-                            selectedNFT.activeListingId!,
-                            walletAddress,
-                            account || undefined,
-                        );
-                        if (success) {
-                            Alert.alert('Cancelled', 'Your NFT listing has been cancelled.');
-                            setModalVisible(false);
-                            refresh();
-                        }
-                    },
-                },
-            ],
+            {
+                confirmLabel: 'Cancel Listing',
+                cancelLabel: 'Keep Listed',
+                destructive: true,
+            },
         );
+        if (!confirmed) return;
+
+        const success = await cancelListingHook.execute(
+            selectedNFT.activeListingId,
+            walletAddress,
+            account || undefined,
+        );
+        if (success) {
+            setModalVisible(false);
+            refresh();
+            await notify(
+                'Cancelled',
+                'Your NFT listing has been cancelled.',
+            );
+        }
     }, [selectedNFT, walletAddress, account, cancelListingHook.execute, refresh]);
 
     // ─── Header ───
