@@ -1,29 +1,27 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, Modal, RefreshControl, Platform } from 'react-native';
+import { View, Text, ScrollView, FlatList, useWindowDimensions, Animated, ActivityIndicator, RefreshControl, Platform } from 'react-native';
 import AnimatedPressable from '../../src/components/shared/AnimatedPressable';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Image } from 'expo-image';
 import AvatarDisplay from '../../src/components/shared/AvatarDisplay';
-import { BadgeCheck, X, ListMusic, Plus, Clock } from 'lucide-react-native';
+import { BadgeCheck, ListMusic, Plus, Clock } from 'lucide-react-native';
 import TabPill from '../../src/components/shared/TabPill';
 import ScreenScaffold from '../../src/components/layout/ScreenScaffold';
 import SongRow from '../../src/components/shared/SongRow';
-import NFTCard from '../../src/components/shared/NFTCard';
-import NFTGroupCard from '../../src/components/shared/NFTGroupCard';
 import CreatePlaylistModal from '../../src/components/shared/CreatePlaylistModal';
-import { Song, NFT, Artist, Playlist } from '../../src/types';
-import { useLikedSongs, useArtists, useOwnedNFTs } from '../../src/hooks/useData';
+import { Song, Artist } from '../../src/types';
+import { useLikedSongs, useArtists } from '../../src/hooks/useData';
 import { usePlayer } from '../../src/context/PlayerContext';
 import { useAuth } from '../../src/context/AuthContext';
 import * as db from '../../src/services/database';
 import ErrorState from '../../src/components/shared/ErrorState';
 import { useResponsive } from '../../src/hooks/useResponsive';
 
-const tabs = ['Songs', 'Playlists', 'NFTs', 'Creators'];
+// NFTs are intentionally excluded — owned NFTs live on the Collection page.
+const tabs = ['Songs', 'Playlists', 'Creators'];
 
 import { useTheme } from '../../src/context/ThemeContext';
-import { useCurrency } from '../../src/hooks/useCurrency';
 
 /* ─── Creator Row ─── */
 function CreatorRow({ item, onPress }: { item: Artist; onPress: () => void }) {
@@ -79,7 +77,6 @@ export default function LibraryScreen() {
     const { width } = useWindowDimensions();
     const { isDesktopLayout, isPhoneLayout } = useResponsive();
     const { isDark, colors } = useTheme();
-    const { fiatCurrency } = useCurrency();
     const insets = useSafeAreaInsets();
     const scrollY = useRef(new Animated.Value(0)).current;
     const { playSong, playHistory } = usePlayer();
@@ -88,24 +85,11 @@ export default function LibraryScreen() {
     // Real data hooks
     const { data: likedSongs, loading: loadingSongs, error: errorSongs, refresh: refreshLiked } = useLikedSongs();
     const { data: artists, loading: loadingArtists, error: errorArtists, refresh: refreshArtists } = useArtists(20);
-    const { data: ownedNFTs, loading: loadingNFTs, error: errorNFTs, refresh: refreshNFTs } = useOwnedNFTs();
 
     // Playlist state
     const [playlists, setPlaylists] = useState<db.PlaylistRow[]>([]);
     const [loadingPlaylists, setLoadingPlaylists] = useState(false);
     const [showCreatePlaylist, setShowCreatePlaylist] = useState(false);
-
-    const [groupModalVisible, setGroupModalVisible] = useState(false);
-    const [selectedGroup, setSelectedGroup] = useState<NFT[]>([]);
-
-    const groupedNFTs = React.useMemo(() => {
-        const groups: Record<string, NFT[]> = {};
-        for (const nft of (ownedNFTs || [])) {
-            if (!groups[nft.songId]) groups[nft.songId] = [];
-            groups[nft.songId].push(nft);
-        }
-        return Object.values(groups);
-    }, [ownedNFTs]);
 
     const fetchPlaylists = useCallback(async () => {
         if (!profile?.id) return;
@@ -119,9 +103,8 @@ export default function LibraryScreen() {
         useCallback(() => {
             refreshLiked();
             refreshArtists();
-            refreshNFTs();
             fetchPlaylists();
-        }, [refreshLiked, refreshArtists, refreshNFTs, fetchPlaylists])
+        }, [refreshLiked, refreshArtists, fetchPlaylists])
     );
 
     const [refreshing, setRefreshing] = useState(false);
@@ -130,17 +113,13 @@ export default function LibraryScreen() {
         await Promise.all([
             refreshLiked(),
             refreshArtists(),
-            refreshNFTs(),
             fetchPlaylists(),
         ]);
         setRefreshing(false);
-    }, [refreshLiked, refreshArtists, refreshNFTs, fetchPlaylists]);
-
-    const numCols = isDesktopLayout ? (width > 1200 ? 4 : width > 800 ? 3 : 2) : 2;
+    }, [refreshLiked, refreshArtists, fetchPlaylists]);
 
     const isLoading = (activeTab === 'Songs' && loadingSongs) ||
                       (activeTab === 'Creators' && loadingArtists) ||
-                      (activeTab === 'NFTs' && loadingNFTs) ||
                       (activeTab === 'Playlists' && loadingPlaylists);
 
     const recentlyPlayed = playHistory.slice(0, 20);
@@ -305,176 +284,56 @@ export default function LibraryScreen() {
     return (
         <ScreenScaffold dominantColor="#38b4ba" noScroll scrollY={scrollY}>
             <View style={{ flex: 1, maxWidth: isDesktopLayout ? 1100 : undefined, width: '100%' as any, alignSelf: 'center' as any }}>
-                {activeTab === 'NFTs' ? (
-                    <FlatList
-                        data={loadingNFTs ? [] : groupedNFTs}
-                        ListHeaderComponent={renderHeader}
-                        renderItem={({ item }: { item: NFT[] }) => {
-                            const firstItem = item[0];
-                            const badgeText = `${item.length} Owned`;
-                            return (
-                                <View style={{ width: `${100 / numCols}%` as any, maxWidth: isDesktopLayout ? 280 : undefined }}>
-                                    <NFTGroupCard
-                                        cover={firstItem.coverImage}
-                                        title={firstItem.songTitle}
-                                        artist={firstItem.artistName}
-                                        badgeText={badgeText}
-                                        onPress={() => {
-                                            setSelectedGroup(item);
-                                            setGroupModalVisible(true);
-                                        }}
-                                    />
-                                </View>
-                            );
-                        }}
-                        keyExtractor={(item) => item[0].id}
-                        numColumns={numCols}
-                        key={`grid-${numCols}`}
-                        showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{
-                            paddingHorizontal: isDesktopLayout ? 26 : 10,
-                            paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
-                            paddingBottom: 100,
-                        }}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={onRefresh}
-                                tintColor={colors.accent.cyan}
-                                colors={[colors.accent.cyan]}
-                            />
-                        }
-                        onScroll={Animated.event(
-                            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-                            { useNativeDriver: false }
-                        )}
-                        scrollEventThrottle={16}
-                        ListEmptyComponent={() => !isLoading ? (
-                            errorNFTs ? (
-                                <ErrorState message={errorNFTs} onRetry={refreshNFTs} />
-                            ) : (
-                                <View style={{ alignItems: 'center', paddingTop: 60 }}>
-                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>No NFTs in your collection yet</Text>
-                                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>Mint or buy NFTs from the Marketplace.</Text>
-                                </View>
-                            )
-                        ) : null}
-                    />
-                ) : (
-                    <FlatList
-                        data={isLoading ? [] : getData()}
-                        ListHeaderComponent={renderHeader}
-                        renderItem={renderItem}
-                        keyExtractor={(item) => item.id}
-                        showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{
-                            paddingHorizontal: isDesktopLayout ? 32 : 16,
-                            paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
-                            paddingBottom: 100,
-                        }}
-                        refreshControl={
-                            <RefreshControl
-                                refreshing={refreshing}
-                                onRefresh={onRefresh}
-                                tintColor={colors.accent.cyan}
-                                colors={[colors.accent.cyan]}
-                            />
-                        }
-                        onScroll={Animated.event(
-                            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-                            { useNativeDriver: false }
-                        )}
-                        scrollEventThrottle={16}
-                        ListEmptyComponent={() => {
-                            if (isLoading) return null;
-                            if (activeTab === 'Playlists') {
-                                return (
-                                    <View style={{ alignItems: 'center', paddingTop: 60 }}>
-                                        <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>No playlists yet</Text>
-                                        <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>Create your first playlist above.</Text>
-                                    </View>
-                                );
-                            }
-                            const currentError = activeTab === 'Songs' ? errorSongs : errorArtists;
-                            const currentRefresh = activeTab === 'Songs' ? refreshLiked : refreshArtists;
-                            if (currentError) return <ErrorState message={currentError} onRetry={currentRefresh} />;
+                <FlatList
+                    data={isLoading ? [] : getData()}
+                    ListHeaderComponent={renderHeader}
+                    renderItem={renderItem}
+                    keyExtractor={(item) => item.id}
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{
+                        paddingHorizontal: isDesktopLayout ? 32 : 16,
+                        paddingTop: Platform.OS === 'web' ? 80 : insets.top + 44,
+                        paddingBottom: 100,
+                    }}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            tintColor={colors.accent.cyan}
+                            colors={[colors.accent.cyan]}
+                        />
+                    }
+                    onScroll={Animated.event(
+                        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                        { useNativeDriver: false }
+                    )}
+                    scrollEventThrottle={16}
+                    ListEmptyComponent={() => {
+                        if (isLoading) return null;
+                        if (activeTab === 'Playlists') {
                             return (
                                 <View style={{ alignItems: 'center', paddingTop: 60 }}>
-                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
-                                        {activeTab === 'Songs' ? 'No liked songs yet' : 'No creators to show'}
-                                    </Text>
-                                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>
-                                        {activeTab === 'Songs' ? 'Like songs to see them here.' : 'Discover creators on the home page.'}
-                                    </Text>
+                                    <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>No playlists yet</Text>
+                                    <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>Create your first playlist above.</Text>
                                 </View>
                             );
-                        }}
-                    />
-                )}
-            </View>
-
-            {/* ── Group Details Modal ── */}
-            <Modal
-                visible={groupModalVisible}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setGroupModalVisible(false)}
-            >
-                <View style={{
-                    flex: 1,
-                    backgroundColor: 'rgba(0,0,0,0.6)',
-                    justifyContent: 'flex-end',
-                }}>
-                    <View style={{
-                        backgroundColor: isDark ? '#1a1a2e' : '#ffffff',
-                        borderTopLeftRadius: 28,
-                        borderTopRightRadius: 28,
-                        paddingTop: 8,
-                        paddingBottom: Math.max(insets.bottom, 20),
-                        maxHeight: '85%',
-                    }}>
-                        <View style={{
-                            width: 40, height: 4, borderRadius: 2,
-                            backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)',
-                            alignSelf: 'center', marginBottom: 16,
-                        }} />
-
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 12 }}>
-                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text.primary, letterSpacing: -0.5 }}>
-                                {selectedGroup[0]?.songTitle || 'Collection'}
-                            </Text>
-                            <AnimatedPressable preset="icon" onPress={() => setGroupModalVisible(false)}>
-                                <X size={22} color={colors.text.secondary} />
-                            </AnimatedPressable>
-                        </View>
-
-                        <ScrollView contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 40 }}>
-                            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                                {selectedGroup.map((item) => (
-                                    <View key={item.id} style={{ width: '50%', padding: 6 }}>
-                                        <NFTCard
-                                            cover={item.coverImage}
-                                            title={item.songTitle}
-                                            artist={item.artistName}
-                                            price={item.price}
-                                            editionNumber={item.editionNumber}
-                                            mintedCount={item.mintedCount}
-                                            totalEditions={item.totalEditions}
-                                            rarity={item.rarity}
-                                            fiatCurrency={fiatCurrency}
-                                            variant="collection"
-                                            onPress={() => {
-                                                setGroupModalVisible(false);
-                                                router.push({ pathname: '/(consumer)/nft-detail', params: { id: item.id } });
-                                            }}
-                                        />
-                                    </View>
-                                ))}
+                        }
+                        const currentError = activeTab === 'Songs' ? errorSongs : errorArtists;
+                        const currentRefresh = activeTab === 'Songs' ? refreshLiked : refreshArtists;
+                        if (currentError) return <ErrorState message={currentError} onRetry={currentRefresh} />;
+                        return (
+                            <View style={{ alignItems: 'center', paddingTop: 60 }}>
+                                <Text style={{ color: colors.text.secondary, fontSize: 16, fontWeight: '600' }}>
+                                    {activeTab === 'Songs' ? 'No liked songs yet' : 'No creators to show'}
+                                </Text>
+                                <Text style={{ color: colors.text.muted, fontSize: 13, marginTop: 4 }}>
+                                    {activeTab === 'Songs' ? 'Like songs to see them here.' : 'Discover creators on the home page.'}
+                                </Text>
                             </View>
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
+                        );
+                    }}
+                />
+            </View>
 
             {/* Create Playlist Modal */}
             <CreatePlaylistModal
