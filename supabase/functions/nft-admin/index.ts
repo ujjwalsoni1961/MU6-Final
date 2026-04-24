@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { verifyAdmin } from "../_shared/admin-auth.ts";
 
 // ── Config ──
 // All chain/network values are env-driven so the same edge function
@@ -658,11 +659,13 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ error: auth.error || "Unauthorized" }, 401);
     }
 
-    // ── Admin-secret gate for privileged actions (SEC-03) ──
+    // ── Admin gate for privileged actions (SEC-05) ──
     // User-callable actions: getTxStatus, lazyMint, serverClaim.
     // Everything else (contract config, royalties, fee sweeps, deploys,
-    // enrichment, sync) requires the MU6_ADMIN_SECRET header. The admin
-    // panel provides it via env var; normal clients never do.
+    // enrichment, sync) requires admin authorisation — either a Supabase
+    // JWT for a profile with role='admin' (admin web panel) or the
+    // MU6_ADMIN_SECRET header (cron / internal). No shared secret is
+    // bundled into client any more.
     const ADMIN_ONLY_ACTIONS = new Set<string>([
         "setClaimConditionForToken",
         "setRoyaltyInfoForToken",
@@ -684,24 +687,19 @@ Deno.serve(async (req: Request) => {
         "deployDropERC1155",
         "updateBatchBaseURI",
     ]);
-    const MU6_ADMIN_SECRET_ENV = Deno.env.get("MU6_ADMIN_SECRET") || "";
-    function ctEqual(a: string, b: string): boolean {
-        if (a.length !== b.length) return false;
-        let diff = 0;
-        for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-        return diff === 0;
-    }
 
     try {
         const body = await req.json();
         const { action } = body;
 
         if (ADMIN_ONLY_ACTIONS.has(action)) {
-            const headerSecret = req.headers.get("x-mu6-admin-secret") || "";
-            if (!MU6_ADMIN_SECRET_ENV || !ctEqual(headerSecret, MU6_ADMIN_SECRET_ENV)) {
+            const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+            const adminCheck = await verifyAdmin(supabaseAdmin, req);
+            if (!adminCheck.ok) {
                 return jsonResponse({
-                    error: "Admin secret required for this action",
-                    code: "ADMIN_SECRET_REQUIRED",
+                    error: "Admin authorisation required for this action",
+                    code: "ADMIN_AUTH_REQUIRED",
+                    reason: adminCheck.reason,
                 }, 403);
             }
         }

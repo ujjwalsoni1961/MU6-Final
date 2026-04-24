@@ -10,7 +10,7 @@ const isWeb = Platform.OS === 'web';
 export default function AdminLoginScreen() {
     const router = useRouter();
     const { isAdminLoggedIn, isAdminLoading, adminLogin } = useAdminAuth();
-    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -23,13 +23,13 @@ export default function AdminLoginScreen() {
     }, [isAdminLoading, isAdminLoggedIn]);
 
     const handleLogin = async () => {
-        if (!username.trim() || !password.trim()) {
-            setError('Please enter both username and password');
+        if (!email.trim() || !password.trim()) {
+            setError('Please enter both email and password');
             return;
         }
         setError('');
         setLoading(true);
-        const result = await adminLogin(username.trim(), password);
+        const result = await adminLogin(email.trim(), password);
         setLoading(false);
         if (result.success) {
             router.replace('/(admin)/dashboard');
@@ -99,10 +99,10 @@ export default function AdminLoginScreen() {
                         </View>
                     ) : null}
 
-                    {/* Username */}
+                    {/* Email */}
                     <View style={{ marginBottom: 16 }}>
                         <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-                            Username
+                            Email
                         </Text>
                         <View style={{
                             flexDirection: 'row', alignItems: 'center',
@@ -113,12 +113,14 @@ export default function AdminLoginScreen() {
                         }}>
                             <User size={18} color="#475569" />
                             <TextInput
-                                value={username}
-                                onChangeText={setUsername}
-                                placeholder="Enter username"
+                                value={email}
+                                onChangeText={setEmail}
+                                placeholder="Enter email"
                                 placeholderTextColor="#475569"
                                 autoCapitalize="none"
                                 autoCorrect={false}
+                                keyboardType="email-address"
+                                textContentType="emailAddress"
                                 style={{
                                     flex: 1, padding: 14, color: '#f1f5f9', fontSize: 15,
                                     ...(isWeb ? { outlineStyle: 'none' } as any : {}),

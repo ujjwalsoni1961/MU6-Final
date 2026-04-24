@@ -90,20 +90,15 @@ async function nftAdminHeaders(): Promise<Record<string, string>> {
     } catch (_e) {
         // No session available — fall through to anon key.
     }
+    // SEC-05: authorise admin-only nft-admin actions via Supabase JWT +
+    // profiles.role='admin' check on the edge function side, instead of a
+    // shared secret bundled into the client. The same authToken above
+    // already carries the signed-in user's JWT when a session exists.
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken}`,
         'apikey': SUPABASE_ANON_KEY,
     };
-    // SEC-03: if the admin secret is present in the build (admin-web only),
-    // forward it so admin-only nft-admin actions (setClaimConditionForToken,
-    // transferFunds, deploySplit, deployMarketplace, …) are authorised. The
-    // edge function ignores this header for user-callable actions, so it is
-    // always safe to include when present.
-    const adminSecret = process.env.EXPO_PUBLIC_ADMIN_SECRET || '';
-    if (adminSecret) {
-        headers['x-mu6-admin-secret'] = adminSecret;
-    }
     return headers;
 }
 

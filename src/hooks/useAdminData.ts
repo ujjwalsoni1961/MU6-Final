@@ -775,7 +775,6 @@ export function useAdminSongSplits(limit = 100) {
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
-const ADMIN_SECRET = process.env.EXPO_PUBLIC_ADMIN_SECRET || '';
 
 export function useAdminPayoutRequests(adminProfileId?: string | 'superadmin', limit = 50) {
     return useAsync(
@@ -786,11 +785,17 @@ export function useAdminPayoutRequests(adminProfileId?: string | 'superadmin', l
             const targetProfile = adminProfileId || 'superadmin';
 
             try {
+                // SEC-05: authorise via Supabase JWT instead of shared secret.
+                // The edge function detects admin callers by verifying the
+                // JWT and checking profiles.role='admin'. Falls back to anon
+                // key only if no session (request will be rejected server-side).
+                const { data: { session } } = await supabase.auth.getSession();
+                const accessToken = session?.access_token || SUPABASE_ANON_KEY;
                 const headers: Record<string, string> = {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                    'apikey': SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${accessToken}`,
                 };
-                if (ADMIN_SECRET) headers['x-mu6-admin-secret'] = ADMIN_SECRET;
                 const response = await fetch(`${SUPABASE_URL}/functions/v1/payout-list`, {
                     method: 'POST',
                     headers,

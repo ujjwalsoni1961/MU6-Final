@@ -1,14 +1,16 @@
 /**
- * admin-action — hardened (SEC-02)
+ * admin-action — hardened (SEC-05)
  *
- * Replaces the previous `profileId === 'superadmin'` string check with a
- * shared-secret header (`x-mu6-admin-secret`) that must match the
- * MU6_ADMIN_SECRET edge-function secret. The admin panel ships that secret
- * via an env var only in the Vercel admin-web build.
+ * Authorisation (either/or):
+ *   1. Supabase JWT whose profile has role='admin' (the admin web panel)
+ *   2. x-mu6-admin-secret header matching MU6_ADMIN_SECRET (cron / service)
+ *
+ * Previously required a client-exposed shared secret; that secret is now
+ * server-only. Admin web callers authorise with their signed-in JWT.
  *
  * Also:
  *   * Locks writes to an allowlist of (table, action) pairs so a stolen
- *     secret cannot be used to clobber arbitrary tables.
+ *     JWT or secret cannot be used to clobber arbitrary tables.
  *   * Emits an entry in admin_audit_log on every call (success OR failure).
  *   * Runs under service_role to bypass RLS for intentional admin writes,
  *     while the guard trigger (migration 046) remains in place for the
@@ -16,10 +18,10 @@
  */
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { verifyAdmin } from "../_shared/admin-auth.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const MU6_ADMIN_SECRET = Deno.env.get("MU6_ADMIN_SECRET") || "";
 
 const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -49,18 +51,10 @@ const ALLOWED: Record<string, string[]> = {
     admin_users: ["update"],
 };
 
-function constantTimeEqual(a: string, b: string): boolean {
-    if (a.length !== b.length) return false;
-    let diff = 0;
-    for (let i = 0; i < a.length; i++) {
-        diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    }
-    return diff === 0;
-}
-
 async function audit(
     supabase: ReturnType<typeof createClient>,
     fields: {
+        admin_id?: string | null;
         action: string;
         target_type?: string | null;
         target_id?: string | null;
@@ -69,7 +63,7 @@ async function audit(
 ) {
     try {
         await supabase.from("admin_audit_log").insert({
-            admin_id: null, // admin panel is still pre-SIWE; we log the secret-holder
+            admin_id: fields.admin_id ?? null,
             action: fields.action,
             target_type: fields.target_type ?? null,
             target_id:
@@ -94,15 +88,16 @@ Deno.serve(async (req) => {
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // 1. Shared-secret auth
-    const headerSecret = req.headers.get("x-mu6-admin-secret") || "";
-    if (!MU6_ADMIN_SECRET || !constantTimeEqual(headerSecret, MU6_ADMIN_SECRET)) {
+    // 1. Admin auth (JWT + profiles.role='admin' OR shared secret for cron)
+    const authResult = await verifyAdmin(supabaseAdmin, req);
+    if (!authResult.ok) {
         await audit(supabaseAdmin, {
             action: "admin-action:denied",
-            details: { reason: "missing-or-invalid-secret" },
+            details: { reason: authResult.reason || "unauthorized" },
         });
         return jsonResponse({ error: "Unauthorized" }, 401);
     }
+    const adminId = authResult.userId ?? null;
 
     let payload: any;
     try {
@@ -121,10 +116,11 @@ Deno.serve(async (req) => {
     const allowedActions = ALLOWED[table];
     if (!allowedActions || !allowedActions.includes(action)) {
         await audit(supabaseAdmin, {
+            admin_id: adminId,
             action: `admin-action:blocked`,
             target_type: table,
             target_id: id ?? null,
-            details: { reason: "table-action-not-allowlisted", action, table },
+            details: { reason: "table-action-not-allowlisted", action, table, mode: authResult.mode },
         });
         return jsonResponse(
             { error: `Action '${action}' not allowed on table '${table}'` },
@@ -143,18 +139,20 @@ Deno.serve(async (req) => {
                 .single();
             if (error) {
                 await audit(supabaseAdmin, {
+                    admin_id: adminId,
                     action: `admin-action:update:error`,
                     target_type: table,
                     target_id: id,
-                    details: { error: error.message, updates },
+                    details: { error: error.message, updates, mode: authResult.mode },
                 });
                 return jsonResponse({ success: false, error: error.message }, 500);
             }
             await audit(supabaseAdmin, {
+                admin_id: adminId,
                 action: `admin-action:update`,
                 target_type: table,
                 target_id: id,
-                details: { updates },
+                details: { updates, mode: authResult.mode },
             });
             return jsonResponse({ success: true, data });
         }
@@ -164,17 +162,20 @@ Deno.serve(async (req) => {
             const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
             if (error) {
                 await audit(supabaseAdmin, {
+                    admin_id: adminId,
                     action: `admin-action:delete:error`,
                     target_type: table,
                     target_id: id,
-                    details: { error: error.message },
+                    details: { error: error.message, mode: authResult.mode },
                 });
                 return jsonResponse({ success: false, error: error.message }, 500);
             }
             await audit(supabaseAdmin, {
+                admin_id: adminId,
                 action: `admin-action:delete`,
                 target_type: table,
                 target_id: id,
+                details: { mode: authResult.mode },
             });
             return jsonResponse({ success: true });
         }
@@ -186,16 +187,18 @@ Deno.serve(async (req) => {
                 .select();
             if (error) {
                 await audit(supabaseAdmin, {
+                    admin_id: adminId,
                     action: `admin-action:insert:error`,
                     target_type: table,
-                    details: { error: error.message, updates },
+                    details: { error: error.message, updates, mode: authResult.mode },
                 });
                 return jsonResponse({ success: false, error: error.message }, 500);
             }
             await audit(supabaseAdmin, {
+                admin_id: adminId,
                 action: `admin-action:insert`,
                 target_type: table,
-                details: { updates },
+                details: { updates, mode: authResult.mode },
             });
             return jsonResponse({ success: true, data });
         }
@@ -204,10 +207,11 @@ Deno.serve(async (req) => {
     } catch (err: any) {
         console.error("[admin-action] Edge function error:", err);
         await audit(supabaseAdmin, {
+            admin_id: adminId,
             action: `admin-action:exception`,
             target_type: table,
             target_id: id ?? null,
-            details: { error: err?.message },
+            details: { error: err?.message, mode: authResult.mode },
         });
         return jsonResponse({ success: false, error: err?.message }, 500);
     }

@@ -12,18 +12,20 @@ import { sendVerificationStatusEmail, sendRoyaltyPayoutEmail } from '../services
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://ukavmvxelsfdfktiiyvg.supabase.co';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
-// SEC-02: admin-action edge function now requires the shared secret.
-// Exposed to the client only in admin-web Vercel builds (never in the
-// native Android/iOS app bundles — those never render the admin panel).
-const ADMIN_SECRET = process.env.EXPO_PUBLIC_ADMIN_SECRET || '';
 
-function adminHeaders(): Record<string, string> {
-    const h: Record<string, string> = {
+// SEC-05: admin-action, nft-admin and payout-list now authorise the caller
+// by verifying the Supabase JWT and checking profiles.role='admin'. No
+// shared secret is ever bundled into the client. The anon key is forwarded
+// as `apikey` (required by Supabase edge runtime) and the user's access
+// token (scoped to the signed-in admin) is forwarded as `Authorization`.
+async function adminHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const accessToken = session?.access_token || SUPABASE_ANON_KEY;
+    return {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${accessToken}`,
     };
-    if (ADMIN_SECRET) h['x-mu6-admin-secret'] = ADMIN_SECRET;
-    return h;
 }
 
 // ────────────────────────────────────────────
@@ -48,7 +50,7 @@ async function logAuditAction(
 async function executeAdminUpdate(table: string, id: string, updates: Record<string, any>) {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: await adminHeaders(),
         body: JSON.stringify({ action: 'update', table, id, updates }),
     });
     return response.json();
@@ -57,7 +59,7 @@ async function executeAdminUpdate(table: string, id: string, updates: Record<str
 async function executeAdminDelete(table: string, id: string) {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: await adminHeaders(),
         body: JSON.stringify({ action: 'delete', table, id }),
     });
     return response.json();
@@ -66,7 +68,7 @@ async function executeAdminDelete(table: string, id: string) {
 async function executeAdminInsert(table: string, updates: Record<string, any> | Record<string, any>[]) {
     const response = await fetch(`${SUPABASE_URL}/functions/v1/admin-action`, {
         method: 'POST',
-        headers: adminHeaders(),
+        headers: await adminHeaders(),
         body: JSON.stringify({ action: 'insert', table, updates }),
     });
     return response.json();
@@ -609,7 +611,7 @@ export function useAdminPrimarySalePayoutActions(refresh: () => void) {
         try {
             const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
                 method: 'POST',
-                headers: adminHeaders(),
+                headers: await adminHeaders(),
                 body: JSON.stringify({
                     action: 'retryPrimarySalePayout',
                     payoutId,
@@ -638,7 +640,7 @@ export function useAdminPrimarySalePayoutActions(refresh: () => void) {
         try {
             const response = await fetch(`${SUPABASE_URL}/functions/v1/nft-admin`, {
                 method: 'POST',
-                headers: adminHeaders(),
+                headers: await adminHeaders(),
                 body: JSON.stringify({
                     action: 'sweepPrimarySalePayouts',
                     limit,

@@ -1,7 +1,10 @@
 /**
- * payout-list — hardened (SEC-04)
+ * payout-list — hardened (SEC-05)
  *
- * Admin callers (admin web panel) must send x-mu6-admin-secret.
+ * Admin callers authorise via EITHER:
+ *   * Supabase JWT whose profile has role='admin' (admin web panel), OR
+ *   * x-mu6-admin-secret header matching MU6_ADMIN_SECRET (cron / internal)
+ *
  * User callers must send signature / signerAddress / issuedAt / nonce so we
  * can verify the caller owns the wallet linked to profileId.
  *
@@ -11,10 +14,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 import { verifyMessage } from "https://esm.sh/ethers@6.13.4";
+import { verifyAdmin } from "../_shared/admin-auth.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-const MU6_ADMIN_SECRET = Deno.env.get("MU6_ADMIN_SECRET") || "";
 
 const CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -28,13 +31,6 @@ function jsonResponse(data: unknown, status = 200) {
         status,
         headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-    if (a.length !== b.length) return false;
-    let diff = 0;
-    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    return diff === 0;
 }
 
 const MAX_MESSAGE_AGE_MS = 10 * 60 * 1000;
@@ -71,15 +67,13 @@ Deno.serve(async (req: Request) => {
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // ── 1. Admin path via shared secret
-    const headerSecret = req.headers.get("x-mu6-admin-secret") || "";
-    const isAdminSecret =
-        MU6_ADMIN_SECRET.length > 0 &&
-        constantTimeEqual(headerSecret, MU6_ADMIN_SECRET);
+    // ── 1. Admin path: Supabase JWT + profiles.role='admin' OR shared secret
+    const adminCheck = await verifyAdmin(supabaseAdmin, req);
+    const isAdminCaller = adminCheck.ok;
 
     // ── 2. User path via wallet signature
     let isOwner = false;
-    if (!isAdminSecret) {
+    if (!isAdminCaller) {
         if (!signature || !signerAddress || !issuedAt || !nonce) {
             return jsonResponse(
                 {
@@ -137,7 +131,7 @@ Deno.serve(async (req: Request) => {
         let query = supabaseAdmin.from("payout_requests").select(
             `*, profile:profiles!profile_id ( id, display_name, wallet_address )`,
         );
-        if (!isAdminSecret) {
+        if (!isAdminCaller) {
             // user may only see their own
             query = query.eq("profile_id", profileId);
         }
@@ -150,7 +144,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({
             success: true,
             payouts: data,
-            debug: { isAdmin: isAdminSecret, isOwner },
+            debug: { isAdmin: isAdminCaller, adminMode: adminCheck.mode, isOwner },
         });
     } catch (err: any) {
         console.error("[payout-list] Edge function error:", err);
