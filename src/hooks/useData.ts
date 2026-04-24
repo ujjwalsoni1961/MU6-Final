@@ -1191,24 +1191,59 @@ export function useOwnedNFTsWithStatus() {
                     ownedPairs.map((p) => ({ contract: p.contract, tokenId: p.tokenId })),
                 ),
             ]);
-            const walletTokenByPair = new Map<PairKey, DbNFTToken>();
+            // ERC-1155 is fungible per tokenId, but the DB stores one
+            // nft_tokens row per claim (mint / secondary-buy) so we can
+            // attribute price, tx hash, and timestamps per-copy. That means a
+            // wallet can legitimately have N ledger rows for the same
+            // (contract, tokenId) pair.
+            //
+            // A previously active listing's `marketplace_listings.nft_token_id`
+            // FK points at ONE specific nft_tokens UUID — whichever row was
+            // the "representative" at list time. If we naively pick the newest
+            // row as representative here, then any new mint or buy of the
+            // same tokenId silently hides the still-active listing (the FK
+            // points at an older row that no longer wins the dedup), and the
+            // collection card flips back to "List for Sale" even though the
+            // token is still listed on-chain and in DB.
+            //
+            // Fix: collect ALL candidate rows per pair, batch-read active
+            // listings across the whole candidate set, and prefer a row that
+            // has an active listing attached. Fall back to the most-recent
+            // row only when none of the candidates is listed. This keeps the
+            // ledger model intact (no schema change) while guaranteeing the
+            // UI's `ownershipStatus` / `activeListingId` survive future mints.
+            const walletTokensByPair = new Map<PairKey, DbNFTToken[]>();
             for (const t of walletLedger) {
                 const contract = (t.release?.contractAddress || '').toLowerCase();
                 const tokenId = t.onChainTokenId;
                 if (!contract || !tokenId) continue;
                 const key = pairKey(contract, tokenId);
-                // Keep the most recent (walletLedger is ordered minted_at DESC).
-                if (!walletTokenByPair.has(key)) walletTokenByPair.set(key, t);
+                const arr = walletTokensByPair.get(key) || [];
+                // walletLedger is ordered minted_at DESC — preserve that so
+                // index 0 is always the newest row (used as fallback below).
+                arr.push(t);
+                walletTokensByPair.set(key, arr);
             }
 
-            const canonicalDbIds: string[] = [];
+            // Collect every candidate UUID (across all pairs the wallet
+            // actually holds on-chain) so we can resolve active listings in a
+            // single batch instead of one round-trip per row.
+            const allCandidateDbIds: string[] = [];
             for (const { contract, tokenId } of ownedPairs) {
-                const row = walletTokenByPair.get(pairKey(contract, tokenId.toString()));
-                if (row) canonicalDbIds.push(row.id);
+                const rows = walletTokensByPair.get(pairKey(contract, tokenId.toString())) || [];
+                for (const r of rows) allCandidateDbIds.push(r.id);
             }
-            const activeListingsByTokenDbId = canonicalDbIds.length > 0
-                ? await db.getActiveListingsForTokens(canonicalDbIds)
+            const activeListingsByTokenDbId = allCandidateDbIds.length > 0
+                ? await db.getActiveListingsForTokens(allCandidateDbIds)
                 : {};
+
+            // Pick the representative row per pair: prefer a candidate that
+            // has an active listing; otherwise keep the most-recent row.
+            const walletTokenByPair = new Map<PairKey, DbNFTToken>();
+            for (const [key, rows] of walletTokensByPair.entries()) {
+                const listedRow = rows.find((r) => !!activeListingsByTokenDbId[r.id]);
+                walletTokenByPair.set(key, listedRow || rows[0]);
+            }
 
             // Step 5: emit one OwnedNFT per owned pair. Metadata comes from
             // the release row (DB cache). If the DB row is thin (no title /
